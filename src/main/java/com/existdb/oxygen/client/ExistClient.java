@@ -199,6 +199,96 @@ public final class ExistClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Language services (existdb-openapi /api/langservice/*, LSP-isomorphic shapes)
+  // ---------------------------------------------------------------------------
+
+  /** A diagnostic. {@code line}/{@code column} are 0-based; {@code severity} is 1=error … 4=hint. */
+  public record Diagnostic(int line, int column, int severity, String code, String message) {
+  }
+
+  /** A completion proposal. {@code kind} is an LSP {@code CompletionItemKind}. */
+  public record Completion(String label, int kind, String detail, String documentation,
+      String insertText) {
+  }
+
+  /** Hover info for a position: signature/documentation text plus the symbol kind. */
+  public record Hover(String contents, String kind) {
+  }
+
+  /** A definition location. {@code line}/{@code column} are 0-based; {@code uri} is the DB path. */
+  public record Definition(int line, int column, String name, String kind, String uri) {
+  }
+
+  /** POST /api/langservice/diagnostics — compile-checks an expression, returning any problems. */
+  public List<Diagnostic> diagnostics(String expression, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONArray arr = new JSONArray(postLang("/langservice/diagnostics",
+        langBody(expression, moduleLoadPath)));
+    List<Diagnostic> out = new ArrayList<>(arr.length());
+    for (int i = 0; i < arr.length(); i++) {
+      JSONObject o = arr.getJSONObject(i);
+      out.add(new Diagnostic(o.optInt("line", 0), o.optInt("column", 0), o.optInt("severity", 1),
+          o.optString("code", null), o.optString("message", "")));
+    }
+    return out;
+  }
+
+  /** POST /api/langservice/completions — proposals for an expression up to the cursor. */
+  public List<Completion> completions(String expression, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONArray arr = new JSONArray(postLang("/langservice/completions",
+        langBody(expression, moduleLoadPath)));
+    List<Completion> out = new ArrayList<>(arr.length());
+    for (int i = 0; i < arr.length(); i++) {
+      JSONObject o = arr.getJSONObject(i);
+      out.add(new Completion(o.optString("label", ""), o.optInt("kind", 0),
+          o.optString("detail", null), o.optString("documentation", null),
+          o.optString("insertText", o.optString("label", ""))));
+    }
+    return out;
+  }
+
+  /** POST /api/langservice/hover — signature/docs at a position, or {@code null} if none. */
+  public Hover hover(String expression, int line, int column, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONObject body = langBody(expression, moduleLoadPath);
+    body.put("line", line);
+    body.put("column", column);
+    JSONObject o = new JSONObject(postLang("/langservice/hover", body));
+    String contents = o.optString("contents", "");
+    return contents.isEmpty() ? null : new Hover(contents, o.optString("kind", null));
+  }
+
+  /** POST /api/langservice/definition — the symbol's definition site, or {@code null} if none. */
+  public Definition definition(String expression, int line, int column, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONObject body = langBody(expression, moduleLoadPath);
+    body.put("line", line);
+    body.put("column", column);
+    JSONObject o = new JSONObject(postLang("/langservice/definition", body));
+    String name = o.optString("name", "");
+    return name.isEmpty() ? null
+        : new Definition(o.optInt("line", 0), o.optInt("column", 0), name,
+            o.optString("kind", null), o.optString("uri", null));
+  }
+
+  private JSONObject langBody(String expression, String moduleLoadPath) {
+    JSONObject body = new JSONObject();
+    body.put("expression", expression);
+    if (moduleLoadPath != null && !moduleLoadPath.isEmpty()) {
+      body.put("module-load-path", moduleLoadPath);
+    }
+    return body;
+  }
+
+  private String postLang(String path, JSONObject body) throws IOException, InterruptedException {
+    return send(request(path)
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+        .build()).body();
+  }
+
+  // ---------------------------------------------------------------------------
   // Low-level HTTP
   // ---------------------------------------------------------------------------
 

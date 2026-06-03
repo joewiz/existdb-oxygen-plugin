@@ -42,6 +42,7 @@ final class MockExistServer implements AutoCloseable {
   private final HttpServer server;
   private volatile String lastPutBody;
   private volatile String lastQueryBody;
+  private volatile String lastLangBody;
 
   MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -93,6 +94,27 @@ final class MockExistServer implements AutoCloseable {
       }
     });
 
+    handle(prefix + "/langservice/diagnostics", ex -> {
+      lastLangBody = readBody(ex);
+      respond(ex, 200, "[{\"line\":0,\"column\":5,\"severity\":1,"
+          + "\"code\":\"XPST0003\",\"message\":\"unexpected token\"}]");
+    });
+    handle(prefix + "/langservice/completions", ex -> {
+      lastLangBody = readBody(ex);
+      respond(ex, 200, "[{\"label\":\"fn:count#1\",\"kind\":3,"
+          + "\"detail\":\"fn:count($arg as item()*) as xs:integer\","
+          + "\"documentation\":\"Returns the number of items\",\"insertText\":\"fn:count()\"}]");
+    });
+    handle(prefix + "/langservice/hover", ex -> {
+      lastLangBody = readBody(ex);
+      respond(ex, 200, "{\"contents\":\"fn:count(...)\",\"kind\":\"function\"}");
+    });
+    handle(prefix + "/langservice/definition", ex -> {
+      lastLangBody = readBody(ex);
+      respond(ex, 200, "{\"line\":5,\"column\":0,\"name\":\"local:my-func#1\","
+          + "\"kind\":\"function\",\"uri\":\"/db/apps/myapp/lib.xqm\"}");
+    });
+
     server.start();
   }
 
@@ -106,6 +128,10 @@ final class MockExistServer implements AutoCloseable {
 
   String lastQueryBody() {
     return lastQueryBody;
+  }
+
+  String lastLangBody() {
+    return lastLangBody;
   }
 
   @Override

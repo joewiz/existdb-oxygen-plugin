@@ -116,6 +116,46 @@ class ExistClientTest {
   }
 
   @Test
+  void diagnosticsParsesProblems() throws Exception {
+    List<ExistClient.Diagnostic> problems = client.diagnostics("1 +", "/db");
+    assertEquals(1, problems.size());
+    ExistClient.Diagnostic d = problems.get(0);
+    assertEquals(0, d.line());
+    assertEquals(5, d.column());
+    assertEquals(1, d.severity());
+    assertEquals("XPST0003", d.code());
+    assertTrue(d.message().contains("unexpected"));
+    assertTrue(server.lastLangBody().contains("\"expression\""));
+    assertTrue(server.lastLangBody().contains("module-load-path"));
+  }
+
+  @Test
+  void completionsParsesProposals() throws Exception {
+    List<ExistClient.Completion> items = client.completions("fn:co", null);
+    assertEquals(1, items.size());
+    assertEquals("fn:count#1", items.get(0).label());
+    assertEquals(3, items.get(0).kind());
+    assertEquals("fn:count()", items.get(0).insertText());
+  }
+
+  @Test
+  void hoverSendsPositionAndParsesContents() throws Exception {
+    ExistClient.Hover h = client.hover("fn:count(1)", 0, 3, null);
+    assertEquals("function", h.kind());
+    assertTrue(h.contents().contains("fn:count"));
+    assertTrue(server.lastLangBody().contains("\"line\":0"));
+    assertTrue(server.lastLangBody().contains("\"column\":3"));
+  }
+
+  @Test
+  void definitionParsesLocation() throws Exception {
+    ExistClient.Definition def = client.definition("local:my-func()", 1, 2, null);
+    assertEquals(5, def.line());
+    assertEquals("local:my-func#1", def.name());
+    assertEquals("/db/apps/myapp/lib.xqm", def.uri());
+  }
+
+  @Test
   void existUrlRoundTripReadsAndWrites() throws Exception {
     // The exist: URL handler reads via GET and saves via PUT-on-close (Oxygen's native save path).
     ExistContext.setActiveProfile(
