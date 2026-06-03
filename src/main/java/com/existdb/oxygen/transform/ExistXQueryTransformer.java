@@ -21,6 +21,14 @@
  */
 package com.existdb.oxygen.transform;
 
+import com.existdb.oxygen.ExistContext;
+import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.query.QueryRunner;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -31,26 +39,72 @@ import javax.xml.transform.Source;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerException;
 import javax.xml.transform.URIResolver;
+import javax.xml.transform.stream.StreamResult;
 
 /**
  * The {@link Transformer} handed to Oxygen for the "eXist-db (HTTP)" XQuery engine. Validation is
- * performed when the transformer is <em>created</em> (compile-check via the language service), so
- * this object's job is execution. Execution against eXist over HTTP is not wired up yet — for now
- * use the <b>eXist-db → Run XQuery…</b> view; running an editor's query through a transformation
- * scenario lands in a later iteration.
+ * performed when the transformer is <em>created</em> (compile-check via the language service); this
+ * object's job is execution: it runs the editor's query against eXist over HTTP and writes the
+ * serialized result sequence to the transformation scenario's output target. (For a one-click run
+ * without a scenario, use <b>eXist-db → Run Current Editor</b>.)
  */
 public final class ExistXQueryTransformer extends Transformer {
 
   private final Map<String, Object> parameters = new HashMap<>();
+  private final String query;
+  private final String moduleLoadPath;
   private Properties outputProperties = new Properties();
   private URIResolver uriResolver;
   private ErrorListener errorListener;
 
+  public ExistXQueryTransformer(String query, String moduleLoadPath) {
+    this.query = query;
+    this.moduleLoadPath = moduleLoadPath;
+  }
+
   @Override
   public void transform(Source xmlSource, Result outputTarget) throws TransformerException {
-    throw new TransformerException(
-        "Running XQuery through the eXist-db engine in a transformation scenario is not yet "
-            + "supported. Use the eXist-db → Run XQuery… view to execute queries.");
+    ExistClient client = ExistContext.client();
+    if (client == null) {
+      throw new TransformerException("Connect to eXist-db first (eXist-db view → Connect…).");
+    }
+    if (query == null || query.isBlank()) {
+      throw new TransformerException("No XQuery to execute.");
+    }
+    try {
+      QueryRunner.QueryResult result = QueryRunner.execute(client, query, moduleLoadPath);
+      writeOutput(outputTarget, result.output());
+    } catch (IOException e) {
+      throw new TransformerException(e.getMessage(), e);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new TransformerException("XQuery execution was interrupted.", e);
+    }
+  }
+
+  /** Writes the serialized output to a {@link StreamResult}'s writer or stream (UTF-8). */
+  private static void writeOutput(Result target, String output) throws TransformerException {
+    if (!(target instanceof StreamResult streamResult)) {
+      throw new TransformerException(
+          "Unsupported transformation output target: " + target.getClass().getName());
+    }
+    try {
+      Writer writer = streamResult.getWriter();
+      if (writer != null) {
+        writer.write(output);
+        writer.flush();
+        return;
+      }
+      OutputStream out = streamResult.getOutputStream();
+      if (out != null) {
+        out.write(output.getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return;
+      }
+      throw new TransformerException("Transformation output target has no writer or stream.");
+    } catch (IOException e) {
+      throw new TransformerException(e.getMessage(), e);
+    }
   }
 
   @Override

@@ -37,14 +37,14 @@ import java.nio.charset.StandardCharsets;
  * the unit tests exercise {@link ExistClient} against canned responses with no eXist or network —
  * the same approach the manual verification harness used, promoted into the test suite.
  */
-final class MockExistServer implements AutoCloseable {
+public final class MockExistServer implements AutoCloseable {
 
   private final HttpServer server;
   private volatile String lastPutBody;
   private volatile String lastQueryBody;
   private volatile String lastLangBody;
 
-  MockExistServer() throws IOException {
+  public MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     String prefix = "/exist/apps/existdb-openapi/api";
 
@@ -118,7 +118,7 @@ final class MockExistServer implements AutoCloseable {
     server.start();
   }
 
-  String baseUrl() {
+  public String baseUrl() {
     return "http://127.0.0.1:" + server.getAddress().getPort() + "/exist/apps/existdb-openapi";
   }
 
