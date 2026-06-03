@@ -23,6 +23,11 @@
   <extension type="URLStreamHandler"
     class="com.existdb.oxygen.ExistdbURLStreamHandlerPluginExtension"/>
 
+  <!-- "eXist-db (HTTP)" XQuery engine: eXist-accurate validation (and, later, execution) via
+       existdb-openapi. Appears in Oxygen's XQuery validation/transformation engine list. -->
+  <extension type="XQueryTransformer"
+    class="com.existdb.oxygen.ExistdbXQueryTransformerPluginExtension"/>
+
   <!-- The eXist-db side view (collection tree + connection controls). -->
   <view id="ExistdbBrowserViewID" initialSide="WEST" initialRow="0"/>
 </plugin>
