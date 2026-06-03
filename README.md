@@ -28,7 +28,7 @@ Notional development goals, roughly by priority vs. effort. **P0 is the current 
 
 **P1 — language services** (via `/api/langservice/*`) 🚧 *implemented on `feature/p1-language-services`, pending PR*
 
-- **Diagnostics** — native "eXist-db (HTTP)" XQuery validation engine (eXist-accurate; knows `util:`/`xmldb:` and resolves DB module imports), with squiggles + Problems view.
+- **Diagnostics** — native "eXist-db (HTTP)" XQuery validation engine (eXist-accurate; knows `util:`/`xmldb:` and resolves DB module imports), with squiggles + Problems view. Resources opened over `exist:` are also **auto-validated** into the Problems view (on open and after each edit) without selecting the engine.
 - **Go-to-definition**, **code completions**, **hover** — eXist-db menu / editor right-click actions (Oxygen reserves native Ctrl-Space and mouse-hover for XQuery, so these are explicit actions; completions filters to the typed prefix).
 
 > **Depends on existdb-openapi [PR #30](https://github.com/eXist-db/existdb-openapi/pull/30)** (a `langservice` `line`/`column` type fix): go-to-definition, hover, and completions need it deployed. Diagnostics works without it.
