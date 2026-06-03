@@ -301,12 +301,37 @@ public final class ExistClient {
   }
 
   private HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException {
-    HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+    HttpResponse<String> resp = sendPrivileged(req);
     int code = resp.statusCode();
     if (code < 200 || code >= 300) {
       throw new ExistHttpException(code, req.method() + " " + req.uri().getPath(), resp.body());
     }
     return resp;
+  }
+
+  /**
+   * Sends the request inside a privileged block. Oxygen runs validation/transformation engines
+   * under a restricted {@code SecurityManager}; without this the HTTP call is denied
+   * {@code java.net.URLPermission} when diagnostics run from the XQuery engine.
+   */
+  @SuppressWarnings("removal")
+  private HttpResponse<String> sendPrivileged(HttpRequest req)
+      throws IOException, InterruptedException {
+    try {
+      return java.security.AccessController.doPrivileged(
+          (java.security.PrivilegedExceptionAction<HttpResponse<String>>) () ->
+              http.send(req, HttpResponse.BodyHandlers.ofString()));
+    } catch (java.security.PrivilegedActionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof IOException io) {
+        throw io;
+      }
+      if (cause instanceof InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        throw ie;
+      }
+      throw new IOException(cause);
+    }
   }
 
   private static String enc(String s) {
