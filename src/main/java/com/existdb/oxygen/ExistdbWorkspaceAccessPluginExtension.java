@@ -22,14 +22,20 @@
 package com.existdb.oxygen;
 
 import com.existdb.oxygen.model.ProfileStore;
+import com.existdb.oxygen.ui.CompletionAction;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
+import com.existdb.oxygen.ui.GoToDefinitionAction;
+import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.QueryDialog;
 
+import ro.sync.ecss.extensions.api.AuthorAccess;
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
+import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.MenuBarCustomizer;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ViewComponentCustomizer;
 import ro.sync.exml.workspace.api.standalone.ViewInfo;
+import ro.sync.exml.workspace.api.standalone.actions.MenusAndToolbarsContributorCustomizer;
 
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
@@ -38,10 +44,11 @@ import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
+import javax.swing.JPopupMenu;
 
 /**
- * Wires the plugin into the Oxygen workspace: contributes the eXist-db collection view and an
- * "eXist-db" main-menu entry (currently "Run XQuery…").
+ * Wires the plugin into the Oxygen workspace: contributes the eXist-db collection view, the
+ * "eXist-db" main menu (Run XQuery…, Go to Definition), and the editor contextual-menu actions.
  */
 public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAccessPluginExtension {
 
@@ -68,16 +75,39 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         new QueryDialog((Frame) pluginWorkspace.getParentFrame()).setVisible(true);
       }
     };
+    final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
+    final Action completionAction = new CompletionAction(pluginWorkspace);
+    final Action hoverAction = new HoverAction(pluginWorkspace);
 
     pluginWorkspace.addMenuBarCustomizer(new MenuBarCustomizer() {
       @Override
       public void customizeMainMenu(JMenuBar mainMenuBar) {
         JMenu menu = new JMenu("eXist-db");
         menu.add(runQueryAction);
+        menu.add(goToDefinitionAction);
+        menu.add(completionAction);
+        menu.add(hoverAction);
         // Insert before the trailing Help menu.
         mainMenuBar.add(menu, Math.max(0, mainMenuBar.getMenuCount() - 1));
       }
     });
+
+    // Offer the eXist editor actions in the Text-mode contextual menu.
+    pluginWorkspace.addMenusAndToolbarsContributorCustomizer(
+        new MenusAndToolbarsContributorCustomizer() {
+          @Override
+          public void customizeTextPopUpMenu(JPopupMenu popUp, WSTextEditorPage textPage) {
+            popUp.addSeparator();
+            popUp.add(goToDefinitionAction);
+            popUp.add(completionAction);
+            popUp.add(hoverAction);
+          }
+
+          @Override
+          public void customizeAuthorPopUpMenu(JPopupMenu popUp, AuthorAccess authorAccess) {
+            // No Author-mode contribution.
+          }
+        });
   }
 
   @Override

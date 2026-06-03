@@ -2,7 +2,7 @@
 
 An [Oxygen XML Editor](https://www.oxygenxml.com/) plugin that connects to [eXist-db](https://exist-db.org/) 7 over HTTP through [existdb-openapi](https://github.com/eXist-db/existdb-openapi).
 
-**Status:** pre-alpha (`0.1.0-SNAPSHOT`). MVP under active development.
+**Status:** `0.1.0` released (P0 MVP); P1 language services implemented on the `feature/p1-language-services` branch and being consolidated for a PR. See the [Roadmap](#roadmap).
 
 ## Why
 
@@ -10,7 +10,7 @@ This is a community-maintained plugin that connects Oxygen to eXist-db 7 purely 
 
 ## Features (MVP)
 
-- **Connect** to an eXist-db server (base URL + credentials), stored in Oxygen's options with the password protected using [Oxygen's built-in `UtilAccess.encrypt`](https://www.oxygenxml.com/InstData/Editor/SDK/javadoc/ro/sync/exml/workspace/api/util/UtilAccess.html).
+- **Connect** to an eXist-db server (base URL + credentials), over HTTP or HTTPS (with an optional "trust self-signed/untrusted certificate" toggle for dev servers), stored in Oxygen's options with the password protected using [Oxygen's built-in `UtilAccess.encrypt`](https://www.oxygenxml.com/InstData/Editor/SDK/javadoc/ro/sync/exml/workspace/api/util/UtilAccess.html).
 - **Browse** collections and resources in a lazily-loaded tree in the **eXist-db** side view.
 - **Open / save** resources directly against the database via the `exist:` URL scheme — Oxygen's normal Save writes straight back to eXist.
 - **Run XQuery** from the **eXist-db → Run XQuery…** menu and view paged results.
@@ -26,12 +26,14 @@ Notional development goals, roughly by priority vs. effort. **P0 is the current 
 - Save back (with permissions)
 - Execute XQuery with paged results
 
-**P1 — language services** (via `/api/langservice/*`)
+**P1 — language services** (via `/api/langservice/*`) 🚧 *implemented on `feature/p1-language-services`, pending PR*
 
-- Diagnostics (on save / on idle)
-- Code completions
-- Hover
-- Go-to-definition
+- **Diagnostics** — native "eXist-db (HTTP)" XQuery validation engine (eXist-accurate; knows `util:`/`xmldb:` and resolves DB module imports), with squiggles + Problems view.
+- **Go-to-definition**, **code completions**, **hover** — eXist-db menu / editor right-click actions (Oxygen reserves native Ctrl-Space and mouse-hover for XQuery, so these are explicit actions; completions filters to the typed prefix).
+
+> **Depends on existdb-openapi [PR #30](https://github.com/eXist-db/existdb-openapi/pull/30)** (a `langservice` `line`/`column` type fix): go-to-definition, hover, and completions need it deployed. Diagnostics works without it.
+>
+> **Deferred (after P1 merges):** an Oxygen *framework* to auto-default `exist:` XQuery to our validation engine and to explore hooking *native* completion/hover. Server-side [issue #31](https://github.com/eXist-db/existdb-openapi/issues/31): completions returns the full function library unscoped to the cursor prefix.
 
 **P2 — common editor affordances**
 

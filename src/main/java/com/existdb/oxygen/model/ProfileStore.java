@@ -37,6 +37,7 @@ public final class ProfileStore {
   private static final String KEY_URL = "existdb.profile.baseUrl";
   private static final String KEY_USER = "existdb.profile.user";
   private static final String KEY_PASS = "existdb.profile.password";
+  private static final String KEY_ACCEPT_SELF_SIGNED = "existdb.profile.acceptSelfSigned";
 
   private final WSOptionsStorage options;
   private final UtilAccess util;
@@ -53,7 +54,9 @@ public final class ProfileStore {
     String user = options.getOption(KEY_USER, def.getUser());
     String encrypted = options.getOption(KEY_PASS, "");
     String pass = encrypted.isEmpty() ? "" : util.decrypt(encrypted);
-    return new ConnectionProfile(name, url, user, pass == null ? "" : pass);
+    boolean acceptSelfSigned =
+        Boolean.parseBoolean(options.getOption(KEY_ACCEPT_SELF_SIGNED, "false"));
+    return new ConnectionProfile(name, url, user, pass == null ? "" : pass, acceptSelfSigned);
   }
 
   public void save(ConnectionProfile profile) {
@@ -62,5 +65,6 @@ public final class ProfileStore {
     options.setOption(KEY_USER, profile.getUser());
     String pass = profile.getPassword();
     options.setOption(KEY_PASS, pass == null || pass.isEmpty() ? "" : util.encrypt(pass));
+    options.setOption(KEY_ACCEPT_SELF_SIGNED, Boolean.toString(profile.isAcceptSelfSigned()));
   }
 }

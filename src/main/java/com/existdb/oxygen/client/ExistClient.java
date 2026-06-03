@@ -33,10 +33,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Thin HTTP client for the existdb-openapi surface. Talks plain HTTP/JSON with HTTP Basic auth.
@@ -56,9 +63,46 @@ public final class ExistClient {
     String creds = profile.getUser() + ":" + profile.getPassword();
     this.authHeader = "Basic " + Base64.getEncoder()
         .encodeToString(creds.getBytes(StandardCharsets.UTF_8));
-    this.http = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(15))
-        .build();
+    HttpClient.Builder builder = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(15));
+    if (profile.isAcceptSelfSigned()) {
+      builder.sslContext(trustAllContext());
+    }
+    this.http = builder.build();
+  }
+
+  /**
+   * An {@link SSLContext} that trusts any server certificate. Used only when the profile opts into
+   * accepting self-signed / untrusted certs (eXist's default HTTPS listener ships a self-signed
+   * cert). The certificate's host name must still match the URL; this only relaxes chain
+   * verification, not host-name checking.
+   */
+  private static SSLContext trustAllContext() {
+    TrustManager[] trustAll = {
+      new X509TrustManager() {
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType) {
+          // Trust any client certificate.
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType) {
+          // Trust any server certificate.
+        }
+
+        @Override
+        public X509Certificate[] getAcceptedIssuers() {
+          return new X509Certificate[0];
+        }
+      }
+    };
+    try {
+      SSLContext ctx = SSLContext.getInstance("TLS");
+      ctx.init(null, trustAll, null);
+      return ctx;
+    } catch (NoSuchAlgorithmException | KeyManagementException e) {
+      throw new IllegalStateException("Cannot build a trust-all SSL context", e);
+    }
   }
 
   public ConnectionProfile getProfile() {
@@ -199,6 +243,111 @@ public final class ExistClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Language services (existdb-openapi /api/langservice/*, LSP-isomorphic shapes)
+  // ---------------------------------------------------------------------------
+
+  /** A diagnostic. {@code line}/{@code column} are 0-based; {@code severity} is 1=error … 4=hint. */
+  public record Diagnostic(int line, int column, int severity, String code, String message) {
+  }
+
+  /** A completion proposal. {@code kind} is an LSP {@code CompletionItemKind}. */
+  public record Completion(String label, int kind, String detail, String documentation,
+      String insertText) {
+  }
+
+  /** Hover info for a position: signature/documentation text plus the symbol kind. */
+  public record Hover(String contents, String kind) {
+  }
+
+  /** A definition location. {@code line}/{@code column} are 0-based; {@code uri} is the DB path. */
+  public record Definition(int line, int column, String name, String kind, String uri) {
+  }
+
+  /** POST /api/langservice/diagnostics — compile-checks an expression, returning any problems. */
+  public List<Diagnostic> diagnostics(String expression, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONArray arr = new JSONArray(postLang("/langservice/diagnostics",
+        langBody(expression, moduleLoadPath)));
+    List<Diagnostic> out = new ArrayList<>(arr.length());
+    for (int i = 0; i < arr.length(); i++) {
+      JSONObject o = arr.getJSONObject(i);
+      out.add(new Diagnostic(o.optInt("line", 0), o.optInt("column", 0), o.optInt("severity", 1),
+          o.optString("code", null), o.optString("message", "")));
+    }
+    return out;
+  }
+
+  /** POST /api/langservice/completions — proposals for an expression up to the cursor. */
+  public List<Completion> completions(String expression, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONArray arr = new JSONArray(postLang("/langservice/completions",
+        langBody(expression, moduleLoadPath)));
+    List<Completion> out = new ArrayList<>(arr.length());
+    for (int i = 0; i < arr.length(); i++) {
+      JSONObject o = arr.getJSONObject(i);
+      out.add(new Completion(o.optString("label", ""), o.optInt("kind", 0),
+          o.optString("detail", null), o.optString("documentation", null),
+          o.optString("insertText", o.optString("label", ""))));
+    }
+    return out;
+  }
+
+  /** POST /api/langservice/hover — signature/docs at a position, or {@code null} if none. */
+  public Hover hover(String expression, int line, int column, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONObject body = langBody(expression, moduleLoadPath);
+    body.put("line", line);
+    body.put("column", column);
+    JSONObject o = asObject(postLang("/langservice/hover", body));
+    if (o == null) {
+      return null;
+    }
+    String contents = o.optString("contents", "");
+    return contents.isEmpty() ? null : new Hover(contents, o.optString("kind", null));
+  }
+
+  /** POST /api/langservice/definition — the symbol's definition site, or {@code null} if none. */
+  public Definition definition(String expression, int line, int column, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONObject body = langBody(expression, moduleLoadPath);
+    body.put("line", line);
+    body.put("column", column);
+    JSONObject o = asObject(postLang("/langservice/definition", body));
+    if (o == null) {
+      return null;
+    }
+    String name = o.optString("name", "");
+    return name.isEmpty() ? null
+        : new Definition(o.optInt("line", 0), o.optInt("column", 0), name,
+            o.optString("kind", null), o.optString("uri", null));
+  }
+
+  /** Parses an object body, or returns {@code null} for an empty/{@code null}/non-object response. */
+  private static JSONObject asObject(String body) {
+    if (body == null) {
+      return null;
+    }
+    String trimmed = body.strip();
+    return trimmed.startsWith("{") ? new JSONObject(trimmed) : null;
+  }
+
+  private JSONObject langBody(String expression, String moduleLoadPath) {
+    JSONObject body = new JSONObject();
+    body.put("expression", expression);
+    if (moduleLoadPath != null && !moduleLoadPath.isEmpty()) {
+      body.put("module-load-path", moduleLoadPath);
+    }
+    return body;
+  }
+
+  private String postLang(String path, JSONObject body) throws IOException, InterruptedException {
+    return send(request(path)
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+        .build()).body();
+  }
+
+  // ---------------------------------------------------------------------------
   // Low-level HTTP
   // ---------------------------------------------------------------------------
 
@@ -211,12 +360,37 @@ public final class ExistClient {
   }
 
   private HttpResponse<String> send(HttpRequest req) throws IOException, InterruptedException {
-    HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+    HttpResponse<String> resp = sendPrivileged(req);
     int code = resp.statusCode();
     if (code < 200 || code >= 300) {
       throw new ExistHttpException(code, req.method() + " " + req.uri().getPath(), resp.body());
     }
     return resp;
+  }
+
+  /**
+   * Sends the request inside a privileged block. Oxygen runs validation/transformation engines
+   * under a restricted {@code SecurityManager}; without this the HTTP call is denied
+   * {@code java.net.URLPermission} when diagnostics run from the XQuery engine.
+   */
+  @SuppressWarnings("removal")
+  private HttpResponse<String> sendPrivileged(HttpRequest req)
+      throws IOException, InterruptedException {
+    try {
+      return java.security.AccessController.doPrivileged(
+          (java.security.PrivilegedExceptionAction<HttpResponse<String>>) () ->
+              http.send(req, HttpResponse.BodyHandlers.ofString()));
+    } catch (java.security.PrivilegedActionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof IOException io) {
+        throw io;
+      }
+      if (cause instanceof InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        throw ie;
+      }
+      throw new IOException(cause);
+    }
   }
 
   private static String enc(String s) {

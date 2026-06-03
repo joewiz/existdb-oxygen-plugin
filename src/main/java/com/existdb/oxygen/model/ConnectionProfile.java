@@ -34,16 +34,23 @@ public final class ConnectionProfile {
   private String baseUrl;
   private String user;
   private String password;
+  private boolean acceptSelfSigned;
 
   public ConnectionProfile() {
-    this("Local eXist", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "");
+    this("Local eXist", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "", false);
   }
 
   public ConnectionProfile(String name, String baseUrl, String user, String password) {
+    this(name, baseUrl, user, password, false);
+  }
+
+  public ConnectionProfile(String name, String baseUrl, String user, String password,
+      boolean acceptSelfSigned) {
     this.name = name;
     this.baseUrl = baseUrl;
     this.user = user;
     this.password = password;
+    this.acceptSelfSigned = acceptSelfSigned;
   }
 
   public String getName() {
@@ -76,6 +83,20 @@ public final class ConnectionProfile {
 
   public void setPassword(String password) {
     this.password = password;
+  }
+
+  /**
+   * Whether to trust self-signed / otherwise-unverified TLS certificates when the base URL is
+   * {@code https}. eXist's default HTTPS listener ships a self-signed cert and {@code xst} defaults
+   * to HTTPS, so dev setups commonly need this; leave it off for production servers with a
+   * CA-signed certificate. Ignored for plain {@code http}.
+   */
+  public boolean isAcceptSelfSigned() {
+    return acceptSelfSigned;
+  }
+
+  public void setAcceptSelfSigned(boolean acceptSelfSigned) {
+    this.acceptSelfSigned = acceptSelfSigned;
   }
 
   /** The {@code /api} root, with any trailing slash on the base URL normalized away. */

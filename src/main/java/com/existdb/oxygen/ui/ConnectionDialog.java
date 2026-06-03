@@ -31,6 +31,7 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -49,6 +50,8 @@ public final class ConnectionDialog extends JDialog {
   private final JTextField urlField = new JTextField(24);
   private final JTextField userField = new JTextField(24);
   private final JPasswordField passField = new JPasswordField(24);
+  private final JCheckBox acceptSelfSignedBox =
+      new JCheckBox("Trust self-signed/untrusted certificates (HTTPS)");
   private boolean confirmed;
 
   public ConnectionDialog(Frame owner, ConnectionProfile profile) {
@@ -60,6 +63,11 @@ public final class ConnectionDialog extends JDialog {
     passField.setToolTipText(
         "Stored in Oxygen's options using Oxygen's UtilAccess.encrypt(). "
             + "See the README for the link to Oxygen's documentation of that mechanism.");
+    acceptSelfSignedBox.setSelected(profile.isAcceptSelfSigned());
+    acceptSelfSignedBox.setToolTipText(
+        "Enable for an https base URL whose certificate is self-signed or otherwise not trusted "
+            + "(eXist's default HTTPS listener and xst both default to a self-signed cert). "
+            + "Leave off for production servers with a CA-signed certificate.");
 
     setLayout(new BorderLayout(8, 8));
     add(buildForm(), BorderLayout.CENTER);
@@ -74,7 +82,20 @@ public final class ConnectionDialog extends JDialog {
     addRow(form, 1, "Base URL:", urlField);
     addRow(form, 2, "User:", userField);
     addRow(form, 3, "Password:", passField);
+    addFieldRow(form, 4, acceptSelfSignedBox);
     return form;
+  }
+
+  /** Adds a full-width row in the field column (no leading label), e.g. a checkbox. */
+  private void addFieldRow(JPanel form, int row, JComponent field) {
+    GridBagConstraints c = new GridBagConstraints();
+    c.insets = new Insets(4, 8, 4, 8);
+    c.gridx = 1;
+    c.gridy = row;
+    c.anchor = GridBagConstraints.LINE_START;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    c.weightx = 1.0;
+    form.add(field, c);
   }
 
   private void addRow(JPanel form, int row, String label, JComponent field) {
@@ -130,7 +151,8 @@ public final class ConnectionDialog extends JDialog {
         nameField.getText().trim(),
         urlField.getText().trim(),
         userField.getText().trim(),
-        new String(passField.getPassword()));
+        new String(passField.getPassword()),
+        acceptSelfSignedBox.isSelected());
   }
 
   public boolean isConfirmed() {
