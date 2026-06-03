@@ -33,10 +33,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Thin HTTP client for the existdb-openapi surface. Talks plain HTTP/JSON with HTTP Basic auth.
@@ -56,9 +63,46 @@ public final class ExistClient {
     String creds = profile.getUser() + ":" + profile.getPassword();
     this.authHeader = "Basic " + Base64.getEncoder()
         .encodeToString(creds.getBytes(StandardCharsets.UTF_8));
-    this.http = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(15))
-        .build();
+    HttpClient.Builder builder = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(15));
+    if (profile.isAcceptSelfSigned()) {
+      builder.sslContext(trustAllContext());
+    }
+    this.http = builder.build();
+  }
+
+  /**
+   * An {@link SSLContext} that trusts any server certificate. Used only when the profile opts into
+   * accepting self-signed / untrusted certs (eXist's default HTTPS listener ships a self-signed
+   * cert). The certificate's host name must still match the URL; this only relaxes chain
+   * verification, not host-name checking.
+   */
+  private static SSLContext trustAllContext() {
+    TrustManager[] trustAll = {
+      new X509TrustManager() {
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType) {
+          // Trust any client certificate.
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType) {
+          // Trust any server certificate.
+        }
+
+        @Override
+        public X509Certificate[] getAcceptedIssuers() {
+          return new X509Certificate[0];
+        }
+      }
+    };
+    try {
+      SSLContext ctx = SSLContext.getInstance("TLS");
+      ctx.init(null, trustAll, null);
+      return ctx;
+    } catch (NoSuchAlgorithmException | KeyManagementException e) {
+      throw new IllegalStateException("Cannot build a trust-all SSL context", e);
+    }
   }
 
   public ConnectionProfile getProfile() {

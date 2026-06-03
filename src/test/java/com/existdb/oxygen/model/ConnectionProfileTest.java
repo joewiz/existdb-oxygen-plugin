@@ -22,10 +22,12 @@
 package com.existdb.oxygen.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** Unit tests for {@link ConnectionProfile} URL normalization. */
+/** Unit tests for {@link ConnectionProfile} URL normalization and defaults. */
 class ConnectionProfileTest {
 
   @Test
@@ -46,5 +48,24 @@ class ConnectionProfileTest {
   void apiRootTrimsWhitespace() {
     ConnectionProfile p = new ConnectionProfile("x", "  http://h:8080/x  ", "admin", "");
     assertEquals("http://h:8080/x/api", p.getApiRoot());
+  }
+
+  @Test
+  void acceptSelfSignedDefaultsToFalse() {
+    assertFalse(new ConnectionProfile().isAcceptSelfSigned());
+    assertFalse(new ConnectionProfile("x", "http://h/x", "admin", "").isAcceptSelfSigned());
+  }
+
+  @Test
+  void acceptSelfSignedRetainedFromConstructor() {
+    ConnectionProfile p = new ConnectionProfile("x", "https://h/x", "admin", "", true);
+    assertTrue(p.isAcceptSelfSigned());
+  }
+
+  @Test
+  void acceptSelfSignedSettable() {
+    ConnectionProfile p = new ConnectionProfile();
+    p.setAcceptSelfSigned(true);
+    assertTrue(p.isAcceptSelfSigned());
   }
 }
