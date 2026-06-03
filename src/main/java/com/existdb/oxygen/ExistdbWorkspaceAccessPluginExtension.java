@@ -59,6 +59,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
   public void applicationStarted(final StandalonePluginWorkspace pluginWorkspace) {
     final ProfileStore profileStore = new ProfileStore(pluginWorkspace);
 
+    // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
+    new ExistAutoValidator(pluginWorkspace).install();
+
     pluginWorkspace.addViewComponentCustomizer(new ViewComponentCustomizer() {
       @Override
       public void customizeView(ViewInfo viewInfo) {

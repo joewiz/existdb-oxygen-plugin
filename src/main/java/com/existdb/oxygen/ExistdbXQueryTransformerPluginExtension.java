@@ -22,6 +22,7 @@
 package com.existdb.oxygen;
 
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.lang.DiagnosticMapper;
 import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.transform.ExistXQueryTransformer;
 
@@ -92,28 +93,13 @@ public final class ExistdbXQueryTransformerPluginExtension implements XQueryTran
     try {
       List<ExistClient.Diagnostic> diagnostics =
           client.diagnostics(query, LangServiceSupport.moduleLoadPath(systemId));
-      List<DocumentPositionedInfo> problems = new ArrayList<>(diagnostics.size());
-      for (ExistClient.Diagnostic d : diagnostics) {
-        // existdb-openapi reports 0-based line/column; Oxygen positions are 1-based.
-        problems.add(new DocumentPositionedInfo(
-            severity(d.severity()), LangServiceSupport.cleanMessage(d.message()), systemId,
-            d.line() + 1, d.column() + 1));
-      }
-      return problems;
+      return DiagnosticMapper.toProblems(diagnostics, systemId);
     } catch (IOException e) {
       return new ArrayList<>();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       return new ArrayList<>();
     }
-  }
-
-  private static int severity(int langserviceSeverity) {
-    return switch (langserviceSeverity) {
-      case 1 -> DocumentPositionedInfo.SEVERITY_ERROR;
-      case 2 -> DocumentPositionedInfo.SEVERITY_WARN;
-      default -> DocumentPositionedInfo.SEVERITY_INFO;
-    };
   }
 
   private static String readQuery(Source source) {
