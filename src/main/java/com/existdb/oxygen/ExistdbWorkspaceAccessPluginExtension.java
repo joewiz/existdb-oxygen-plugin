@@ -27,28 +27,35 @@ import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.QueryDialog;
+import com.existdb.oxygen.ui.RunCurrentEditorAction;
 
 import ro.sync.ecss.extensions.api.AuthorAccess;
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
 import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.MenuBarCustomizer;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
+import ro.sync.exml.workspace.api.standalone.ToolbarComponentsCustomizer;
+import ro.sync.exml.workspace.api.standalone.ToolbarInfo;
 import ro.sync.exml.workspace.api.standalone.ViewComponentCustomizer;
 import ro.sync.exml.workspace.api.standalone.ViewInfo;
 import ro.sync.exml.workspace.api.standalone.actions.MenusAndToolbarsContributorCustomizer;
 
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
+import java.util.Arrays;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
+import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JPopupMenu;
 
 /**
  * Wires the plugin into the Oxygen workspace: contributes the eXist-db collection view, the
- * "eXist-db" main menu (Run XQuery…, Go to Definition), and the editor contextual-menu actions.
+ * "eXist-db" main menu, the editor contextual-menu actions, and a toolbar button for
+ * "Run Current Editor".
  */
 public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAccessPluginExtension {
 
@@ -78,6 +85,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         new QueryDialog((Frame) pluginWorkspace.getParentFrame()).setVisible(true);
       }
     };
+    final Action runCurrentEditorAction = new RunCurrentEditorAction(pluginWorkspace);
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
@@ -86,6 +94,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       @Override
       public void customizeMainMenu(JMenuBar mainMenuBar) {
         JMenu menu = new JMenu("eXist-db");
+        menu.add(runCurrentEditorAction);
         menu.add(runQueryAction);
         menu.add(goToDefinitionAction);
         menu.add(completionAction);
@@ -101,6 +110,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
           @Override
           public void customizeTextPopUpMenu(JPopupMenu popUp, WSTextEditorPage textPage) {
             popUp.addSeparator();
+            popUp.add(runCurrentEditorAction);
             popUp.add(goToDefinitionAction);
             popUp.add(completionAction);
             popUp.add(hoverAction);
@@ -111,6 +121,24 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             // No Author-mode contribution.
           }
         });
+
+    // A toolbar button for one-click "Run Current Editor".
+    pluginWorkspace.addToolbarComponentsCustomizer(new ToolbarComponentsCustomizer() {
+      @Override
+      public void customizeToolbar(ToolbarInfo toolbarInfo) {
+        if (!ToolbarComponentsCustomizer.CUSTOM.equals(toolbarInfo.getToolbarID())) {
+          return;
+        }
+        JButton runButton = new JButton(runCurrentEditorAction);
+        runButton.setHideActionText(true);
+        JComponent[] existing = toolbarInfo.getComponents();
+        JComponent[] updated = existing == null ? new JComponent[1]
+            : Arrays.copyOf(existing, existing.length + 1);
+        updated[updated.length - 1] = runButton;
+        toolbarInfo.setComponents(updated);
+        toolbarInfo.setTitle("eXist-db");
+      }
+    });
   }
 
   @Override
