@@ -254,7 +254,10 @@ public final class ExistClient {
     JSONObject body = langBody(expression, moduleLoadPath);
     body.put("line", line);
     body.put("column", column);
-    JSONObject o = new JSONObject(postLang("/langservice/hover", body));
+    JSONObject o = asObject(postLang("/langservice/hover", body));
+    if (o == null) {
+      return null;
+    }
     String contents = o.optString("contents", "");
     return contents.isEmpty() ? null : new Hover(contents, o.optString("kind", null));
   }
@@ -265,11 +268,23 @@ public final class ExistClient {
     JSONObject body = langBody(expression, moduleLoadPath);
     body.put("line", line);
     body.put("column", column);
-    JSONObject o = new JSONObject(postLang("/langservice/definition", body));
+    JSONObject o = asObject(postLang("/langservice/definition", body));
+    if (o == null) {
+      return null;
+    }
     String name = o.optString("name", "");
     return name.isEmpty() ? null
         : new Definition(o.optInt("line", 0), o.optInt("column", 0), name,
             o.optString("kind", null), o.optString("uri", null));
+  }
+
+  /** Parses an object body, or returns {@code null} for an empty/{@code null}/non-object response. */
+  private static JSONObject asObject(String body) {
+    if (body == null) {
+      return null;
+    }
+    String trimmed = body.strip();
+    return trimmed.startsWith("{") ? new JSONObject(trimmed) : null;
   }
 
   private JSONObject langBody(String expression, String moduleLoadPath) {
