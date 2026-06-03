@@ -1,0 +1,89 @@
+/*
+ * eXist-db Oxygen Plugin
+ * Copyright (C) 2026 The eXist-db Authors
+ *
+ * info@exist-db.org
+ * https://www.exist-db.org
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+package com.existdb.oxygen.model;
+
+/**
+ * A single eXist-db connection: a base URL plus credentials.
+ *
+ * <p>The base URL points at the existdb-openapi application root, e.g.
+ * {@code http://localhost:8080/exist/apps/existdb-openapi}. The {@code /api/*} endpoints
+ * hang off that root.</p>
+ */
+public final class ConnectionProfile {
+
+  private String name;
+  private String baseUrl;
+  private String user;
+  private String password;
+
+  public ConnectionProfile() {
+    this("Local eXist", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "");
+  }
+
+  public ConnectionProfile(String name, String baseUrl, String user, String password) {
+    this.name = name;
+    this.baseUrl = baseUrl;
+    this.user = user;
+    this.password = password;
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public void setName(String name) {
+    this.name = name;
+  }
+
+  public String getBaseUrl() {
+    return baseUrl;
+  }
+
+  public void setBaseUrl(String baseUrl) {
+    this.baseUrl = baseUrl;
+  }
+
+  public String getUser() {
+    return user;
+  }
+
+  public void setUser(String user) {
+    this.user = user;
+  }
+
+  public String getPassword() {
+    return password;
+  }
+
+  public void setPassword(String password) {
+    this.password = password;
+  }
+
+  /** The {@code /api} root, with any trailing slash on the base URL normalized away. */
+  public String getApiRoot() {
+    String base = baseUrl == null ? "" : baseUrl.trim();
+    while (base.endsWith("/")) {
+      base = base.substring(0, base.length() - 1);
+    }
+    return base + "/api";
+  }
+}

@@ -1,0 +1,25 @@
+<!-- Used to install the plugin as an add-on:
+     https://www.oxygenxml.com/doc/ug-editor/topics/packing-and-deploying-addons.html -->
+<xt:extensions xmlns:xt="http://www.oxygenxml.com/ns/extension"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.oxygenxml.com/ns/extension http://www.oxygenxml.com/ns/extension/extensions.xsd">
+    <xt:extension id="org.exist_db.oxygen.existdb">
+        <xt:location href="${project.build.finalName}-plugin.jar"/>
+        <xt:version>${project.version}</xt:version>
+        <xt:oxy_version>26.0+</xt:oxy_version>
+        <xt:type>plugin</xt:type>
+        <xt:author>eXist-db</xt:author>
+        <xt:name>eXist-db</xt:name>
+        <xt:description><html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>eXist-db Oxygen plugin</title></head>
+            <body>
+                <div>
+                    <p>Connects Oxygen XML Editor to an eXist-db 7 server over HTTP through the
+                        existdb-openapi surface. Browse collections, open and save resources, and
+                        run XQuery against the database.</p>
+                </div>
+            </body>
+        </html></xt:description>
+        <xt:license><![CDATA[Licensed under the GNU LGPL v2.1 or later. See LICENSE.]]></xt:license>
+    </xt:extension>
+</xt:extensions>

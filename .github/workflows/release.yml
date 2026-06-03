@@ -1,0 +1,62 @@
+name: Release
+
+# Tag a release (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to:
+#   1. build the plugin and attach the installable artifacts to a GitHub Release, and
+#   2. publish an Oxygen add-on update site to GitHub Pages, so users can install and
+#      auto-update via Help -> Install new add-ons.
+#
+# One-time repo setting: Settings -> Pages -> Build and deployment -> Source = GitHub Actions.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the Release
+  pages: write      # deploy the update site
+  id-token: write   # required by actions/deploy-pages
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # Built with JDK 21 (the Oxygen SDK jars are Java-21 bytecode); output targets release 17.
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build
+        run: mvn -B clean package
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            target/*-plugin.jar
+            target/addon.xml
+
+      # The update-site addon.xml points at THIS release's jar asset (absolute URL), so the
+      # Pages-hosted descriptor always reflects the latest published version.
+      - name: Assemble update site
+        run: |
+          jar="$(basename target/*-plugin.jar)"
+          href="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${jar}"
+          mkdir -p site
+          sed "s#<xt:location href=\"[^\"]*\"/>#<xt:location href=\"${href}\"/>#" \
+            target/addon.xml > site/addon.xml
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy update site to GitHub Pages
+        id: pages
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,11 @@
+target/
+*.iml
+.idea/
+.classpath
+.project
+.settings/
+.vscode/
+.DS_Store
+
+# Local xst connection settings (copy from .env.example)
+.env

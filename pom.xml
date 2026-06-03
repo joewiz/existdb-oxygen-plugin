@@ -1,0 +1,221 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.exist-db</groupId>
+  <artifactId>existdb-oxygen-plugin</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+
+  <name>eXist-db Oxygen Plugin</name>
+  <description>Oxygen XML Editor plugin that connects to eXist-db 7 over HTTP via existdb-openapi.</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Oxygen 28.1 bundles a Java 21 runtime; we target 17 for broader compatibility
+         with older Oxygen releases. The SDK jars are read by the JDK 21 toolchain. -->
+    <maven.compiler.release>17</maven.compiler.release>
+    <!-- Keep in sync with the installed Oxygen version (Help -> About). -->
+    <oxygen.sdk.version>28.1.0.0</oxygen.sdk.version>
+    <!-- The eXist Docker image the integration tests boot. -->
+    <existdb.docker.image>existdb/existdb:7.0.0-beta3</existdb.docker.image>
+    <junit.version>5.10.2</junit.version>
+    <testcontainers.version>1.19.8</testcontainers.version>
+  </properties>
+
+  <repositories>
+    <repository>
+      <id>oxygen</id>
+      <name>oXygen public artifacts</name>
+      <url>https://www.oxygenxml.com/maven</url>
+      <releases><enabled>true</enabled></releases>
+      <snapshots><enabled>true</enabled></snapshots>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.oxygenxml</groupId>
+      <artifactId>oxygen-sdk</artifactId>
+      <version>${oxygen.sdk.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <!-- Small, dependency-free JSON library bundled into the plugin's own classloader. -->
+    <dependency>
+      <groupId>org.json</groupId>
+      <artifactId>json</artifactId>
+      <version>20240303</version>
+    </dependency>
+
+    <!-- Tests -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Used only by integration tests (*IT) under the `it` profile. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${testcontainers.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>${project.artifactId}-${project.version}</finalName>
+    <plugins>
+      <!-- Copy runtime dependencies (org.json) into target/lib so the plugin can load them. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <phase>generate-resources</phase>
+            <goals><goal>copy-dependencies</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Put the plugin classes JAR under target/build so the assembly can pick it up. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.1</version>
+        <configuration>
+          <outputDirectory>${project.build.directory}/build</outputDirectory>
+        </configuration>
+      </plugin>
+
+      <!-- Assemble the installable plugin JAR (classes + lib + filtered plugin.xml). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>3.7.1</version>
+        <executions>
+          <execution>
+            <id>make-assembly</id>
+            <phase>package</phase>
+            <goals><goal>single</goal></goals>
+            <configuration>
+              <archiveBaseDirectory>${project.basedir}</archiveBaseDirectory>
+              <descriptors>
+                <descriptor>assembly.xml</descriptor>
+              </descriptors>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Filter addon.xml (substitutes ${project.*}) into target/ for add-on installation. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.3.1</version>
+        <executions>
+          <execution>
+            <id>copy-addon</id>
+            <phase>validate</phase>
+            <goals><goal>copy-resources</goal></goals>
+            <configuration>
+              <outputDirectory>${basedir}/target/</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${project.basedir}</directory>
+                  <includes>
+                    <include>addon.xml</include>
+                  </includes>
+                  <filtering>true</filtering>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Unit tests (*Test). Integration tests (*IT) run only under the `it` profile. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+
+      <!-- LGPL 2.1 source headers, mirroring eXist-db/exist. `mvn license:format` applies them;
+           `check` is bound to verify so CI fails on a missing/modified header. -->
+      <plugin>
+        <groupId>com.mycila</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <version>5.0.0</version>
+        <configuration>
+          <licenseSets>
+            <licenseSet>
+              <header>LGPL-21-license.template.txt</header>
+              <includes>
+                <include>src/**/*.java</include>
+              </includes>
+            </licenseSet>
+          </licenseSets>
+          <mapping>
+            <java>SLASHSTAR_STYLE</java>
+          </mapping>
+          <properties>
+            <copyright.year>2026</copyright.year>
+            <copyright.name>The eXist-db Authors</copyright.name>
+            <email>info@exist-db.org</email>
+            <url>https://www.exist-db.org</url>
+          </properties>
+          <failIfMissing>true</failIfMissing>
+          <strictCheck>true</strictCheck>
+          <encoding>${project.build.sourceEncoding}</encoding>
+        </configuration>
+        <executions>
+          <execution>
+            <id>check-headers</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- Docker-backed integration tests: mvn verify -Pit (requires a running Docker daemon). -->
+    <profile>
+      <id>it</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <version>3.2.5</version>
+            <configuration>
+              <systemPropertyVariables>
+                <existdb.docker.image>${existdb.docker.image}</existdb.docker.image>
+              </systemPropertyVariables>
+            </configuration>
+            <executions>
+              <execution>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

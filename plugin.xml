@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The plugin.dtd file is located in the OXYGEN_INSTALL_DIR/plugins directory. -->
+<!DOCTYPE plugin SYSTEM "../plugin.dtd">
+
+<plugin
+  id="org.exist_db.oxygen.existdb"
+  name="eXist-db"
+  description="Connect to eXist-db 7 over HTTP (existdb-openapi): browse collections, open/save resources, run XQuery."
+  version="${project.version}"
+  vendor="eXist-db"
+  class="com.existdb.oxygen.ExistdbPlugin"
+  classLoaderType="preferReferencedResources">
+
+  <runtime>
+    <librariesFolder name="lib" />
+  </runtime>
+
+  <!-- Side view + menu/toolbar contributions: collection tree, connection, query. -->
+  <extension type="WorkspaceAccess"
+    class="com.existdb.oxygen.ExistdbWorkspaceAccessPluginExtension"/>
+
+  <!-- exist: URL scheme so Oxygen can open and natively save DB resources round-trip. -->
+  <extension type="URLStreamHandler"
+    class="com.existdb.oxygen.ExistdbURLStreamHandlerPluginExtension"/>
+
+  <!-- The eXist-db side view (collection tree + connection controls). -->
+  <view id="ExistdbBrowserViewID" initialSide="WEST" initialRow="0"/>
+</plugin>
