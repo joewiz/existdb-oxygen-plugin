@@ -22,6 +22,7 @@
 package com.existdb.oxygen;
 
 import com.existdb.oxygen.model.ProfileStore;
+import com.existdb.oxygen.ui.CompletionAction;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.QueryDialog;
@@ -74,6 +75,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       }
     };
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
+    final Action completionAction = new CompletionAction(pluginWorkspace);
 
     pluginWorkspace.addMenuBarCustomizer(new MenuBarCustomizer() {
       @Override
@@ -81,18 +83,20 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         JMenu menu = new JMenu("eXist-db");
         menu.add(runQueryAction);
         menu.add(goToDefinitionAction);
+        menu.add(completionAction);
         // Insert before the trailing Help menu.
         mainMenuBar.add(menu, Math.max(0, mainMenuBar.getMenuCount() - 1));
       }
     });
 
-    // Offer "Go to Definition (eXist)" in the Text-mode editor's contextual menu.
+    // Offer the eXist editor actions in the Text-mode contextual menu.
     pluginWorkspace.addMenusAndToolbarsContributorCustomizer(
         new MenusAndToolbarsContributorCustomizer() {
           @Override
           public void customizeTextPopUpMenu(JPopupMenu popUp, WSTextEditorPage textPage) {
             popUp.addSeparator();
             popUp.add(goToDefinitionAction);
+            popUp.add(completionAction);
           }
 
           @Override
