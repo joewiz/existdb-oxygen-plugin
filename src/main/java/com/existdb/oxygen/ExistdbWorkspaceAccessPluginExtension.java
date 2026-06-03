@@ -25,6 +25,7 @@ import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.ui.CompletionAction;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
+import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.QueryDialog;
 
 import ro.sync.ecss.extensions.api.AuthorAccess;
@@ -76,6 +77,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     };
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
     final Action completionAction = new CompletionAction(pluginWorkspace);
+    final Action hoverAction = new HoverAction(pluginWorkspace);
 
     pluginWorkspace.addMenuBarCustomizer(new MenuBarCustomizer() {
       @Override
@@ -84,6 +86,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         menu.add(runQueryAction);
         menu.add(goToDefinitionAction);
         menu.add(completionAction);
+        menu.add(hoverAction);
         // Insert before the trailing Help menu.
         mainMenuBar.add(menu, Math.max(0, mainMenuBar.getMenuCount() - 1));
       }
@@ -97,6 +100,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             popUp.addSeparator();
             popUp.add(goToDefinitionAction);
             popUp.add(completionAction);
+            popUp.add(hoverAction);
           }
 
           @Override
