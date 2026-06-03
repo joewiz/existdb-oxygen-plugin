@@ -4,7 +4,7 @@
 
   <groupId>org.exist-db</groupId>
   <artifactId>existdb-oxygen-plugin</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0</version>
 
   <name>eXist-db Oxygen Plugin</name>
   <description>Oxygen XML Editor plugin that connects to eXist-db 7 over HTTP via existdb-openapi.</description>
