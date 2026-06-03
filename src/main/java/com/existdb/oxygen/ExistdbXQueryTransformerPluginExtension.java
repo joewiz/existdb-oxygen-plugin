@@ -22,6 +22,7 @@
 package com.existdb.oxygen;
 
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.transform.ExistXQueryTransformer;
 
 import ro.sync.document.DocumentPositionedInfo;
@@ -55,7 +56,6 @@ import javax.xml.transform.stream.StreamSource;
 public final class ExistdbXQueryTransformerPluginExtension implements XQueryTransformerPluginExtension {
 
   private static final String ENGINE_NAME = "eXist-db (HTTP)";
-  private static final String SCHEME = "exist:";
 
   @Override
   public String getTransformerName() {
@@ -90,12 +90,13 @@ public final class ExistdbXQueryTransformerPluginExtension implements XQueryTran
   private List<DocumentPositionedInfo> compileCheck(ExistClient client, String query,
       String systemId) {
     try {
-      List<ExistClient.Diagnostic> diagnostics = client.diagnostics(query, moduleLoadPath(systemId));
+      List<ExistClient.Diagnostic> diagnostics =
+          client.diagnostics(query, LangServiceSupport.moduleLoadPath(systemId));
       List<DocumentPositionedInfo> problems = new ArrayList<>(diagnostics.size());
       for (ExistClient.Diagnostic d : diagnostics) {
         // existdb-openapi reports 0-based line/column; Oxygen positions are 1-based.
         problems.add(new DocumentPositionedInfo(
-            severity(d.severity()), cleanMessage(d.message()), systemId,
+            severity(d.severity()), LangServiceSupport.cleanMessage(d.message()), systemId,
             d.line() + 1, d.column() + 1));
       }
       return problems;
@@ -105,31 +106,6 @@ public final class ExistdbXQueryTransformerPluginExtension implements XQueryTran
       Thread.currentThread().interrupt();
       return new ArrayList<>();
     }
-  }
-
-  /**
-   * The module-import base. For resources opened from eXist, the parent collection as an
-   * {@code xmldb:exist://} URI — the scheme is what lets eXist resolve relative, bare-{@code /db},
-   * and {@code xmldb:} import hints alike. On-disk files get no DB base (empty).
-   */
-  private static String moduleLoadPath(String systemId) {
-    if (systemId == null || !systemId.startsWith(SCHEME)) {
-      return "";
-    }
-    String path = systemId.substring(SCHEME.length());
-    int slash = path.lastIndexOf('/');
-    String collection = slash > 0 ? path.substring(0, slash) : "/db";
-    return "xmldb:exist://" + collection;
-  }
-
-  /** The message already carries the {@code err:CODE}; drop eXist's exception-class prefix. */
-  private static String cleanMessage(String message) {
-    if (message == null) {
-      return "";
-    }
-    String prefix = "org.exist.xquery.XPathException: ";
-    String trimmed = message.strip();
-    return trimmed.startsWith(prefix) ? trimmed.substring(prefix.length()) : trimmed;
   }
 
   private static int severity(int langserviceSeverity) {

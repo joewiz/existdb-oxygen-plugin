@@ -23,6 +23,7 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.lang.LangServiceSupport;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.editor.page.WSEditorPage;
@@ -34,7 +35,6 @@ import java.awt.Dimension;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.geom.Rectangle2D;
-import java.net.URL;
 
 import javax.swing.AbstractAction;
 import javax.swing.JPopupMenu;
@@ -50,8 +50,6 @@ import javax.swing.text.JTextComponent;
  * XQuery); the result appears in a small popup at the caret.
  */
 public final class HoverAction extends AbstractAction {
-
-  private static final String SCHEME = "exist:";
 
   private final transient StandalonePluginWorkspace workspace;
 
@@ -74,7 +72,7 @@ public final class HoverAction extends AbstractAction {
     }
     final JTextComponent component = (JTextComponent) page.getTextComponent();
     final String text = component.getText();
-    final String moduleLoadPath = moduleLoadPath(editor.getEditorLocation());
+    final String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
     final int caret = component.getCaretPosition();
     final int line;
     final int column;
@@ -136,19 +134,5 @@ public final class HoverAction extends AbstractAction {
     }
     WSEditorPage current = editor.getCurrentPage();
     return current instanceof WSTextEditorPage textPage ? textPage : null;
-  }
-
-  private static String moduleLoadPath(URL location) {
-    if (location == null || !"exist".equals(location.getProtocol())) {
-      return "";
-    }
-    String dbPath = location.toExternalForm().substring(SCHEME.length());
-    int query = dbPath.indexOf('?');
-    if (query >= 0) {
-      dbPath = dbPath.substring(0, query);
-    }
-    int slash = dbPath.lastIndexOf('/');
-    String collection = slash > 0 ? dbPath.substring(0, slash) : "/db";
-    return "xmldb:exist://" + collection;
   }
 }

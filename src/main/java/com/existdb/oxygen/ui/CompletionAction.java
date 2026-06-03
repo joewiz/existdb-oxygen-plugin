@@ -23,6 +23,7 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.lang.LangServiceSupport;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.editor.page.WSEditorPage;
@@ -38,7 +39,6 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Rectangle2D;
-import java.net.URL;
 import java.util.List;
 
 import javax.swing.AbstractAction;
@@ -62,7 +62,6 @@ import javax.swing.text.JTextComponent;
  */
 public final class CompletionAction extends AbstractAction {
 
-  private static final String SCHEME = "exist:";
   private static final int MAX_VISIBLE_ROWS = 10;
   private static final int ROW_HEIGHT = 18;
 
@@ -88,8 +87,8 @@ public final class CompletionAction extends AbstractAction {
     final JTextComponent component = (JTextComponent) page.getTextComponent();
     final int caret = component.getCaretPosition();
     final String expression = component.getText().substring(0, caret);
-    final String prefix = trailingIdentifier(expression);
-    final String moduleLoadPath = moduleLoadPath(editor.getEditorLocation());
+    final String prefix = LangServiceSupport.trailingIdentifier(expression);
+    final String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
 
     new SwingWorker<List<ExistClient.Completion>, Void>() {
       @Override
@@ -100,7 +99,7 @@ public final class CompletionAction extends AbstractAction {
       @Override
       protected void done() {
         try {
-          List<ExistClient.Completion> proposals = filterByPrefix(get(), prefix);
+          List<ExistClient.Completion> proposals = LangServiceSupport.filterByPrefix(get(), prefix);
           if (proposals.isEmpty()) {
             workspace.showStatusMessage("eXist: no completions.");
           } else {
@@ -111,28 +110,6 @@ public final class CompletionAction extends AbstractAction {
         }
       }
     }.execute();
-  }
-
-  /** The identifier being typed immediately before the caret (e.g. {@code util:}). */
-  private static String trailingIdentifier(String expression) {
-    int start = expression.length();
-    while (start > 0 && isIdentifierChar(expression.charAt(start - 1))) {
-      start--;
-    }
-    return expression.substring(start);
-  }
-
-  /** Keeps proposals whose label starts with the typed prefix; falls back to all if none match. */
-  private static List<ExistClient.Completion> filterByPrefix(
-      List<ExistClient.Completion> proposals, String prefix) {
-    if (prefix.isEmpty()) {
-      return proposals;
-    }
-    String lower = prefix.toLowerCase();
-    List<ExistClient.Completion> matches = proposals.stream()
-        .filter(c -> c.label() != null && c.label().toLowerCase().startsWith(lower))
-        .toList();
-    return matches.isEmpty() ? proposals : matches;
   }
 
   private void showPopup(JTextComponent component, int caret, List<ExistClient.Completion> items) {
@@ -204,7 +181,7 @@ public final class CompletionAction extends AbstractAction {
     try {
       Document doc = component.getDocument();
       int start = caret;
-      while (start > 0 && isIdentifierChar(doc.getText(start - 1, 1).charAt(0))) {
+      while (start > 0 && LangServiceSupport.isIdentifierChar(doc.getText(start - 1, 1).charAt(0))) {
         start--;
       }
       doc.remove(start, caret - start);
@@ -215,29 +192,11 @@ public final class CompletionAction extends AbstractAction {
     }
   }
 
-  private static boolean isIdentifierChar(char c) {
-    return Character.isLetterOrDigit(c) || c == ':' || c == '-' || c == '_' || c == '$';
-  }
-
   private static WSTextEditorPage textPage(WSEditor editor) {
     if (editor == null) {
       return null;
     }
     WSEditorPage current = editor.getCurrentPage();
     return current instanceof WSTextEditorPage textPage ? textPage : null;
-  }
-
-  private static String moduleLoadPath(URL location) {
-    if (location == null || !"exist".equals(location.getProtocol())) {
-      return "";
-    }
-    String dbPath = location.toExternalForm().substring(SCHEME.length());
-    int query = dbPath.indexOf('?');
-    if (query >= 0) {
-      dbPath = dbPath.substring(0, query);
-    }
-    int slash = dbPath.lastIndexOf('/');
-    String collection = slash > 0 ? dbPath.substring(0, slash) : "/db";
-    return "xmldb:exist://" + collection;
   }
 }

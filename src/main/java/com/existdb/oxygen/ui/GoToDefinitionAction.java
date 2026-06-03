@@ -23,6 +23,7 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
@@ -46,8 +47,6 @@ import javax.swing.text.JTextComponent;
  */
 public final class GoToDefinitionAction extends AbstractAction {
 
-  private static final String SCHEME = "exist:";
-
   private final transient StandalonePluginWorkspace workspace;
 
   public GoToDefinitionAction(StandalonePluginWorkspace workspace) {
@@ -69,7 +68,7 @@ public final class GoToDefinitionAction extends AbstractAction {
     }
     JTextComponent component = (JTextComponent) page.getTextComponent();
     final String query = component.getText();
-    final String moduleLoadPath = moduleLoadPath(editor.getEditorLocation());
+    final String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
     final int line;
     final int column;
     try {
@@ -133,20 +132,5 @@ public final class GoToDefinitionAction extends AbstractAction {
     }
     WSEditorPage current = editor.getCurrentPage();
     return current instanceof WSTextEditorPage textPage ? textPage : null;
-  }
-
-  /** Parent collection as an {@code xmldb:exist://} URI for {@code exist:} resources, else empty. */
-  private static String moduleLoadPath(URL location) {
-    if (location == null || !"exist".equals(location.getProtocol())) {
-      return "";
-    }
-    String dbPath = location.toExternalForm().substring(SCHEME.length());
-    int query = dbPath.indexOf('?');
-    if (query >= 0) {
-      dbPath = dbPath.substring(0, query);
-    }
-    int slash = dbPath.lastIndexOf('/');
-    String collection = slash > 0 ? dbPath.substring(0, slash) : "/db";
-    return "xmldb:exist://" + collection;
   }
 }
