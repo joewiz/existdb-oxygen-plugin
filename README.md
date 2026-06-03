@@ -84,6 +84,25 @@ Oxygen will offer updates from the same URL as new releases are published. (The 
 
 After installing, open the **eXist-db** view (Window → Show View), click **Connect…**, enter your server details, **Test connection**, then browse.
 
+## Releasing
+
+Releases are **tag-driven via GitHub Actions** — there is no `maven-release-plugin`, and nothing is published to Maven Central. The plugin is distributed as a [GitHub Release](https://github.com/joewiz/existdb-oxygen-plugin/releases) asset plus the GitHub Pages add-on update site. To cut release `X.Y.Z`:
+
+```bash
+# 1. Set the release version and commit
+mvn versions:set -DnewVersion=X.Y.Z -DgenerateBackupPoms=false
+git commit -am "Release X.Y.Z" && git push origin main
+
+# 2. Tag and push — this fires .github/workflows/release.yml
+git tag -a vX.Y.Z -m "eXist-db Oxygen plugin X.Y.Z" && git push origin vX.Y.Z
+
+# 3. Bump to the next development version
+mvn versions:set -DnewVersion=<next>-SNAPSHOT -DgenerateBackupPoms=false
+git commit -am "Begin <next>-SNAPSHOT" && git push origin main
+```
+
+The tagged `release.yml` run builds with JDK 21, attaches `*-plugin.jar` + `addon.xml` to a GitHub Release, and deploys the update site to GitHub Pages. One-time prerequisites (already configured): repo **Settings → Pages → Source = GitHub Actions**, and the `github-pages` deployment environment must allow `v*` tags.
+
 ## Architecture
 
 | Concern | Where |
