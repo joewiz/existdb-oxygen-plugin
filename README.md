@@ -14,6 +14,7 @@ This is a community-maintained plugin that connects Oxygen to eXist-db 7 purely 
 - **Browse** collections and resources in a lazily-loaded tree in the **eXist-db** side view.
 - **Open / save** resources directly against the database via the `exist:` URL scheme — Oxygen's normal Save writes straight back to eXist.
 - **Run XQuery** from the **eXist-db → Run XQuery…** menu and view paged results.
+- **Run Current Editor** — execute the active editor's XQuery (or its selection) against eXist with one click (eXist-db menu, editor right-click, or toolbar button); results open in a new editor. No transformation scenario to set up — though the **eXist-db (HTTP)** engine also works as a native XQuery transformation scenario if you prefer.
 
 ## Roadmap
 
@@ -38,6 +39,7 @@ Notional development goals, roughly by priority vs. effort. **P0 is the current 
 **P2 — common editor affordances**
 
 - Multiple saved server connection profiles
+- **eXist-db side-pane refinements** — right-size the pane's minimum width; drag-and-drop to move resources; right-click actions (Rename, Duplicate, Download, and Oxygen-native ones like Validate); a server-selection dropdown and a settings menu, modeled on Oxygen's Project pane and eXide's Collections pane
 - Database-wide resource search (`/api/search`)
 - Visual diff between local and stored versions
 - Permissions/ownership editing (`/api/db/permissions`)
