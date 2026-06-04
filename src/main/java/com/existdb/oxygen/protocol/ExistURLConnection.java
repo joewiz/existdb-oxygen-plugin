@@ -23,15 +23,19 @@ package com.existdb.oxygen.protocol;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.client.ExistHttpException;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * A {@link URLConnection} for {@code exist:} URLs. Reads pull the resource from existdb-openapi
@@ -41,6 +45,28 @@ import java.nio.charset.StandardCharsets;
  * <p>The URL path component is the DB path, e.g. {@code exist:/db/apps/myapp/index.xq}.</p>
  */
 final class ExistURLConnection extends URLConnection {
+
+  /** Maps a filename extension to the mime-type eXist should store the resource as. */
+  private static final Map<String, String> MIME_BY_EXTENSION = Map.ofEntries(
+      Map.entry("xq", "application/xquery"),
+      Map.entry("xqm", "application/xquery"),
+      Map.entry("xquery", "application/xquery"),
+      Map.entry("xqy", "application/xquery"),
+      Map.entry("xql", "application/xquery"),
+      Map.entry("xqws", "application/xquery"),
+      Map.entry("json", "application/json"),
+      Map.entry("js", "application/javascript"),
+      Map.entry("css", "text/css"),
+      Map.entry("html", "text/html"),
+      Map.entry("htm", "text/html"),
+      Map.entry("md", "text/markdown"),
+      Map.entry("txt", "text/plain"),
+      Map.entry("xml", "application/xml"),
+      Map.entry("xsl", "application/xml"),
+      Map.entry("xslt", "application/xml"),
+      Map.entry("xsd", "application/xml"),
+      Map.entry("rng", "application/xml"),
+      Map.entry("svg", "application/xml"));
 
   private byte[] content;
   private String mimeType;
@@ -71,6 +97,14 @@ final class ExistURLConnection extends URLConnection {
       ExistClient.ResourceContent rc = client.getResource(dbPath());
       this.mimeType = rc.mimeType();
       this.content = rc.content().getBytes(StandardCharsets.UTF_8);
+    } catch (ExistHttpException e) {
+      // Honor the URLConnection contract: a missing resource is FileNotFoundException, not a
+      // generic error. This lets Oxygen show its "Missing File — keep open?" prompt and still
+      // re-save the editor (the save PUT re-creates the resource).
+      if (e.getStatusCode() == 404) {
+        throw (FileNotFoundException) new FileNotFoundException(dbPath()).initCause(e);
+      }
+      throw e;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new IOException("Interrupted while reading " + dbPath(), e);
@@ -93,7 +127,10 @@ final class ExistURLConnection extends URLConnection {
   public OutputStream getOutputStream() throws IOException {
     final ExistClient client = requireClient();
     final String path = dbPath();
-    final String mime = mimeType;
+    // When re-creating a deleted resource the GET never ran, so mimeType is null; without a
+    // mime-type eXist tries to store the content as XML (an .xq then fails to parse). Guess from
+    // the extension so XQuery/text resources are stored correctly.
+    final String mime = mimeType != null ? mimeType : guessMimeType(path);
     // Buffer the editor's bytes; flush to the DB with a PUT when Oxygen closes the stream.
     return new ByteArrayOutputStream() {
       private boolean closed;
@@ -118,6 +155,15 @@ final class ExistURLConnection extends URLConnection {
   @Override
   public boolean getDoOutput() {
     return true;
+  }
+
+  /** A mime-type from the resource's filename extension, so eXist stores it as the right kind. */
+  private static String guessMimeType(String path) {
+    int dot = path.lastIndexOf('.');
+    if (dot < 0 || dot < path.lastIndexOf('/')) {
+      return null; // No extension; let eXist decide (defaults to XML).
+    }
+    return MIME_BY_EXTENSION.get(path.substring(dot + 1).toLowerCase(Locale.ROOT));
   }
 
   private ExistClient requireClient() throws IOException {
