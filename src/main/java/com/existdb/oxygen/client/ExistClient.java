@@ -187,6 +187,16 @@ public final class ExistClient {
         o.optString("mime-type", null));
   }
 
+  /** DELETE /api/db/resource?path=… — removes a stored resource. Throws on non-2xx. */
+  public void deleteResource(String dbPath) throws IOException, InterruptedException {
+    send(request("/db/resource?path=" + enc(dbPath)).DELETE().build());
+  }
+
+  /** DELETE /api/db/collection?path=…&force=true — removes a collection and its contents. */
+  public void deleteCollection(String dbPath) throws IOException, InterruptedException {
+    send(request("/db/collection?path=" + enc(dbPath) + "&force=true").DELETE().build());
+  }
+
   /** PUT /api/db/resource — stores (creates or updates) a resource. Throws on non-2xx. */
   public void putResource(String dbPath, String content, String mimeType)
       throws IOException, InterruptedException {

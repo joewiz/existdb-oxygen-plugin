@@ -74,6 +74,16 @@ public final class MockExistServer implements AutoCloseable {
       } else if ("PUT".equals(ex.getRequestMethod())) {
         lastPutBody = readBody(ex);
         respond(ex, 201, "{\"stored\":\"/db/x.xq\"}");
+      } else if ("DELETE".equals(ex.getRequestMethod())) {
+        respond(ex, 200, "{\"deleted\":true}");
+      } else {
+        respond(ex, 405, "{}");
+      }
+    });
+
+    handle(prefix + "/db/collection", ex -> {
+      if ("DELETE".equals(ex.getRequestMethod())) {
+        respond(ex, 200, "{\"deleted\":true}");
       } else {
         respond(ex, 405, "{}");
       }

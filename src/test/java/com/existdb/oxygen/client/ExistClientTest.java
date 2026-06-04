@@ -94,6 +94,12 @@ class ExistClientTest {
   }
 
   @Test
+  void deleteResourceAndCollectionSucceed() throws Exception {
+    client.deleteResource("/db/x.xq"); // must not throw
+    client.deleteCollection("/db/old"); // must not throw
+  }
+
+  @Test
   void runAndFetchAndCloseQuery() throws Exception {
     ExistClient.QueryHandle handle = client.runQuery("(1 to 3)", null);
     assertEquals("C1", handle.cursor());
