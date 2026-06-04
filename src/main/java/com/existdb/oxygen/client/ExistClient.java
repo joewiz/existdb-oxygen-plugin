@@ -197,6 +197,16 @@ public final class ExistClient {
     send(request("/db/collection?path=" + enc(dbPath) + "&force=true").DELETE().build());
   }
 
+  /** POST /api/db/collection — creates a collection (and any missing ancestors). */
+  public void createCollection(String dbPath) throws IOException, InterruptedException {
+    JSONObject body = new JSONObject();
+    body.put("path", dbPath);
+    send(request("/db/collection")
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+        .build());
+  }
+
   /** PUT /api/db/resource — stores (creates or updates) a resource. Throws on non-2xx. */
   public void putResource(String dbPath, String content, String mimeType)
       throws IOException, InterruptedException {

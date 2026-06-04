@@ -23,6 +23,7 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.client.MimeTypes;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
@@ -34,17 +35,22 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.Toolkit;
+import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.swing.ButtonGroup;
+import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JMenu;
@@ -55,8 +61,10 @@ import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JTree;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.ToolTipManager;
+import javax.swing.TransferHandler;
 import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -119,6 +127,10 @@ public final class ExistdbBrowserPanel extends JPanel {
     tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
     tree.setCellRenderer(new ExistTreeCellRenderer());
     ToolTipManager.sharedInstance().registerComponent(tree);
+
+    // Accept files dropped from Finder / the Project pane onto a collection.
+    tree.setDropMode(DropMode.ON);
+    tree.setTransferHandler(new ExistTreeTransferHandler());
 
     tree.addTreeWillExpandListener(new TreeWillExpandListener() {
       @Override
@@ -491,6 +503,163 @@ public final class ExistdbBrowserPanel extends JPanel {
     } catch (Exception ex) {
       workspace.showErrorMessage("Failed to open " + existNode.path + ": " + ex.getMessage());
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drag and drop (import: Finder / Project pane → a collection)
+  // ---------------------------------------------------------------------------
+
+  /** Accepts OS files dropped onto a collection node and uploads them to that server. */
+  private final class ExistTreeTransferHandler extends TransferHandler {
+    @Override
+    public boolean canImport(TransferSupport support) {
+      return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
+          && dropCollection(support) != null;
+    }
+
+    @Override
+    public boolean importData(TransferSupport support) {
+      DefaultMutableTreeNode targetNode = dropCollection(support);
+      if (targetNode == null
+          || !(targetNode.getUserObject() instanceof ExistNode target)) {
+        return false;
+      }
+      List<File> files;
+      try {
+        @SuppressWarnings("unchecked")
+        List<File> dropped = (List<File>) support.getTransferable()
+            .getTransferData(DataFlavor.javaFileListFlavor);
+        files = dropped;
+      } catch (Exception e) {
+        return false;
+      }
+      uploadFiles(files, target, targetNode);
+      return true;
+    }
+
+    /** The collection node a drop targets: the node itself if a collection, else its parent. */
+    private DefaultMutableTreeNode dropCollection(TransferSupport support) {
+      if (!(support.getDropLocation() instanceof JTree.DropLocation location)
+          || location.getPath() == null
+          || !(location.getPath().getLastPathComponent() instanceof DefaultMutableTreeNode node)
+          || !(node.getUserObject() instanceof ExistNode existNode)) {
+        return null;
+      }
+      if (existNode.collection) {
+        return node;
+      }
+      return node.getParent() instanceof DefaultMutableTreeNode parent
+          && parent.getUserObject() instanceof ExistNode ? parent : null;
+    }
+  }
+
+  private void uploadFiles(List<File> files, ExistNode target, DefaultMutableTreeNode targetNode) {
+    final ExistClient client = ExistContext.clientById(target.serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    final List<String> skipped = new ArrayList<>();
+    new SwingWorker<Integer, Void>() {
+      @Override
+      protected Integer doInBackground() throws Exception {
+        Set<String> existing = new HashSet<>();
+        for (ExistClient.ChildEntry child : client.listChildren(target.path)) {
+          existing.add(child.name());
+        }
+        if (files.stream().anyMatch(f -> existing.contains(f.getName()))
+            && !confirmOverwrite(target.path)) {
+          return -1;
+        }
+        int count = 0;
+        for (File file : files) {
+          count += uploadRecursive(client, target.path, file, skipped);
+        }
+        return count;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          int count = get();
+          if (count < 0) {
+            return; // overwrite cancelled
+          }
+          StringBuilder message = new StringBuilder("Uploaded ").append(count)
+              .append(" file(s) to ").append(target.path);
+          if (!skipped.isEmpty()) {
+            message.append("; skipped ").append(skipped.size())
+                .append(" binary file(s) (not yet supported): ").append(String.join(", ", skipped));
+          }
+          workspace.showStatusMessage(message.toString());
+          reloadNode(targetNode);
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Upload failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /**
+   * Uploads a file (or, recursively, a directory) under {@code parentPath}; returns the count
+   * uploaded. Binary files are skipped (existdb-openapi's resource PUT is text-only) and their names
+   * collected in {@code skipped}.
+   */
+  private static int uploadRecursive(ExistClient client, String parentPath, File file,
+      List<String> skipped) throws java.io.IOException, InterruptedException {
+    if (file.isDirectory()) {
+      String collection = parentPath + "/" + file.getName();
+      client.createCollection(collection);
+      int count = 0;
+      File[] children = file.listFiles();
+      if (children != null) {
+        for (File child : children) {
+          count += uploadRecursive(client, collection, child, skipped);
+        }
+      }
+      return count;
+    }
+    byte[] bytes = Files.readAllBytes(file.toPath());
+    if (isBinary(bytes)) {
+      skipped.add(file.getName());
+      return 0;
+    }
+    // A known extension picks the right mime; otherwise store as plain text (never XML-parsed).
+    String mime = MimeTypes.byName(file.getName());
+    client.putResource(parentPath + "/" + file.getName(),
+        new String(bytes, StandardCharsets.UTF_8), mime != null ? mime : "text/plain");
+    return 1;
+  }
+
+  /** Heuristic: a NUL byte in the head means binary (existdb-openapi can't store binary as text). */
+  private static boolean isBinary(byte[] bytes) {
+    int limit = Math.min(bytes.length, 8192);
+    for (int i = 0; i < limit; i++) {
+      if (bytes[i] == 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Asks (on the EDT) whether to overwrite colliding resources; returns the user's choice. */
+  private boolean confirmOverwrite(String collectionPath) {
+    final boolean[] confirmed = {false};
+    Runnable ask = () -> confirmed[0] = JOptionPane.showConfirmDialog(this,
+        "Some items already exist in " + collectionPath + ". Overwrite them?",
+        "Confirm overwrite", JOptionPane.OK_CANCEL_OPTION,
+        JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+    try {
+      if (SwingUtilities.isEventDispatchThread()) {
+        ask.run();
+      } else {
+        SwingUtilities.invokeAndWait(ask);
+      }
+    } catch (Exception e) {
+      return false;
+    }
+    return confirmed[0];
   }
 
   // ---------------------------------------------------------------------------
