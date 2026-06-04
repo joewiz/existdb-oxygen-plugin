@@ -207,29 +207,6 @@ public final class ExistClient {
         .build());
   }
 
-  /** POST /api/db/move — moves a resource/collection into {@code targetCollection} (keeps its name). */
-  public void move(String source, String targetCollection)
-      throws IOException, InterruptedException {
-    relocate("/db/move", source, targetCollection);
-  }
-
-  /** POST /api/db/copy — copies a resource/collection into {@code targetCollection} (keeps its name). */
-  public void copy(String source, String targetCollection)
-      throws IOException, InterruptedException {
-    relocate("/db/copy", source, targetCollection);
-  }
-
-  private void relocate(String apiPath, String source, String targetCollection)
-      throws IOException, InterruptedException {
-    JSONObject body = new JSONObject();
-    body.put("source", source);
-    body.put("target", targetCollection);
-    send(request(apiPath)
-        .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
-        .build());
-  }
-
   /** PUT /api/db/resource — stores (creates or updates) a resource. Throws on non-2xx. */
   public void putResource(String dbPath, String content, String mimeType)
       throws IOException, InterruptedException {
