@@ -34,9 +34,42 @@ import java.util.List;
 public final class LangServiceSupport {
 
   private static final String SCHEME = "exist:";
+  private static final String SCHEME_AUTHORITY = "exist://";
   private static final String CLASS_PREFIX = "org.exist.xquery.XPathException: ";
 
   private LangServiceSupport() {
+  }
+
+  /**
+   * The server id in an {@code exist://<id>/…} system id, or {@code ""} when there is no authority
+   * (a legacy {@code exist:/db/…} form or a non-{@code exist:} id).
+   */
+  public static String serverId(String systemId) {
+    if (systemId == null || !systemId.startsWith(SCHEME_AUTHORITY)) {
+      return "";
+    }
+    int slash = systemId.indexOf('/', SCHEME_AUTHORITY.length());
+    return slash < 0
+        ? systemId.substring(SCHEME_AUTHORITY.length())
+        : systemId.substring(SCHEME_AUTHORITY.length(), slash);
+  }
+
+  /**
+   * The DB path ({@code /db/…}) in an {@code exist:} system id — with an {@code //<id>} authority or
+   * without — or {@code ""} for a {@code null}/non-{@code exist:} id. An optional {@code ?query}
+   * suffix is dropped.
+   */
+  public static String dbPath(String systemId) {
+    if (systemId == null || !systemId.startsWith(SCHEME)) {
+      return "";
+    }
+    String rest = systemId.substring(SCHEME.length());
+    if (rest.startsWith("//")) {
+      int slash = rest.indexOf('/', 2);
+      rest = slash < 0 ? "" : rest.substring(slash);
+    }
+    int query = rest.indexOf('?');
+    return query >= 0 ? rest.substring(0, query) : rest;
   }
 
   /**
@@ -46,16 +79,12 @@ public final class LangServiceSupport {
    * system id (e.g. an on-disk file), which signals "no DB base".
    *
    * @param systemId an {@code exist:}-scheme system id or external URL form, e.g.
-   *     {@code exist:/db/apps/foo/bar.xq} (an optional {@code ?query} suffix is ignored)
+   *     {@code exist://srv-1/db/apps/foo/bar.xq} (an optional {@code ?query} suffix is ignored)
    */
   public static String moduleLoadPath(String systemId) {
-    if (systemId == null || !systemId.startsWith(SCHEME)) {
+    String path = dbPath(systemId);
+    if (path.isEmpty()) {
       return "";
-    }
-    String path = systemId.substring(SCHEME.length());
-    int query = path.indexOf('?');
-    if (query >= 0) {
-      path = path.substring(0, query);
     }
     int slash = path.lastIndexOf('/');
     String collection = slash > 0 ? path.substring(0, slash) : "/db";

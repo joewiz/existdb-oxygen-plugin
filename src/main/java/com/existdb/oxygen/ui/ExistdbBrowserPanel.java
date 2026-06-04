@@ -80,6 +80,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode);
   private final JTree tree = new JTree(treeModel);
 
+  /** Id of the server whose {@code /db} the tree currently shows (for building exist:// URLs). */
+  private String activeServerId;
+
   public ExistdbBrowserPanel(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
     this.workspace = workspace;
@@ -98,7 +101,8 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     // Restore the saved profile and activate it (without forcing a network call yet).
     ConnectionProfile saved = profileStore.load();
-    ExistContext.setActiveProfile(saved);
+    ExistContext.setProfiles(profileStore.loadAll(), profileStore.defaultProfileId());
+    activeServerId = saved.getId();
     updateConnectionLabel(saved);
   }
 
@@ -297,7 +301,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     ConnectionProfile edited = ConnectionDialog.edit(ownerFrame(), current);
     if (edited != null) {
       profileStore.save(edited);
-      ExistContext.setActiveProfile(edited);
+      ExistContext.setProfiles(profileStore.loadAll(), profileStore.defaultProfileId());
+      activeServerId = edited.getId();
       updateConnectionLabel(edited);
       reloadRoot();
     }
@@ -394,7 +399,7 @@ public final class ExistdbBrowserPanel extends JPanel {
       return;
     }
     try {
-      URL url = ExistURLStreamHandler.toUrl(existNode.path);
+      URL url = ExistURLStreamHandler.toUrl(activeServerId, existNode.path);
       if (!workspace.open(url)) {
         workspace.showErrorMessage("Oxygen declined to open " + existNode.path);
       }

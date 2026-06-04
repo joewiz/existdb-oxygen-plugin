@@ -164,9 +164,10 @@ class ExistClientTest {
   @Test
   void existUrlRoundTripReadsAndWrites() throws Exception {
     // The exist: URL handler reads via GET and saves via PUT-on-close (Oxygen's native save path).
-    ExistContext.setActiveProfile(
-        new ConnectionProfile("test", server.baseUrl(), "admin", "secret"));
-    URL url = ExistURLStreamHandler.toUrl("/db/x.xq");
+    ConnectionProfile profile = new ConnectionProfile("test", server.baseUrl(), "admin", "secret");
+    profile.setId("srv");
+    ExistContext.setActiveProfile(profile);
+    URL url = ExistURLStreamHandler.toUrl("srv", "/db/x.xq");
 
     String read = new String(url.openConnection().getInputStream().readAllBytes(),
         StandardCharsets.UTF_8);

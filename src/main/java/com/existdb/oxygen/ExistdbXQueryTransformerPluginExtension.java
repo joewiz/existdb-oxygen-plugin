@@ -76,9 +76,10 @@ public final class ExistdbXQueryTransformerPluginExtension implements XQueryTran
   @Override
   public Transformer getXQueryTransformer(Source xquerySource, URIResolver uriResolver,
       boolean createForValidation) throws ErrorListException {
-    ExistClient client = ExistContext.client();
+    String systemId = xquerySource.getSystemId();
+    ExistClient client = ExistContext.clientForSystemId(systemId);
     String query = readQuery(xquerySource);
-    String moduleLoadPath = LangServiceSupport.moduleLoadPath(xquerySource.getSystemId());
+    String moduleLoadPath = LangServiceSupport.moduleLoadPath(systemId);
     // Degrade gracefully: no connection or unreadable source -> no eXist diagnostics.
     if (client != null && !query.isEmpty()) {
       List<DocumentPositionedInfo> problems = compileCheck(client, query, xquerySource.getSystemId());
@@ -86,7 +87,7 @@ public final class ExistdbXQueryTransformerPluginExtension implements XQueryTran
         throw new ErrorListException(problems);
       }
     }
-    return new ExistXQueryTransformer(query, moduleLoadPath);
+    return new ExistXQueryTransformer(query, moduleLoadPath, systemId);
   }
 
   private List<DocumentPositionedInfo> compileCheck(ExistClient client, String query,

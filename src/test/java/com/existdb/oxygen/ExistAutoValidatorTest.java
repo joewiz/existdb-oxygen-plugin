@@ -35,16 +35,16 @@ class ExistAutoValidatorTest {
 
   @Test
   void existXqueryResourcesAreAutoValidated() throws Exception {
-    assertTrue(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("/db/apps/foo/bar.xq")));
-    assertTrue(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("/db/lib/util.xqm")));
+    assertTrue(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("srv", "/db/apps/foo/bar.xq")));
+    assertTrue(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("srv", "/db/lib/util.xqm")));
   }
 
   @Test
   void existNonXqueryResourcesAreNotAutoValidated() throws Exception {
     // Only XQuery is compile-checked; other types must be left alone (e.g. .md, .xml, .html).
-    assertFalse(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("/db/readme.md")));
-    assertFalse(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("/db/data.xml")));
-    assertFalse(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("/db/page.html")));
+    assertFalse(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("srv", "/db/readme.md")));
+    assertFalse(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("srv", "/db/data.xml")));
+    assertFalse(ExistAutoValidator.isAutoValidated(ExistURLStreamHandler.toUrl("srv", "/db/page.html")));
   }
 
   @Test
