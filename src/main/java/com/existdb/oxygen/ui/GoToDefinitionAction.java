@@ -56,19 +56,23 @@ public final class GoToDefinitionAction extends AbstractAction {
 
   @Override
   public void actionPerformed(ActionEvent event) {
-    final ExistClient client = ExistContext.client();
-    if (client == null) {
-      workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
-      return;
-    }
     WSEditor editor = workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
     WSTextEditorPage page = textPage(editor);
     if (page == null) {
       return;
     }
+    final URL location = editor.getEditorLocation();
+    final ExistClient client = ExistContext.clientFor(location);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
+      return;
+    }
+    // The definition resolves on the same server as the current editor.
+    final String serverId =
+        location == null ? "" : LangServiceSupport.serverId(location.toExternalForm());
     JTextComponent component = (JTextComponent) page.getTextComponent();
     final String query = component.getText();
-    final String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
+    final String moduleLoadPath = LangServiceSupport.moduleLoadPath(location);
     final int line;
     final int column;
     try {
@@ -94,7 +98,7 @@ public final class GoToDefinitionAction extends AbstractAction {
             workspace.showInformationMessage("No definition found for the symbol under the caret.");
             return;
           }
-          openAt(def);
+          openAt(def, serverId);
         } catch (Exception e) {
           workspace.showErrorMessage("Go to definition failed: " + e.getMessage());
         }
@@ -102,9 +106,9 @@ public final class GoToDefinitionAction extends AbstractAction {
     }.execute();
   }
 
-  private void openAt(ExistClient.Definition def) throws Exception {
+  private void openAt(ExistClient.Definition def, String serverId) throws Exception {
     URL target = def.uri() != null && !def.uri().isEmpty()
-        ? ExistURLStreamHandler.toUrl(def.uri())
+        ? ExistURLStreamHandler.toUrl(serverId, def.uri())
         : workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA)
             .getEditorLocation();
     if (!workspace.open(target)) {

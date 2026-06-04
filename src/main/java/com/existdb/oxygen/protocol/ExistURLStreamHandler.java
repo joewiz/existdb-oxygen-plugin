@@ -37,9 +37,13 @@ public final class ExistURLStreamHandler extends URLStreamHandler {
     return new ExistURLConnection(url);
   }
 
-  /** Builds an {@code exist:} URL for a DB path, e.g. {@code /db/apps/myapp/index.xq}. */
-  public static URL toUrl(String dbPath) throws IOException {
+  /**
+   * Builds an {@code exist://<serverId>/<dbPath>} URL — e.g.
+   * {@code exist://srv-1/db/apps/myapp/index.xq} — so open/save and validation can route to the
+   * right server. The {@code serverId} is a connection profile's stable id.
+   */
+  public static URL toUrl(String serverId, String dbPath) throws IOException {
     String path = dbPath.startsWith("/") ? dbPath : "/" + dbPath;
-    return new URL(null, PROTOCOL + ":" + path, new ExistURLStreamHandler());
+    return new URL(null, PROTOCOL + "://" + serverId + path, new ExistURLStreamHandler());
   }
 }

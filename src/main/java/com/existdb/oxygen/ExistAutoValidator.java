@@ -158,7 +158,7 @@ public final class ExistAutoValidator {
 
   /** Runs diagnostics for the editor off the EDT and refreshes the Problems view on completion. */
   private void validate(URL location) {
-    ExistClient client = ExistContext.client();
+    ExistClient client = ExistContext.clientFor(location);
     JTextComponent component = textComponent(location);
     if (client == null || component == null) {
       // Not connected (or editor gone): clear any stale problems for this file.

@@ -53,18 +53,21 @@ public final class ExistXQueryTransformer extends Transformer {
   private final Map<String, Object> parameters = new HashMap<>();
   private final String query;
   private final String moduleLoadPath;
+  private final String systemId;
   private Properties outputProperties = new Properties();
   private URIResolver uriResolver;
   private ErrorListener errorListener;
 
-  public ExistXQueryTransformer(String query, String moduleLoadPath) {
+  public ExistXQueryTransformer(String query, String moduleLoadPath, String systemId) {
     this.query = query;
     this.moduleLoadPath = moduleLoadPath;
+    this.systemId = systemId;
   }
 
   @Override
   public void transform(Source xmlSource, Result outputTarget) throws TransformerException {
-    ExistClient client = ExistContext.client();
+    // Route to the editor's own server (the systemId), or the default for an unsaved query.
+    ExistClient client = ExistContext.clientForSystemId(systemId);
     if (client == null) {
       throw new TransformerException("Connect to eXist-db first (eXist-db view → Connect…).");
     }

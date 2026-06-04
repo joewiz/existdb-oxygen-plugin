@@ -24,6 +24,7 @@ package com.existdb.oxygen.protocol;
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
+import com.existdb.oxygen.lang.LangServiceSupport;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -75,16 +76,9 @@ final class ExistURLConnection extends URLConnection {
     super(url);
   }
 
+  /** The DB path, e.g. {@code /db/apps/x.xq} from {@code exist://srv-1/db/apps/x.xq}. */
   private String dbPath() {
-    // For "exist:/db/apps/x.xq" the path is "/db/apps/x.xq".
-    String path = getURL().getPath();
-    if (path == null || path.isEmpty()) {
-      // Fall back to the scheme-specific part for opaque forms ("exist:/db/...").
-      String ssp = getURL().toExternalForm().substring("exist:".length());
-      int q = ssp.indexOf('?');
-      path = q >= 0 ? ssp.substring(0, q) : ssp;
-    }
-    return path;
+    return LangServiceSupport.dbPath(getURL().toExternalForm());
   }
 
   @Override
@@ -167,7 +161,8 @@ final class ExistURLConnection extends URLConnection {
   }
 
   private ExistClient requireClient() throws IOException {
-    ExistClient client = ExistContext.client();
+    // Route to the server named in the exist://<id>/… URL (falls back to the default server).
+    ExistClient client = ExistContext.clientFor(getURL());
     if (client == null) {
       throw new IOException("No active eXist-db connection. Connect via the eXist-db view first.");
     }

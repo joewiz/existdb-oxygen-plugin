@@ -60,14 +60,14 @@ public final class HoverAction extends AbstractAction {
 
   @Override
   public void actionPerformed(ActionEvent event) {
-    final ExistClient client = ExistContext.client();
-    if (client == null) {
-      workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
-      return;
-    }
     WSEditor editor = workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
     WSTextEditorPage page = textPage(editor);
     if (page == null) {
+      return;
+    }
+    final ExistClient client = ExistContext.clientFor(editor.getEditorLocation());
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
       return;
     }
     final JTextComponent component = (JTextComponent) page.getTextComponent();

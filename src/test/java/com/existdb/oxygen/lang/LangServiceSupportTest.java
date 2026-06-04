@@ -37,24 +37,44 @@ import org.junit.jupiter.api.Test;
 /** Unit tests for the pure language-service helpers. */
 class LangServiceSupportTest {
 
+  // ---- serverId / dbPath ----
+
+  @Test
+  void serverIdReadsTheAuthority() {
+    assertEquals("srv-1", LangServiceSupport.serverId("exist://srv-1/db/apps/foo/bar.xq"));
+    assertEquals("", LangServiceSupport.serverId("exist:/db/legacy.xq"));
+    assertEquals("", LangServiceSupport.serverId("file:/tmp/x.xq"));
+    assertEquals("", LangServiceSupport.serverId(null));
+  }
+
+  @Test
+  void dbPathStripsSchemeAuthorityAndQuery() {
+    assertEquals("/db/apps/foo/bar.xq",
+        LangServiceSupport.dbPath("exist://srv-1/db/apps/foo/bar.xq"));
+    assertEquals("/db/apps/foo/bar.xq",
+        LangServiceSupport.dbPath("exist://srv-1/db/apps/foo/bar.xq?v=2"));
+    assertEquals("/db/legacy.xq", LangServiceSupport.dbPath("exist:/db/legacy.xq"));
+    assertEquals("", LangServiceSupport.dbPath("file:/tmp/x.xq"));
+  }
+
   // ---- moduleLoadPath(String) ----
 
   @Test
   void moduleLoadPathTakesParentCollectionAsXmldbUri() {
     assertEquals("xmldb:exist:///db/apps/foo",
-        LangServiceSupport.moduleLoadPath("exist:/db/apps/foo/bar.xq"));
+        LangServiceSupport.moduleLoadPath("exist://srv-1/db/apps/foo/bar.xq"));
   }
 
   @Test
   void moduleLoadPathForResourceDirectlyInDb() {
     assertEquals("xmldb:exist:///db",
-        LangServiceSupport.moduleLoadPath("exist:/db/bar.xq"));
+        LangServiceSupport.moduleLoadPath("exist://srv-1/db/bar.xq"));
   }
 
   @Test
   void moduleLoadPathIgnoresQuerySuffix() {
     assertEquals("xmldb:exist:///db/apps/foo",
-        LangServiceSupport.moduleLoadPath("exist:/db/apps/foo/bar.xq?v=2"));
+        LangServiceSupport.moduleLoadPath("exist://srv-1/db/apps/foo/bar.xq?v=2"));
   }
 
   @Test
@@ -71,7 +91,7 @@ class LangServiceSupportTest {
 
   @Test
   void moduleLoadPathFromExistUrl() throws Exception {
-    URL url = ExistURLStreamHandler.toUrl("/db/apps/foo/bar.xq");
+    URL url = ExistURLStreamHandler.toUrl("srv-1", "/db/apps/foo/bar.xq");
     assertEquals("xmldb:exist:///db/apps/foo", LangServiceSupport.moduleLoadPath(url));
   }
 
