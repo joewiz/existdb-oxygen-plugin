@@ -37,6 +37,8 @@ import java.awt.Frame;
 import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
@@ -53,6 +55,7 @@ import javax.swing.ButtonGroup;
 import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -83,6 +86,11 @@ import javax.swing.tree.TreeSelectionModel;
 public final class ExistdbBrowserPanel extends JPanel {
 
   private static final String DB_ROOT = "/db";
+
+  /** Flavor for an {@link ExistNodeRef} dragged within the JVM (pane → pane). */
+  private static final DataFlavor NODE_FLAVOR = new DataFlavor(
+      DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ExistNodeRef.class.getName(),
+      "eXist tree node");
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -128,7 +136,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     tree.setCellRenderer(new ExistTreeCellRenderer());
     ToolTipManager.sharedInstance().registerComponent(tree);
 
-    // Accept files dropped from Finder / the Project pane onto a collection.
+    // Drag resources/collections within the tree; accept files dropped from Finder / Project.
+    tree.setDragEnabled(true);
     tree.setDropMode(DropMode.ON);
     tree.setTransferHandler(new ExistTreeTransferHandler());
 
@@ -506,35 +515,66 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   // ---------------------------------------------------------------------------
-  // Drag and drop (import: Finder / Project pane → a collection)
+  // Drag and drop
   // ---------------------------------------------------------------------------
 
-  /** Accepts OS files dropped onto a collection node and uploads them to that server. */
+  /** A dragged tree node, carried in-JVM for pane-to-pane drops. */
+  private record ExistNodeRef(String serverId, String path, String name, boolean collection) {
+  }
+
+  /**
+   * Drag from the tree (a resource or sub-collection) and drop OS files / other nodes onto a
+   * collection. Same-server drops relocate via the API (move, or copy with ⌥); dropping files from
+   * Finder/Project uploads them. Cross-server drops are handled in a later step.
+   */
   private final class ExistTreeTransferHandler extends TransferHandler {
     @Override
+    public int getSourceActions(JComponent c) {
+      return COPY_OR_MOVE;
+    }
+
+    @Override
+    protected Transferable createTransferable(JComponent c) {
+      // Only resources and sub-collections are draggable — not the server / db root.
+      if (tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && !DB_ROOT.equals(existNode.path)) {
+        return new NodeTransferable(new ExistNodeRef(
+            existNode.serverId, existNode.path, existNode.name, existNode.collection));
+      }
+      return null;
+    }
+
+    @Override
     public boolean canImport(TransferSupport support) {
-      return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
-          && dropCollection(support) != null;
+      return dropCollection(support) != null
+          && (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
+              || support.isDataFlavorSupported(NODE_FLAVOR));
     }
 
     @Override
     public boolean importData(TransferSupport support) {
       DefaultMutableTreeNode targetNode = dropCollection(support);
-      if (targetNode == null
-          || !(targetNode.getUserObject() instanceof ExistNode target)) {
+      if (targetNode == null || !(targetNode.getUserObject() instanceof ExistNode target)) {
         return false;
       }
-      List<File> files;
+      Transferable transferable = support.getTransferable();
       try {
-        @SuppressWarnings("unchecked")
-        List<File> dropped = (List<File>) support.getTransferable()
-            .getTransferData(DataFlavor.javaFileListFlavor);
-        files = dropped;
+        if (transferable.isDataFlavorSupported(NODE_FLAVOR)) {
+          relocateInternal((ExistNodeRef) transferable.getTransferData(NODE_FLAVOR),
+              target, targetNode, support.getDropAction());
+          return true;
+        }
+        if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+          @SuppressWarnings("unchecked")
+          List<File> files = (List<File>) transferable.getTransferData(DataFlavor.javaFileListFlavor);
+          uploadFiles(files, target, targetNode);
+          return true;
+        }
       } catch (Exception e) {
         return false;
       }
-      uploadFiles(files, target, targetNode);
-      return true;
+      return false;
     }
 
     /** The collection node a drop targets: the node itself if a collection, else its parent. */
@@ -551,6 +591,134 @@ public final class ExistdbBrowserPanel extends JPanel {
       return node.getParent() instanceof DefaultMutableTreeNode parent
           && parent.getUserObject() instanceof ExistNode ? parent : null;
     }
+  }
+
+  /** A {@link Transferable} carrying a single {@link ExistNodeRef} under {@link #NODE_FLAVOR}. */
+  private static final class NodeTransferable implements Transferable {
+    private final ExistNodeRef ref;
+
+    NodeTransferable(ExistNodeRef ref) {
+      this.ref = ref;
+    }
+
+    @Override
+    public DataFlavor[] getTransferDataFlavors() {
+      return new DataFlavor[] {NODE_FLAVOR};
+    }
+
+    @Override
+    public boolean isDataFlavorSupported(DataFlavor flavor) {
+      return NODE_FLAVOR.equals(flavor);
+    }
+
+    @Override
+    public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+      if (!NODE_FLAVOR.equals(flavor)) {
+        throw new UnsupportedFlavorException(flavor);
+      }
+      return ref;
+    }
+  }
+
+  /** Moves (or, with ⌥, copies) a dragged node into a collection on the same server. */
+  private void relocateInternal(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, int dropAction) {
+    if (!source.serverId().equals(target.serverId)) {
+      workspace.showInformationMessage("Cross-server drag-and-drop is coming in the next step.");
+      return;
+    }
+    String sourceParent = parentPath(source.path());
+    if (target.path.equals(sourceParent)) {
+      return; // already in this collection
+    }
+    if (target.path.equals(source.path()) || target.path.startsWith(source.path() + "/")) {
+      workspace.showErrorMessage("Can't move a collection into itself.");
+      return;
+    }
+    final ExistClient client = ExistContext.clientById(target.serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    performRelocate(client, source, target, targetNode, dropAction == TransferHandler.COPY);
+  }
+
+  private void performRelocate(ExistClient client, ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy) {
+    // existdb-openapi's move/copy target differs by type: a resource wants the full destination
+    // path, a collection wants the destination parent collection. Passing the wrong one errors and
+    // can delete the source, so pick per type.
+    final String dest = source.collection() ? target.path : target.path + "/" + source.name();
+    new SwingWorker<Boolean, Void>() {
+      @Override
+      protected Boolean doInBackground() throws Exception {
+        boolean collides = client.listChildren(target.path).stream()
+            .anyMatch(c -> c.name().equals(source.name()));
+        if (collides && !confirmOverwrite(target.path)) {
+          return false;
+        }
+        if (copy) {
+          client.copy(source.path(), dest);
+        } else {
+          client.move(source.path(), dest);
+        }
+        return true;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          if (get()) {
+            afterRelocate(source, target, targetNode, copy);
+          }
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage((copy ? "Copy" : "Move") + " failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /**
+   * Refreshes the tree after a successful move/copy, surgically so other servers / expanded
+   * collections aren't collapsed: the moved node is dropped in place and the target invalidated.
+   */
+  private void afterRelocate(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy) {
+    workspace.showStatusMessage((copy ? "Copied " : "Moved ")
+        + source.path() + " to " + target.path);
+    if (!copy) {
+      DefaultMutableTreeNode moved = findNode(source.serverId(), source.path());
+      if (moved != null && moved.getParent() != null) {
+        treeModel.removeNodeFromParent(moved);
+      }
+    }
+    addRelocatedChild(source, target, targetNode);
+  }
+
+  /**
+   * Shows the relocated item under the target collection without collapsing anything: if the target
+   * has been loaded, insert a node for it in place (unless one with that name is already there);
+   * otherwise it will appear when the target is first expanded.
+   */
+  private void addRelocatedChild(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode) {
+    if (!target.loaded) {
+      return;
+    }
+    for (int i = 0; i < targetNode.getChildCount(); i++) {
+      if (targetNode.getChildAt(i) instanceof DefaultMutableTreeNode existing
+          && existing.getUserObject() instanceof ExistNode node
+          && node.name.equals(source.name())) {
+        return; // already shown (e.g. an overwrite replaced its content, the node stays)
+      }
+    }
+    DefaultMutableTreeNode child = new DefaultMutableTreeNode(new ExistNode(
+        target.serverId, target.path + "/" + source.name(), source.name(), source.collection()));
+    if (source.collection()) {
+      addPlaceholder(child);
+    }
+    treeModel.insertNodeInto(child, targetNode, targetNode.getChildCount());
   }
 
   private void uploadFiles(List<File> files, ExistNode target, DefaultMutableTreeNode targetNode) {
@@ -660,6 +828,25 @@ public final class ExistdbBrowserPanel extends JPanel {
       return false;
     }
     return confirmed[0];
+  }
+
+  /** The parent collection of a DB path, e.g. {@code /db/a} for {@code /db/a/x.xq}. */
+  private static String parentPath(String path) {
+    int slash = path.lastIndexOf('/');
+    return slash > 0 ? path.substring(0, slash) : DB_ROOT;
+  }
+
+  /** Finds the loaded tree node for a given server + DB path, or {@code null}. */
+  private DefaultMutableTreeNode findNode(String serverId, String path) {
+    java.util.Enumeration<?> nodes = rootNode.breadthFirstEnumeration();
+    while (nodes.hasMoreElements()) {
+      if (nodes.nextElement() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && serverId.equals(existNode.serverId) && path.equals(existNode.path)) {
+        return node;
+      }
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------------

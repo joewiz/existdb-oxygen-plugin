@@ -91,6 +91,15 @@ public final class MockExistServer implements AutoCloseable {
       }
     });
 
+    handle(prefix + "/db/move", ex -> {
+      lastPutBody = readBody(ex);
+      respond(ex, 200, "{\"moved\":true}");
+    });
+    handle(prefix + "/db/copy", ex -> {
+      lastPutBody = readBody(ex);
+      respond(ex, 200, "{\"copied\":true}");
+    });
+
     handle(prefix + "/query", ex -> {
       String path = ex.getRequestURI().getPath();
       if ("POST".equals(ex.getRequestMethod()) && path.endsWith("/api/query")) {

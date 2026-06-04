@@ -105,6 +105,15 @@ class ExistClientTest {
   }
 
   @Test
+  void moveAndCopySendSourceAndTarget() throws Exception {
+    client.move("/db/a/x.xq", "/db/b");
+    assertTrue(server.lastPutBody().contains("\"source\""));
+    assertTrue(server.lastPutBody().contains("/db/b"));
+    client.copy("/db/a/x.xq", "/db/c");
+    assertTrue(server.lastPutBody().contains("/db/c"));
+  }
+
+  @Test
   void runAndFetchAndCloseQuery() throws Exception {
     ExistClient.QueryHandle handle = client.runQuery("(1 to 3)", null);
     assertEquals("C1", handle.cursor());
