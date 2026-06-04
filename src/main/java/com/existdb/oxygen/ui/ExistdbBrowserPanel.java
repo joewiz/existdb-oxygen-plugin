@@ -30,22 +30,34 @@ import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTree;
 import javax.swing.SwingWorker;
+import javax.swing.ToolTipManager;
 import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.ExpandVetoException;
 import javax.swing.tree.TreePath;
@@ -73,6 +85,11 @@ public final class ExistdbBrowserPanel extends JPanel {
     this.workspace = workspace;
     this.profileStore = profileStore;
 
+    // Keep the docked view from demanding a huge minimum width: the connection label below shows
+    // only the profile name (full URL is a tooltip), and the panel reports a modest min/pref width.
+    setMinimumSize(new Dimension(150, 0));
+    setPreferredSize(new Dimension(260, 400));
+
     add(buildConnectionBar(), BorderLayout.NORTH);
     add(new JScrollPane(tree), BorderLayout.CENTER);
     add(buildButtonBar(), BorderLayout.SOUTH);
@@ -88,6 +105,8 @@ public final class ExistdbBrowserPanel extends JPanel {
   private JPanel buildConnectionBar() {
     JButton connect = new JButton("Connect…");
     connect.addActionListener(e -> editConnection());
+    // Let the label shrink (it ellipsizes) instead of dictating the pane's minimum width.
+    connectionLabel.setMinimumSize(new Dimension(0, 0));
     JPanel bar = new JPanel(new BorderLayout(4, 0));
     bar.add(connectionLabel, BorderLayout.CENTER);
     bar.add(connect, BorderLayout.EAST);
@@ -109,6 +128,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     tree.setRootVisible(true);
     tree.setShowsRootHandles(true);
     tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+    tree.setCellRenderer(new ExistTreeCellRenderer());
+    ToolTipManager.sharedInstance().registerComponent(tree);
     rootNode.setUserObject(new ExistNode(DB_ROOT, "db", true));
     addPlaceholder(rootNode);
 
@@ -129,12 +150,142 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     tree.addMouseListener(new MouseAdapter() {
       @Override
+      public void mousePressed(MouseEvent e) {
+        maybeShowPopup(e);
+      }
+
+      @Override
+      public void mouseReleased(MouseEvent e) {
+        maybeShowPopup(e);
+      }
+
+      @Override
       public void mouseClicked(MouseEvent e) {
         if (e.getClickCount() == 2) {
           openSelected();
         }
       }
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Contextual menu
+  // ---------------------------------------------------------------------------
+
+  private void maybeShowPopup(MouseEvent e) {
+    if (!e.isPopupTrigger()) {
+      return;
+    }
+    TreePath path = tree.getPathForLocation(e.getX(), e.getY());
+    if (path == null) {
+      return;
+    }
+    tree.setSelectionPath(path);
+    Object last = path.getLastPathComponent();
+    if (!(last instanceof DefaultMutableTreeNode node)
+        || !(node.getUserObject() instanceof ExistNode existNode)) {
+      return;
+    }
+    contextMenu(node, existNode).show(tree, e.getX(), e.getY());
+  }
+
+  private JPopupMenu contextMenu(DefaultMutableTreeNode node, ExistNode existNode) {
+    JPopupMenu menu = new JPopupMenu();
+    if (!existNode.collection) {
+      menu.add(menuItem("Open", () -> openSelected()));
+      menu.add(menuItem("Download…", () -> downloadResource(existNode)));
+    }
+    if (existNode.collection) {
+      menu.add(menuItem("Refresh", () -> reloadNode(node)));
+    }
+    menu.add(menuItem("Copy Path", () -> copyToClipboard(existNode.path)));
+    if (!DB_ROOT.equals(existNode.path)) {
+      menu.addSeparator();
+      menu.add(menuItem("Delete…", () -> deleteNode(node, existNode)));
+    }
+    return menu;
+  }
+
+  private static JMenuItem menuItem(String label, Runnable action) {
+    JMenuItem item = new JMenuItem(label);
+    item.addActionListener(e -> action.run());
+    return item;
+  }
+
+  private void copyToClipboard(String text) {
+    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
+    workspace.showStatusMessage("Copied: " + text);
+  }
+
+  private void downloadResource(ExistNode existNode) {
+    final ExistClient client = ExistContext.client();
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    final Path target = Path.of(System.getProperty("user.home"), "Downloads", existNode.name);
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() throws Exception {
+        // existdb-openapi returns resource content as text (even for "binary" types like .xq),
+        // matching how the exist: URL connection reads it; write it back out as UTF-8.
+        ExistClient.ResourceContent content = client.getResource(existNode.path);
+        Files.write(target, content.content().getBytes(StandardCharsets.UTF_8));
+        return null;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          get();
+          workspace.showStatusMessage("Downloaded to " + target);
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Download failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  private void deleteNode(DefaultMutableTreeNode node, ExistNode existNode) {
+    final ExistClient client = ExistContext.client();
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    String kind = existNode.collection ? "collection (and all its contents)" : "resource";
+    int choice = JOptionPane.showConfirmDialog(this,
+        "Delete the " + kind + " " + existNode.path + "?",
+        "Confirm delete", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+    if (choice != JOptionPane.OK_OPTION) {
+      return;
+    }
+    final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() throws Exception {
+        if (existNode.collection) {
+          client.deleteCollection(existNode.path);
+        } else {
+          client.deleteResource(existNode.path);
+        }
+        return null;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          get();
+          workspace.showStatusMessage("Deleted " + existNode.path);
+          if (parent != null) {
+            reloadNode(parent);
+          }
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Delete failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
   }
 
   // ---------------------------------------------------------------------------
@@ -153,7 +304,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private void updateConnectionLabel(ConnectionProfile profile) {
-    connectionLabel.setText(profile.getName() + " — " + profile.getBaseUrl());
+    // Name only in the (width-constraining) label; the full base URL lives in the tooltip.
+    connectionLabel.setText(profile.getName());
+    connectionLabel.setToolTipText(profile.getName() + " — " + profile.getBaseUrl());
   }
 
   // ---------------------------------------------------------------------------
@@ -161,16 +314,23 @@ public final class ExistdbBrowserPanel extends JPanel {
   // ---------------------------------------------------------------------------
 
   private void reloadRoot() {
-    ExistNode rootInfo = (ExistNode) rootNode.getUserObject();
-    rootInfo.loaded = false;
-    rootInfo.loading = false;
-    rootNode.removeAllChildren();
-    addPlaceholder(rootNode);
-    treeModel.reload(rootNode);
+    reloadNode(rootNode);
+  }
+
+  /** Re-fetches a collection node's children from the server, replacing what's shown. */
+  private void reloadNode(DefaultMutableTreeNode node) {
+    if (!(node.getUserObject() instanceof ExistNode info)) {
+      return;
+    }
+    info.loaded = false;
+    info.loading = false;
+    node.removeAllChildren();
+    addPlaceholder(node);
+    treeModel.reload(node);
     // Trigger the load directly: relying on expandPath() to fire treeWillExpand is unreliable
     // when the node is already expanded (the event won't fire, leaving "Loading…" forever).
-    loadChildren(rootNode);
-    tree.expandPath(new TreePath(rootNode.getPath()));
+    loadChildren(node);
+    tree.expandPath(new TreePath(node.getPath()));
   }
 
   private void loadChildren(DefaultMutableTreeNode node) {
@@ -253,6 +413,36 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private Frame ownerFrame() {
     return (Frame) workspace.getParentFrame();
+  }
+
+  /** Node tooltip: the DB path, plus the server base URL on the {@code /db} root. */
+  private static String tooltipFor(ExistNode existNode) {
+    if (!DB_ROOT.equals(existNode.path)) {
+      return existNode.path;
+    }
+    ExistClient client = ExistContext.client();
+    String base = client != null ? client.getProfile().getBaseUrl() : "";
+    return base.isEmpty() ? existNode.path : existNode.path + " — " + base;
+  }
+
+  /** Renders collections (incl. {@code /db}) as folders, resources as files, with a path tooltip. */
+  private static final class ExistTreeCellRenderer extends DefaultTreeCellRenderer {
+    @Override
+    public Component getTreeCellRendererComponent(JTree t, Object value, boolean selected,
+        boolean expanded, boolean leaf, int row, boolean focus) {
+      super.getTreeCellRendererComponent(t, value, selected, expanded, leaf, row, focus);
+      if (value instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode) {
+        // Keep collections looking like folders even when empty (an empty node is otherwise a leaf).
+        setIcon(existNode.collection
+            ? (expanded ? getDefaultOpenIcon() : getDefaultClosedIcon())
+            : getDefaultLeafIcon());
+        setToolTipText(tooltipFor(existNode));
+      } else {
+        setToolTipText(null);
+      }
+      return this;
+    }
   }
 
   /** Tree node payload: a DB path, its short name, and lazy-load state. */
