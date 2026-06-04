@@ -1,0 +1,144 @@
+/*
+ * eXist-db Oxygen Plugin
+ * Copyright (C) 2026 The eXist-db Authors
+ *
+ * info@exist-db.org
+ * https://www.exist-db.org
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ */
+package com.existdb.oxygen.model;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.UnaryOperator;
+
+import org.junit.jupiter.api.Test;
+
+/** Unit tests for {@link ProfileStore} list storage and legacy migration (in-memory options). */
+class ProfileStoreTest {
+
+  /** Map-backed options + a reversible "encryption" (prefix marker) for the tests. */
+  private static ProfileStore store(Map<String, String> backing) {
+    ProfileStore.Options options = new ProfileStore.Options() {
+      @Override
+      public String get(String key, String defaultValue) {
+        return backing.getOrDefault(key, defaultValue);
+      }
+
+      @Override
+      public void set(String key, String value) {
+        backing.put(key, value);
+      }
+    };
+    UnaryOperator<String> encrypt = s -> "enc:" + s;
+    UnaryOperator<String> decrypt = s -> s.startsWith("enc:") ? s.substring(4) : s;
+    return new ProfileStore(options, encrypt, decrypt);
+  }
+
+  @Test
+  void freshInstallYieldsOneDefaultProfileWithStableId() {
+    Map<String, String> backing = new HashMap<>();
+    ProfileStore store = store(backing);
+
+    List<ConnectionProfile> first = store.loadAll();
+    assertEquals(1, first.size());
+    assertNotNull(first.get(0).getId());
+    assertEquals("Local eXist", first.get(0).getName());
+    assertEquals(first.get(0).getId(), store.defaultProfileId());
+
+    // The generated id is persisted, so a second load returns the same id.
+    assertEquals(first.get(0).getId(), store.loadAll().get(0).getId());
+  }
+
+  @Test
+  void migratesLegacySingleProfile() {
+    Map<String, String> backing = new HashMap<>();
+    backing.put("existdb.profile.name", "Prod");
+    backing.put("existdb.profile.baseUrl", "https://db.example.org/exist/apps/existdb-openapi");
+    backing.put("existdb.profile.user", "admin");
+    backing.put("existdb.profile.password", "enc:secret");
+    backing.put("existdb.profile.acceptSelfSigned", "true");
+    ProfileStore store = store(backing);
+
+    List<ConnectionProfile> all = store.loadAll();
+    assertEquals(1, all.size());
+    ConnectionProfile p = all.get(0);
+    assertEquals("Prod", p.getName());
+    assertEquals("admin", p.getUser());
+    assertEquals("secret", p.getPassword());
+    assertTrue(p.isAcceptSelfSigned());
+    assertNotNull(p.getId());
+    // Migration persists the new list format.
+    assertFalse(backing.get("existdb.profiles.ids").isBlank());
+    assertEquals(p.getId(), store.defaultProfileId());
+  }
+
+  @Test
+  void saveAllRoundTripsMultipleProfilesAndPassword() {
+    Map<String, String> backing = new HashMap<>();
+    ProfileStore store = store(backing);
+
+    ConnectionProfile a = new ConnectionProfile("Local", "http://localhost:8080/x", "admin", "");
+    ConnectionProfile b =
+        new ConnectionProfile("Stg", "https://stg/x", "dev", "pw", true);
+    store.saveAll(new java.util.ArrayList<>(List.of(a, b)));
+
+    List<ConnectionProfile> all = store.loadAll();
+    assertEquals(2, all.size());
+    assertNotNull(all.get(0).getId());
+    assertNotNull(all.get(1).getId());
+    assertEquals("Stg", all.get(1).getName());
+    assertEquals("pw", all.get(1).getPassword());
+    assertTrue(all.get(1).isAcceptSelfSigned());
+    // Password is not stored in clear text.
+    assertFalse(backing.get("existdb.profile." + all.get(1).getId() + ".password").contains("pw")
+        && !backing.get("existdb.profile." + all.get(1).getId() + ".password").startsWith("enc:"));
+  }
+
+  @Test
+  void backCompatSaveUpdatesDefaultProfileInPlace() {
+    Map<String, String> backing = new HashMap<>();
+    ProfileStore store = store(backing);
+    String originalId = store.load().getId();
+
+    // ConnectionDialog produces a fresh profile with no id; save() must reuse the default's id.
+    store.save(new ConnectionProfile("Renamed", "http://h/x", "admin", ""));
+
+    List<ConnectionProfile> all = store.loadAll();
+    assertEquals(1, all.size());
+    assertEquals("Renamed", all.get(0).getName());
+    assertEquals(originalId, all.get(0).getId());
+  }
+
+  @Test
+  void defaultProfileIdIsSettable() {
+    Map<String, String> backing = new HashMap<>();
+    ProfileStore store = store(backing);
+    ConnectionProfile a = new ConnectionProfile("A", "http://a/x", "u", "");
+    ConnectionProfile b = new ConnectionProfile("B", "http://b/x", "u", "");
+    store.saveAll(new java.util.ArrayList<>(List.of(a, b)));
+
+    store.setDefaultProfileId(b.getId());
+    assertEquals(b.getId(), store.defaultProfileId());
+    assertEquals("B", store.load().getName());
+  }
+}

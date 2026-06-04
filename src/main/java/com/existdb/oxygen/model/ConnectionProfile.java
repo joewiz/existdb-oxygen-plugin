@@ -30,6 +30,12 @@ package com.existdb.oxygen.model;
  */
 public final class ConnectionProfile {
 
+  /**
+   * Stable, hidden identifier for this profile, assigned once by {@code ProfileStore}. Survives
+   * name and base-URL edits, and identifies the server in {@code exist://<id>/…} URLs. May be
+   * {@code null} for a freshly-constructed profile until the store assigns one.
+   */
+  private String id;
   private String name;
   private String baseUrl;
   private String user;
@@ -51,6 +57,14 @@ public final class ConnectionProfile {
     this.user = user;
     this.password = password;
     this.acceptSelfSigned = acceptSelfSigned;
+  }
+
+  public String getId() {
+    return id;
+  }
+
+  public void setId(String id) {
+    this.id = id;
   }
 
   public String getName() {
