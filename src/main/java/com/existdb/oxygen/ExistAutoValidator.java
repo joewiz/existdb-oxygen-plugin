@@ -38,7 +38,9 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -59,6 +61,9 @@ public final class ExistAutoValidator {
 
   /** Results-view tab the problems are grouped under. */
   private static final String RESULTS_TAB = "eXist-db";
+  /** Only XQuery resources are compile-checked; other types (.xml, .md, …) are left alone. */
+  private static final Set<String> XQUERY_EXTENSIONS =
+      Set.of(".xq", ".xqm", ".xquery", ".xqy", ".xql", ".xqws");
   /** Quiet period after the last keystroke before re-validating, in milliseconds. */
   private static final int DEBOUNCE_MS = 600;
   private static final int AREA = StandalonePluginWorkspace.MAIN_EDITING_AREA;
@@ -94,9 +99,19 @@ public final class ExistAutoValidator {
     }, AREA);
   }
 
-  /** True for resources this validator handles: those opened from eXist over the {@code exist:} scheme. */
+  /**
+   * True for resources this validator handles: XQuery files opened from eXist over the
+   * {@code exist:} scheme. Non-XQuery resources (.xml, .md, .html, …) are skipped so they aren't
+   * compile-checked as XQuery.
+   */
   static boolean isAutoValidated(URL editorLocation) {
-    return editorLocation != null && "exist".equals(editorLocation.getProtocol());
+    if (editorLocation == null || !"exist".equals(editorLocation.getProtocol())) {
+      return false;
+    }
+    String form = editorLocation.toExternalForm();
+    int query = form.indexOf('?');
+    String path = (query >= 0 ? form.substring(0, query) : form).toLowerCase(Locale.ROOT);
+    return XQUERY_EXTENSIONS.stream().anyMatch(path::endsWith);
   }
 
   private void onOpened(URL location) {
