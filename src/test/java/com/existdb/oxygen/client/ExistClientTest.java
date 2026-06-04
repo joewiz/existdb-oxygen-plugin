@@ -100,6 +100,11 @@ class ExistClientTest {
   }
 
   @Test
+  void createCollectionSucceeds() throws Exception {
+    client.createCollection("/db/new-coll"); // must not throw
+  }
+
+  @Test
   void runAndFetchAndCloseQuery() throws Exception {
     ExistClient.QueryHandle handle = client.runQuery("(1 to 3)", null);
     assertEquals("C1", handle.cursor());

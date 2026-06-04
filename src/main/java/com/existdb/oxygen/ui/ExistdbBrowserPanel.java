@@ -23,6 +23,8 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.client.ExistHttpException;
+import com.existdb.oxygen.client.MimeTypes;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
@@ -34,19 +36,27 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.Toolkit;
+import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.swing.ButtonGroup;
+import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -55,8 +65,10 @@ import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JTree;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.ToolTipManager;
+import javax.swing.TransferHandler;
 import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -75,6 +87,14 @@ import javax.swing.tree.TreeSelectionModel;
 public final class ExistdbBrowserPanel extends JPanel {
 
   private static final String DB_ROOT = "/db";
+
+  /** Flavor for an {@link ExistNodeRef} dragged within the JVM (pane → pane). */
+  private static final DataFlavor NODE_FLAVOR = new DataFlavor(
+      DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ExistNodeRef.class.getName(),
+      "eXist tree node");
+
+  /** Oxygen's database-connection icon for the top-level server nodes (matches Data Source Explorer). */
+  private static final ImageIcon SERVER_ICON = loadFirstIcon("/images/DBConnection16.png");
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -119,6 +139,11 @@ public final class ExistdbBrowserPanel extends JPanel {
     tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
     tree.setCellRenderer(new ExistTreeCellRenderer());
     ToolTipManager.sharedInstance().registerComponent(tree);
+
+    // Drag resources/collections within the tree; accept files dropped from Finder / Project.
+    tree.setDragEnabled(true);
+    tree.setDropMode(DropMode.ON);
+    tree.setTransferHandler(new ExistTreeTransferHandler());
 
     tree.addTreeWillExpandListener(new TreeWillExpandListener() {
       @Override
@@ -396,8 +421,9 @@ public final class ExistdbBrowserPanel extends JPanel {
         try {
           get();
           workspace.showStatusMessage("Deleted " + existNode.path);
+          // Remove the node in place so the rest of the tree's expansion isn't disturbed.
           if (parent != null) {
-            reloadNode(parent);
+            treeModel.removeNodeFromParent(node);
           }
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
@@ -494,6 +520,426 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   // ---------------------------------------------------------------------------
+  // Drag and drop
+  // ---------------------------------------------------------------------------
+
+  /** A dragged tree node, carried in-JVM for pane-to-pane drops. */
+  private record ExistNodeRef(String serverId, String path, String name, boolean collection) {
+  }
+
+  /**
+   * Drag from the tree (a resource or sub-collection) and drop OS files / other nodes onto a
+   * collection. Same-server drops relocate via the API (move, or copy with ⌥); dropping files from
+   * Finder/Project uploads them. Cross-server drops are handled in a later step.
+   */
+  private final class ExistTreeTransferHandler extends TransferHandler {
+    @Override
+    public int getSourceActions(JComponent c) {
+      return COPY_OR_MOVE;
+    }
+
+    @Override
+    protected Transferable createTransferable(JComponent c) {
+      // Only resources and sub-collections are draggable — not the server / db root.
+      if (tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && !DB_ROOT.equals(existNode.path)) {
+        return new NodeTransferable(new ExistNodeRef(
+            existNode.serverId, existNode.path, existNode.name, existNode.collection));
+      }
+      return null;
+    }
+
+    @Override
+    public boolean canImport(TransferSupport support) {
+      return dropCollection(support) != null
+          && (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
+              || support.isDataFlavorSupported(NODE_FLAVOR));
+    }
+
+    @Override
+    public boolean importData(TransferSupport support) {
+      DefaultMutableTreeNode targetNode = dropCollection(support);
+      if (targetNode == null || !(targetNode.getUserObject() instanceof ExistNode target)) {
+        return false;
+      }
+      Transferable transferable = support.getTransferable();
+      try {
+        if (transferable.isDataFlavorSupported(NODE_FLAVOR)) {
+          relocateInternal((ExistNodeRef) transferable.getTransferData(NODE_FLAVOR),
+              target, targetNode, support.getDropAction());
+          return true;
+        }
+        if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+          @SuppressWarnings("unchecked")
+          List<File> files = (List<File>) transferable.getTransferData(DataFlavor.javaFileListFlavor);
+          uploadFiles(files, target, targetNode);
+          return true;
+        }
+      } catch (Exception e) {
+        return false;
+      }
+      return false;
+    }
+
+    /** The collection node a drop targets: the node itself if a collection, else its parent. */
+    private DefaultMutableTreeNode dropCollection(TransferSupport support) {
+      if (!(support.getDropLocation() instanceof JTree.DropLocation location)
+          || location.getPath() == null
+          || !(location.getPath().getLastPathComponent() instanceof DefaultMutableTreeNode node)
+          || !(node.getUserObject() instanceof ExistNode existNode)) {
+        return null;
+      }
+      if (existNode.collection) {
+        return node;
+      }
+      return node.getParent() instanceof DefaultMutableTreeNode parent
+          && parent.getUserObject() instanceof ExistNode ? parent : null;
+    }
+  }
+
+  /** A {@link Transferable} carrying a single {@link ExistNodeRef} under {@link #NODE_FLAVOR}. */
+  private static final class NodeTransferable implements Transferable {
+    private final ExistNodeRef ref;
+
+    NodeTransferable(ExistNodeRef ref) {
+      this.ref = ref;
+    }
+
+    @Override
+    public DataFlavor[] getTransferDataFlavors() {
+      return new DataFlavor[] {NODE_FLAVOR};
+    }
+
+    @Override
+    public boolean isDataFlavorSupported(DataFlavor flavor) {
+      return NODE_FLAVOR.equals(flavor);
+    }
+
+    @Override
+    public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
+      if (!NODE_FLAVOR.equals(flavor)) {
+        throw new UnsupportedFlavorException(flavor);
+      }
+      return ref;
+    }
+  }
+
+  /**
+   * Drops a dragged node into a collection: move (a safe copy-then-delete) by default, copy with ⌥.
+   * Works within a server (server-side copy) and across servers (a client-side recursive copy).
+   */
+  private void relocateInternal(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, int dropAction) {
+    final boolean sameServer = source.serverId().equals(target.serverId);
+    if (sameServer) {
+      if (target.path.equals(parentPath(source.path()))) {
+        return; // already in this collection
+      }
+      if (target.path.equals(source.path()) || target.path.startsWith(source.path() + "/")) {
+        workspace.showErrorMessage("Can't move a collection into itself.");
+        return;
+      }
+    }
+    final ExistClient sourceClient = ExistContext.clientById(source.serverId());
+    final ExistClient targetClient = ExistContext.clientById(target.serverId);
+    if (sourceClient == null || targetClient == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    // Same-server: move by default, copy with ⌥. Cross-server is always a copy — never auto-delete
+    // a remote server's source on a drag (the Finder "different volume = copy" default; ⌘-to-move
+    // isn't reliably available in Swing DnD).
+    // Same-server: move by default, copy with ⌥. Cross-server is always a copy — never auto-delete
+    // a remote server's source on a drag (the Finder "different volume = copy" default; ⌘-to-move
+    // isn't reliably available in Swing DnD).
+    final boolean copy = !sameServer || dropAction == TransferHandler.COPY;
+    // A collection relocate is a recursive copy (client-side), so confirm before a big transfer.
+    if (source.collection() && !confirmCollectionRelocate(source.path(), copy)) {
+      return;
+    }
+    performRelocate(sourceClient, targetClient, source, target, targetNode, copy);
+  }
+
+  private boolean confirmCollectionRelocate(String path, boolean copy) {
+    return JOptionPane.showConfirmDialog(this,
+        (copy ? "Copy" : "Move") + " the collection " + path + "? "
+            + "It is transferred recursively and may take a while.",
+        (copy ? "Copy" : "Move") + " collection",
+        JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+  }
+
+  private void performRelocate(ExistClient sourceClient, ExistClient targetClient,
+      ExistNodeRef source, ExistNode target, DefaultMutableTreeNode targetNode, boolean copy) {
+    final String dest = target.path + "/" + source.name();
+    new SwingWorker<Boolean, Void>() {
+      @Override
+      protected Boolean doInBackground() throws Exception {
+        boolean collides = targetClient.listChildren(target.path).stream()
+            .anyMatch(c -> c.name().equals(source.name()));
+        if (collides && !confirmOverwrite(target.path)) {
+          return false;
+        }
+        // Always a client-side copy (GET → PUT, recursive), then delete on move. We never call
+        // existdb-openapi's move/copy: their target rules are inconsistent and, worse, a failure
+        // can delete the source (existdb-openapi #36/#37). A move deletes the source only after the
+        // copy fully succeeds, so a failure can't lose data.
+        crossServerCopy(sourceClient, targetClient, source.path(), dest, source.collection());
+        if (!copy) {
+          deleteFrom(sourceClient, source.path(), source.collection());
+        }
+        return true;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          if (get()) {
+            afterRelocate(source, target, targetNode, copy);
+          }
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage((copy ? "Copy" : "Move") + " failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /** Recursively copies a resource/collection from one server to another (client-side). */
+  private static void crossServerCopy(ExistClient from, ExistClient to, String sourcePath,
+      String destPath, boolean collection) throws java.io.IOException, InterruptedException {
+    if (collection) {
+      to.createCollection(destPath);
+      for (ExistClient.ChildEntry child : from.listChildren(sourcePath)) {
+        crossServerCopy(from, to, child.path(), destPath + "/" + child.name(), child.collection());
+      }
+    } else {
+      ExistClient.ResourceContent content = from.getResource(sourcePath);
+      String mime = content.mimeType() != null ? content.mimeType() : MimeTypes.byName(destPath);
+      putResourceTolerant(to, destPath, content.content(), mime);
+    }
+  }
+
+  /**
+   * Stores a resource, falling back to {@code text/plain} if eXist rejects the content as malformed
+   * XML — e.g. non-well-formed HTML, which eXist would otherwise try to parse as XML and reject.
+   */
+  private static void putResourceTolerant(ExistClient client, String path, String content,
+      String mime) throws java.io.IOException, InterruptedException {
+    try {
+      client.putResource(path, content, mime);
+    } catch (ExistHttpException e) {
+      if ("text/plain".equals(mime) || !isXmlParseError(e)) {
+        throw e;
+      }
+      client.putResource(path, content, "text/plain");
+    }
+  }
+
+  private static boolean isXmlParseError(ExistHttpException e) {
+    String body = e.getResponseBody();
+    return body != null
+        && (body.contains("XML parser") || body.contains("Content is not allowed in prolog"));
+  }
+
+  private static void deleteFrom(ExistClient client, String path, boolean collection)
+      throws java.io.IOException, InterruptedException {
+    if (collection) {
+      client.deleteCollection(path);
+    } else {
+      client.deleteResource(path);
+    }
+  }
+
+  /**
+   * Refreshes the tree after a successful move/copy, surgically so other servers / expanded
+   * collections aren't collapsed: the moved node is dropped in place and the target invalidated.
+   */
+  private void afterRelocate(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy) {
+    workspace.showStatusMessage((copy ? "Copied " : "Moved ")
+        + source.path() + " to " + target.path);
+    if (!copy) {
+      DefaultMutableTreeNode moved = findNode(source.serverId(), source.path());
+      if (moved != null && moved.getParent() != null) {
+        treeModel.removeNodeFromParent(moved);
+      }
+    }
+    addRelocatedChild(source, target, targetNode);
+  }
+
+  /**
+   * Shows the relocated item under the target collection without collapsing anything: if the target
+   * has been loaded, insert a node for it in place (unless one with that name is already there);
+   * otherwise it will appear when the target is first expanded.
+   */
+  private void addRelocatedChild(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode) {
+    if (!target.loaded) {
+      return;
+    }
+    for (int i = 0; i < targetNode.getChildCount(); i++) {
+      if (targetNode.getChildAt(i) instanceof DefaultMutableTreeNode existing
+          && existing.getUserObject() instanceof ExistNode node
+          && node.name.equals(source.name())) {
+        return; // already shown (e.g. an overwrite replaced its content, the node stays)
+      }
+    }
+    DefaultMutableTreeNode child = new DefaultMutableTreeNode(new ExistNode(
+        target.serverId, target.path + "/" + source.name(), source.name(), source.collection()));
+    if (source.collection()) {
+      addPlaceholder(child);
+    }
+    treeModel.insertNodeInto(child, targetNode,
+        insertionIndex(targetNode, source.name(), source.collection()));
+  }
+
+  /** The sorted insert position in a collection: sub-collections before resources, each by name. */
+  private static int insertionIndex(DefaultMutableTreeNode parent, String name, boolean collection) {
+    for (int i = 0; i < parent.getChildCount(); i++) {
+      if (!(parent.getChildAt(i) instanceof DefaultMutableTreeNode node)
+          || !(node.getUserObject() instanceof ExistNode existNode)) {
+        continue;
+      }
+      if (collection && !existNode.collection) {
+        return i; // collections sort before the first resource
+      }
+      if (collection == existNode.collection && existNode.name.compareToIgnoreCase(name) > 0) {
+        return i;
+      }
+    }
+    return parent.getChildCount();
+  }
+
+  private void uploadFiles(List<File> files, ExistNode target, DefaultMutableTreeNode targetNode) {
+    final ExistClient client = ExistContext.clientById(target.serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    final List<String> skipped = new ArrayList<>();
+    new SwingWorker<Integer, Void>() {
+      @Override
+      protected Integer doInBackground() throws Exception {
+        Set<String> existing = new HashSet<>();
+        for (ExistClient.ChildEntry child : client.listChildren(target.path)) {
+          existing.add(child.name());
+        }
+        if (files.stream().anyMatch(f -> existing.contains(f.getName()))
+            && !confirmOverwrite(target.path)) {
+          return -1;
+        }
+        int count = 0;
+        for (File file : files) {
+          count += uploadRecursive(client, target.path, file, skipped);
+        }
+        return count;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          int count = get();
+          if (count < 0) {
+            return; // overwrite cancelled
+          }
+          StringBuilder message = new StringBuilder("Uploaded ").append(count)
+              .append(" file(s) to ").append(target.path);
+          if (!skipped.isEmpty()) {
+            message.append("; skipped ").append(skipped.size())
+                .append(" binary file(s) (not yet supported): ").append(String.join(", ", skipped));
+          }
+          workspace.showStatusMessage(message.toString());
+          reloadNode(targetNode);
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Upload failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /**
+   * Uploads a file (or, recursively, a directory) under {@code parentPath}; returns the count
+   * uploaded. Binary files are skipped (existdb-openapi's resource PUT is text-only) and their names
+   * collected in {@code skipped}.
+   */
+  private static int uploadRecursive(ExistClient client, String parentPath, File file,
+      List<String> skipped) throws java.io.IOException, InterruptedException {
+    if (file.isDirectory()) {
+      String collection = parentPath + "/" + file.getName();
+      client.createCollection(collection);
+      int count = 0;
+      File[] children = file.listFiles();
+      if (children != null) {
+        for (File child : children) {
+          count += uploadRecursive(client, collection, child, skipped);
+        }
+      }
+      return count;
+    }
+    byte[] bytes = Files.readAllBytes(file.toPath());
+    if (isBinary(bytes)) {
+      skipped.add(file.getName());
+      return 0;
+    }
+    // A known extension picks the right mime; otherwise store as plain text (never XML-parsed).
+    String mime = MimeTypes.byName(file.getName());
+    putResourceTolerant(client, parentPath + "/" + file.getName(),
+        new String(bytes, StandardCharsets.UTF_8), mime != null ? mime : "text/plain");
+    return 1;
+  }
+
+  /** Heuristic: a NUL byte in the head means binary (existdb-openapi can't store binary as text). */
+  private static boolean isBinary(byte[] bytes) {
+    int limit = Math.min(bytes.length, 8192);
+    for (int i = 0; i < limit; i++) {
+      if (bytes[i] == 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Asks (on the EDT) whether to overwrite colliding resources; returns the user's choice. */
+  private boolean confirmOverwrite(String collectionPath) {
+    final boolean[] confirmed = {false};
+    Runnable ask = () -> confirmed[0] = JOptionPane.showConfirmDialog(this,
+        "Some items already exist in " + collectionPath + ". Overwrite them?",
+        "Confirm overwrite", JOptionPane.OK_CANCEL_OPTION,
+        JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+    try {
+      if (SwingUtilities.isEventDispatchThread()) {
+        ask.run();
+      } else {
+        SwingUtilities.invokeAndWait(ask);
+      }
+    } catch (Exception e) {
+      return false;
+    }
+    return confirmed[0];
+  }
+
+  /** The parent collection of a DB path, e.g. {@code /db/a} for {@code /db/a/x.xq}. */
+  private static String parentPath(String path) {
+    int slash = path.lastIndexOf('/');
+    return slash > 0 ? path.substring(0, slash) : DB_ROOT;
+  }
+
+  /** Finds the loaded tree node for a given server + DB path, or {@code null}. */
+  private DefaultMutableTreeNode findNode(String serverId, String path) {
+    java.util.Enumeration<?> nodes = rootNode.breadthFirstEnumeration();
+    while (nodes.hasMoreElements()) {
+      if (nodes.nextElement() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && serverId.equals(existNode.serverId) && path.equals(existNode.path)) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
@@ -565,14 +1011,23 @@ public final class ExistdbBrowserPanel extends JPanel {
       super.getTreeCellRendererComponent(t, value, selected, expanded, leaf, row, focus);
       if (value instanceof DefaultMutableTreeNode node
           && node.getUserObject() instanceof ExistNode existNode) {
-        setIcon(existNode.collection
-            ? (expanded ? getDefaultOpenIcon() : getDefaultClosedIcon())
-            : getDefaultLeafIcon());
+        setIcon(iconFor(existNode, expanded));
         setToolTipText(tooltipFor(existNode));
       } else {
         setToolTipText(null);
       }
       return this;
+    }
+
+    /** Server nodes get the DB-connection icon; collections folders; resources files. */
+    private javax.swing.Icon iconFor(ExistNode existNode, boolean expanded) {
+      if (DB_ROOT.equals(existNode.path) && SERVER_ICON != null) {
+        return SERVER_ICON;
+      }
+      if (existNode.collection) {
+        return expanded ? getDefaultOpenIcon() : getDefaultClosedIcon();
+      }
+      return getDefaultLeafIcon();
     }
   }
 
