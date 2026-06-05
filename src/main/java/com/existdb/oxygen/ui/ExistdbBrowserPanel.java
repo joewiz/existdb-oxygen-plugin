@@ -32,6 +32,7 @@ import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
+import ro.sync.exml.workspace.api.listeners.WSEditorListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -144,6 +145,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     loadServers();
 
     // Link with Editor: when enabled, follow editor focus by revealing the matching tree node.
+    // Also: when an exist: editor opens, watch for saves so a newly-created resource appears in the
+    // tree without a manual Refresh.
     workspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorSelected(URL editorLocation) {
@@ -154,7 +157,49 @@ public final class ExistdbBrowserPanel extends JPanel {
       public void editorActivated(URL editorLocation) {
         revealIfLinked(editorLocation);
       }
+
+      @Override
+      public void editorOpened(URL editorLocation) {
+        watchForSaves(editorLocation);
+      }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+  }
+
+  /** Attaches a save listener to an {@code exist:} editor so saves refresh its collection in the tree. */
+  private void watchForSaves(URL editorLocation) {
+    if (editorLocation == null
+        || LangServiceSupport.serverId(editorLocation.toString()).isEmpty()) {
+      return; // not an exist: resource
+    }
+    WSEditor editor =
+        workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (editor != null) {
+      editor.addEditorListener(new WSEditorListener() {
+        @Override
+        public void editorSaved(int operationType) {
+          showSavedResource(editorLocation);
+        }
+      });
+    }
+  }
+
+  /** Inserts a just-saved resource into its (already-loaded) parent collection node if not shown. */
+  private void showSavedResource(URL editorLocation) {
+    String systemId = editorLocation.toString();
+    String serverId = LangServiceSupport.serverId(systemId);
+    String dbPath = LangServiceSupport.dbPath(systemId);
+    if (serverId.isEmpty() || dbPath.isEmpty()) {
+      return;
+    }
+    DefaultMutableTreeNode parentNode = findNode(serverId, parentPath(dbPath));
+    if (parentNode == null || !(parentNode.getUserObject() instanceof ExistNode parent)
+        || !parent.loaded) {
+      return;
+    }
+    String name = dbPath.substring(dbPath.lastIndexOf('/') + 1);
+    if (childNamed(parentNode, name) == null) {
+      insertChild(parentNode, serverId, dbPath, name, false);
+    }
   }
 
   private JComponent buildToolbar() {
@@ -396,6 +441,7 @@ public final class ExistdbBrowserPanel extends JPanel {
           if (parent != null) {
             treeModel.removeNodeFromParent(node);
           }
+          offerToCloseDeletedEditors(existNode);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Delete failed: " + cause.getMessage());
@@ -468,6 +514,61 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
       workspace.showStatusMessage("Duplicated as " + name);
     }, "Duplicate failed");
+  }
+
+  /**
+   * After a delete, offers to close any open editors that pointed at the removed resource (or, for a
+   * collection, anything under it). Choosing "No" keeps them open so the user can re-save and thereby
+   * re-create the resource — Oxygen otherwise gives no "Missing File" prompt for the {@code exist:}
+   * scheme.
+   */
+  private void offerToCloseDeletedEditors(ExistNode existNode) {
+    List<WSEditor> affected = affectedEditors(existNode);
+    if (affected.isEmpty()) {
+      return;
+    }
+    int choice = JOptionPane.showConfirmDialog(this,
+        closeDeletedMessage(affected.size(), existNode.collection), "Resource deleted",
+        JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+    if (choice == JOptionPane.YES_OPTION) {
+      affected.forEach(editor -> editor.close(false));
+    }
+  }
+
+  private List<WSEditor> affectedEditors(ExistNode existNode) {
+    List<WSEditor> affected = new ArrayList<>();
+    URL[] locations = workspace.getAllEditorLocations(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (locations == null) {
+      return affected;
+    }
+    for (URL location : locations) {
+      if (matchesDeleted(existNode, location)) {
+        WSEditor editor =
+            workspace.getEditorAccess(location, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+        if (editor != null) {
+          affected.add(editor);
+        }
+      }
+    }
+    return affected;
+  }
+
+  private static boolean matchesDeleted(ExistNode existNode, URL location) {
+    String systemId = location.toString();
+    if (!existNode.serverId.equals(LangServiceSupport.serverId(systemId))) {
+      return false;
+    }
+    String dbPath = LangServiceSupport.dbPath(systemId);
+    return existNode.collection
+        ? dbPath.equals(existNode.path) || dbPath.startsWith(existNode.path + "/")
+        : dbPath.equals(existNode.path);
+  }
+
+  private static String closeDeletedMessage(int count, boolean collection) {
+    String it = count == 1 ? "it" : "them";
+    return count + " open editor" + (count == 1 ? "" : "s") + " reference the deleted "
+        + (collection ? "collection" : "resource") + ".\nClose " + it
+        + "? Choose No to keep " + it + " open so you can re-save.";
   }
 
   // ---------------------------------------------------------------------------
