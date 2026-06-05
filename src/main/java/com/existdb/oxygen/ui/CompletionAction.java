@@ -44,6 +44,8 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.ImageIcon;
+import javax.swing.JEditorPane;
 import javax.swing.JList;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
@@ -64,6 +66,9 @@ public final class CompletionAction extends AbstractAction {
 
   private static final int MAX_VISIBLE_ROWS = 10;
   private static final int ROW_HEIGHT = 18;
+  // LSP CompletionItemKind: 3 = function, 6 = variable, 14 = keyword.
+  private static final ImageIcon FUNCTION_ICON = icon("/images/node-customizer/XSLFunction16.png");
+  private static final ImageIcon VARIABLE_ICON = icon("/images/node-customizer/XSLVariable16.png");
 
   private final transient StandalonePluginWorkspace workspace;
 
@@ -118,14 +123,23 @@ public final class CompletionAction extends AbstractAction {
 
     JList<ExistClient.Completion> list = new JList<>(model);
     list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    list.setSelectedIndex(0);
     list.setCellRenderer(completionRenderer());
+
+    JEditorPane doc = new JEditorPane("text/html", "");
+    doc.setEditable(false);
+    doc.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+    JScrollPane docScroll = new JScrollPane(doc);
+    docScroll.setPreferredSize(new Dimension(320,
+        Math.min(items.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT + 4));
+    list.addListSelectionListener(e -> showDoc(doc, list.getSelectedValue()));
 
     JPopupMenu popup = new JPopupMenu();
     popup.setLayout(new BorderLayout());
-    JScrollPane scroll = new JScrollPane(list);
-    scroll.setPreferredSize(new Dimension(420, Math.min(items.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT + 4));
-    popup.add(scroll, BorderLayout.CENTER);
+    JScrollPane listScroll = new JScrollPane(list);
+    listScroll.setPreferredSize(new Dimension(340,
+        Math.min(items.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT + 4));
+    popup.add(listScroll, BorderLayout.WEST);
+    popup.add(docScroll, BorderLayout.CENTER);
 
     list.addMouseListener(new MouseAdapter() {
       @Override
@@ -146,6 +160,7 @@ public final class CompletionAction extends AbstractAction {
       }
     });
 
+    list.setSelectedIndex(0);
     try {
       Rectangle2D r = component.modelToView2D(caret);
       popup.show(component, (int) r.getX(), (int) (r.getY() + r.getHeight()));
@@ -153,6 +168,27 @@ public final class CompletionAction extends AbstractAction {
     } catch (BadLocationException e) {
       // Cannot place the popup; skip.
     }
+  }
+
+  /** Shows the selected proposal's signature and documentation in the side panel. */
+  private static void showDoc(JEditorPane doc, ExistClient.Completion c) {
+    if (c == null) {
+      doc.setText("");
+      return;
+    }
+    StringBuilder html = new StringBuilder("<html><body style='font-family:sans-serif;font-size:9px'>");
+    String signature = c.detail() != null && !c.detail().isEmpty() ? c.detail() : c.label();
+    html.append("<b>").append(escape(signature)).append("</b>");
+    if (c.documentation() != null && !c.documentation().isEmpty()) {
+      html.append("<br><br>").append(escape(c.documentation()));
+    }
+    html.append("</body></html>");
+    doc.setText(html.toString());
+    doc.setCaretPosition(0);
+  }
+
+  private static String escape(String s) {
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
   }
 
   private void accept(JList<ExistClient.Completion> list, JPopupMenu popup,
@@ -170,10 +206,24 @@ public final class CompletionAction extends AbstractAction {
       public Component getListCellRendererComponent(JList<?> list, Object value,
           int index, boolean selected, boolean focus) {
         ExistClient.Completion c = (ExistClient.Completion) value;
-        String detail = c.detail() != null && !c.detail().isEmpty() ? "  —  " + c.detail() : "";
-        return super.getListCellRendererComponent(list, c.label() + detail, index, selected, focus);
+        super.getListCellRendererComponent(list, c.label(), index, selected, focus);
+        setIcon(kindIcon(c.kind()));
+        return this;
       }
     };
+  }
+
+  private static javax.swing.Icon kindIcon(int kind) {
+    return switch (kind) {
+      case 3 -> FUNCTION_ICON;
+      case 6 -> VARIABLE_ICON;
+      default -> null;
+    };
+  }
+
+  private static ImageIcon icon(String resource) {
+    java.net.URL url = CompletionAction.class.getResource(resource);
+    return url != null ? new ImageIcon(url) : null;
   }
 
   /** Replaces the identifier prefix immediately before the caret with the proposal's insert text. */

@@ -43,6 +43,7 @@ import ro.sync.exml.workspace.api.standalone.ViewInfo;
 import ro.sync.exml.workspace.api.standalone.actions.MenusAndToolbarsContributorCustomizer;
 
 import java.awt.Toolkit;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.net.URL;
 import java.util.Arrays;
@@ -102,20 +103,33 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
 
-    // Bind Cmd/Ctrl+Enter to Run in Results View inside text editors (the menu was removed, so the
-    // accelerator is wired onto each text page as it opens / switches to Text mode).
+    // Wire editor shortcuts onto each text page as it opens / switches to Text mode (the menu was
+    // removed, so accelerators are bound on the editor component): Cmd/Ctrl+Enter runs into the
+    // Results view; Ctrl+Space and Cmd/Ctrl+Alt+Slash trigger eXist-aware completion.
     final KeyStroke runShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
+    final KeyStroke completionShortcut =
+        KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK);
+    final KeyStroke completionShortcutAlt = KeyStroke.getKeyStroke(KeyEvent.VK_SLASH,
+        Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.ALT_DOWN_MASK);
     runInResultsViewAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorOpened(URL editorLocation) {
-        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runInResultsViewAction);
+        bindShortcuts(pluginWorkspace, editorLocation);
       }
 
       @Override
       public void editorPageChanged(URL editorLocation) {
-        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runInResultsViewAction);
+        bindShortcuts(pluginWorkspace, editorLocation);
+      }
+
+      private void bindShortcuts(StandalonePluginWorkspace workspace, URL editorLocation) {
+        bindShortcut(workspace, editorLocation, runShortcut, "existRun", runInResultsViewAction);
+        bindShortcut(workspace, editorLocation, completionShortcut, "existComplete",
+            completionAction);
+        bindShortcut(workspace, editorLocation, completionShortcutAlt, "existComplete",
+            completionAction);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
 
@@ -157,15 +171,15 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     });
   }
 
-  /** Binds the Run-Current-Editor shortcut to a text editor's input map (idempotent). */
-  private static void bindRunShortcut(StandalonePluginWorkspace workspace, URL editorLocation,
-      KeyStroke shortcut, Action action) {
+  /** Binds {@code shortcut} → {@code action} on a text editor's input map (idempotent). */
+  private static void bindShortcut(StandalonePluginWorkspace workspace, URL editorLocation,
+      KeyStroke shortcut, String key, Action action) {
     WSEditor editor =
         workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
     if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
         && page.getTextComponent() instanceof JComponent component) {
-      component.getInputMap(JComponent.WHEN_FOCUSED).put(shortcut, "existRunCurrentEditor");
-      component.getActionMap().put("existRunCurrentEditor", action);
+      component.getInputMap(JComponent.WHEN_FOCUSED).put(shortcut, key);
+      component.getActionMap().put(key, action);
     }
   }
 
