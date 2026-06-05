@@ -65,13 +65,15 @@ final class ExistURLConnection extends URLConnection {
     }
     ExistClient client = requireClient();
     try {
-      // Text resources (XQuery, XML, …) come back correctly as the JSON envelope's UTF-8 content —
-      // and crucially the raw streaming endpoint would *execute* an XQuery module, not return its
-      // source. Only binary resources (images, PDFs, fonts), whose JSON text content is lossy, are
-      // fetched as raw bytes via the streaming endpoint.
+      // eXist stores XQuery (and some other text resources) as *binary* documents, so the JSON
+      // envelope's `binary` flag is true for them — but its `content` is still the real UTF-8
+      // source, and crucially the raw streaming endpoint would *execute* an .xq/.xqm module rather
+      // than return its source. So branch on whether the mime-type is textual, not on `binary`:
+      // read text (XQuery, XML, JSON, …) from the JSON content; fetch only genuinely-binary
+      // resources (images, PDFs, fonts) as raw bytes via the streaming endpoint.
       ExistClient.ResourceContent rc = client.getResource(dbPath());
-      this.mimeType = rc.mimeType();
-      if (rc.binary()) {
+      this.mimeType = rc.mimeType() != null ? rc.mimeType() : MimeTypes.byName(dbPath());
+      if (rc.binary() && !MimeTypes.isTextual(this.mimeType)) {
         ExistClient.RawResource raw = client.getResourceBytes(dbPath());
         this.content = raw.bytes();
         if (raw.mimeType() != null) {
