@@ -43,7 +43,9 @@ import ro.sync.exml.workspace.api.standalone.ViewComponentCustomizer;
 import ro.sync.exml.workspace.api.standalone.ViewInfo;
 import ro.sync.exml.workspace.api.standalone.actions.MenusAndToolbarsContributorCustomizer;
 
+import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.net.URL;
@@ -121,10 +123,8 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK);
     final KeyStroke completionShortcutAlt = KeyStroke.getKeyStroke(KeyEvent.VK_SLASH,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.ALT_DOWN_MASK);
-    // F1 shows eXist function documentation for the symbol under the caret, overriding Oxygen's
-    // default F1 (which opens the XQuery help page in a browser).
-    final KeyStroke hoverShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0);
     evaluateQueryAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
+    installFunctionDocF1(pluginWorkspace, hoverAction);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorOpened(URL editorLocation) {
@@ -161,7 +161,6 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             completionAction);
         bindShortcut(workspace, editorLocation, completionShortcutAlt, "existComplete",
             completionAction);
-        bindShortcut(workspace, editorLocation, hoverShortcut, "existHover", hoverAction);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
 
@@ -200,6 +199,33 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         toolbarInfo.setComponents(updated);
         toolbarInfo.setTitle("eXist-db");
       }
+    });
+  }
+
+  /**
+   * Overrides F1 with eXist Function Documentation while an XQuery editor is focused. Oxygen binds
+   * F1 to Help as a global menu accelerator, which a component input-map binding can't reliably
+   * beat — a {@link KeyEventDispatcher} sees the key before menu accelerators and consumes it.
+   */
+  private static void installFunctionDocF1(StandalonePluginWorkspace workspace, Action hoverAction) {
+    KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+      if (e.getKeyCode() != KeyEvent.VK_F1 || e.getModifiersEx() != 0) {
+        return false;
+      }
+      WSEditor editor =
+          workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+      boolean inXQueryEditor = editor != null
+          && ExistAutoValidator.isXQuery(editor.getEditorLocation())
+          && KeyboardFocusManager.getCurrentKeyboardFocusManager()
+              .getFocusOwner() instanceof JTextComponent;
+      if (!inXQueryEditor) {
+        return false;
+      }
+      if (e.getID() == KeyEvent.KEY_PRESSED) {
+        hoverAction.actionPerformed(
+            new ActionEvent(e.getSource(), ActionEvent.ACTION_PERFORMED, "F1"));
+      }
+      return true; // consume PRESSED and RELEASED so Oxygen's Help doesn't also fire
     });
   }
 
