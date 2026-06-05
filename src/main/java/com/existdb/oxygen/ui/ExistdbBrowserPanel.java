@@ -536,15 +536,18 @@ public final class ExistdbBrowserPanel extends JPanel {
    * scheme.
    */
   private void offerToCloseDeletedEditors(ExistNode existNode) {
-    List<WSEditor> affected = affectedEditors(existNode);
-    if (affected.isEmpty()) {
-      return;
-    }
-    int choice = JOptionPane.showConfirmDialog(this,
-        closeDeletedMessage(affected.size(), existNode.collection), "Resource deleted",
-        JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-    if (choice == JOptionPane.YES_OPTION) {
-      affected.forEach(editor -> editor.close(false));
+    for (WSEditor editor : affectedEditors(existNode)) {
+      String dbPath = LangServiceSupport.dbPath(editor.getEditorLocation().toString());
+      // Mirror Oxygen's native Missing-File prompt (wording, Yes = keep open).
+      int choice = JOptionPane.showConfirmDialog(this,
+          "The following resource no longer exists in the database:\n" + dbPath
+              + "\n\nKeep it open in the editor?",
+          "Missing File", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+      if (choice == JOptionPane.YES_OPTION) {
+        editor.setModified(true); // mark dirty so a save re-creates the resource
+      } else {
+        editor.close(false);
+      }
     }
   }
 
@@ -575,13 +578,6 @@ public final class ExistdbBrowserPanel extends JPanel {
     return existNode.collection
         ? dbPath.equals(existNode.path) || dbPath.startsWith(existNode.path + "/")
         : dbPath.equals(existNode.path);
-  }
-
-  private static String closeDeletedMessage(int count, boolean collection) {
-    String it = count == 1 ? "it" : "them";
-    return count + " open editor" + (count == 1 ? "" : "s") + " reference the deleted "
-        + (collection ? "collection" : "resource") + ".\nClose " + it
-        + "? Choose No to keep " + it + " open so you can re-save.";
   }
 
   // ---------------------------------------------------------------------------
