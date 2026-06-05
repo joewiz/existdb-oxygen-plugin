@@ -53,7 +53,18 @@ public final class QueryRunner {
    */
   public static QueryResult execute(ExistClient client, String query, String moduleLoadPath)
       throws IOException, InterruptedException {
-    ExistClient.QueryHandle handle = client.runQuery(query, moduleLoadPath);
+    return execute(client, query, moduleLoadPath, null);
+  }
+
+  /**
+   * As {@link #execute(ExistClient, String, String)}, but supplies {@code contextItem} (a serialized
+   * node) as the evaluation context item so context-dependent expressions evaluate against the
+   * document being queried. A null/blank {@code contextItem} runs with no context item.
+   */
+  public static QueryResult execute(
+      ExistClient client, String query, String moduleLoadPath, String contextItem)
+      throws IOException, InterruptedException {
+    ExistClient.QueryHandle handle = client.runQuery(query, moduleLoadPath, contextItem);
     int total = handle.items();
     if (handle.cursor() == null || total == 0) {
       return new QueryResult("", total, false);

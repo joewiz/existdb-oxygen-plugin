@@ -129,6 +129,19 @@ class ExistClientTest {
   }
 
   @Test
+  void runQueryIncludesContextItemWhenSupplied() throws Exception {
+    client.runQuery("//para", null, "<doc><para>hi</para></doc>");
+    assertTrue(server.lastQueryBody().contains("\"context-item\""));
+    assertTrue(server.lastQueryBody().contains("<para>hi"));
+  }
+
+  @Test
+  void runQueryOmitsContextItemWhenBlank() throws Exception {
+    client.runQuery("1 to 3", null, "  ");
+    assertFalse(server.lastQueryBody().contains("context-item"));
+  }
+
+  @Test
   void nonSuccessStatusRaisesExistHttpException() {
     ExistHttpException ex = org.junit.jupiter.api.Assertions.assertThrows(
         ExistHttpException.class, () -> client.getResource("/db/missing.xq"));

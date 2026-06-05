@@ -27,6 +27,7 @@ import com.existdb.oxygen.query.QueryRunner;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.StringWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -34,12 +35,16 @@ import java.util.Map;
 import java.util.Properties;
 
 import javax.xml.transform.ErrorListener;
+import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Result;
 import javax.xml.transform.Source;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.TransformerFactoryConfigurationError;
 import javax.xml.transform.URIResolver;
 import javax.xml.transform.stream.StreamResult;
+import javax.xml.transform.stream.StreamSource;
 
 /**
  * The {@link Transformer} handed to Oxygen for the "eXist-db (HTTP)" XQuery engine. Validation is
@@ -75,13 +80,44 @@ public final class ExistXQueryTransformer extends Transformer {
       throw new TransformerException("No XQuery to execute.");
     }
     try {
-      QueryRunner.QueryResult result = QueryRunner.execute(client, query, moduleLoadPath);
+      String contextItem = serializeSource(xmlSource);
+      QueryRunner.QueryResult result =
+          QueryRunner.execute(client, query, moduleLoadPath, contextItem);
       writeOutput(outputTarget, result.output());
     } catch (IOException e) {
       throw new TransformerException(e.getMessage(), e);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new TransformerException("XQuery execution was interrupted.", e);
+    }
+  }
+
+  /**
+   * Serializes the transformation's input {@link Source} to a string to hand the server as the
+   * {@code context-item}, so context-dependent expressions (e.g. {@code //para}) evaluate against
+   * the document being queried (the XPath/XQuery Builder supplies the open document here). Returns
+   * null when there is no usable input — an unsaved-query / no-context run — so no context item is
+   * sent. Any serialization failure is swallowed (null), degrading to a context-free run rather than
+   * failing the query.
+   */
+  private static String serializeSource(Source xmlSource) {
+    if (xmlSource == null) {
+      return null;
+    }
+    if (xmlSource instanceof StreamSource stream
+        && stream.getReader() == null && stream.getInputStream() == null
+        && (stream.getSystemId() == null || stream.getSystemId().isBlank())) {
+      return null;
+    }
+    try {
+      Transformer identity = TransformerFactory.newInstance().newTransformer();
+      identity.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
+      StringWriter out = new StringWriter();
+      identity.transform(xmlSource, new StreamResult(out));
+      String serialized = out.toString();
+      return serialized.isBlank() ? null : serialized;
+    } catch (TransformerException | TransformerFactoryConfigurationError e) {
+      return null;
     }
   }
 

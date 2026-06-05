@@ -260,10 +260,25 @@ public final class ExistClient {
   /** POST /api/query — compiles and evaluates, returning a cursor over the results. */
   public QueryHandle runQuery(String query, String moduleLoadPath)
       throws IOException, InterruptedException {
+    return runQuery(query, moduleLoadPath, null);
+  }
+
+  /**
+   * POST /api/query with an optional {@code context-item} — a serialized node supplied as the
+   * evaluation context so context-dependent expressions (e.g. {@code //para}) run against the
+   * document the user is querying. When {@code contextItem} is null/blank the query evaluates with
+   * no context item (the editor-content-is-the-query case). Servers without existdb-openapi PR #41
+   * simply ignore the unknown field, so this is safe against older deployments.
+   */
+  public QueryHandle runQuery(String query, String moduleLoadPath, String contextItem)
+      throws IOException, InterruptedException {
     JSONObject body = new JSONObject();
     body.put("query", query);
     if (moduleLoadPath != null && !moduleLoadPath.isEmpty()) {
       body.put("module-load-path", moduleLoadPath);
+    }
+    if (contextItem != null && !contextItem.isBlank()) {
+      body.put("context-item", contextItem);
     }
     HttpResponse<String> r = send(request("/query")
         .header("Content-Type", "application/json")
