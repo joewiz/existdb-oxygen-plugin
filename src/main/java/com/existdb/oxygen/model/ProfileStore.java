@@ -26,8 +26,11 @@ import ro.sync.exml.workspace.api.options.WSOptionsStorage;
 import ro.sync.exml.workspace.api.util.UtilAccess;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
-import java.util.UUID;
+import java.util.Locale;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 
 /**
@@ -54,6 +57,8 @@ public final class ProfileStore {
   private final Options options;
   private final UnaryOperator<String> encrypt;
   private final UnaryOperator<String> decrypt;
+  /** Notified when the result-display defaults change, so an open results view can re-apply them. */
+  private final List<Runnable> resultsPrefsListeners = new ArrayList<>();
 
   /** Minimal string options backend, so the storage logic is testable without Oxygen. */
   public interface Options {
@@ -96,19 +101,66 @@ public final class ProfileStore {
     return profiles.isEmpty() ? migrate() : profiles;
   }
 
-  /** Persists the given profiles (assigning ids where missing) and keeps the default id valid. */
+  /**
+   * Persists the given profiles, assigning each a name-derived slug id (unique across the set) and,
+   * on a rename, keeping the old slug as an alias so open {@code exist://} editors still resolve.
+   * Keeps the default id valid.
+   */
   public void saveAll(List<ConnectionProfile> profiles) {
+    Set<String> taken = new HashSet<>();
     List<String> ids = new ArrayList<>(profiles.size());
     for (ConnectionProfile profile : profiles) {
-      if (profile.getId() == null || profile.getId().isBlank()) {
-        profile.setId(newId());
-      }
+      assignId(profile, taken);
+      taken.add(profile.getId());
       writeProfile(profile);
       ids.add(profile.getId());
     }
     options.set(KEY_IDS, String.join(",", ids));
     if (!ids.contains(defaultProfileId())) {
       options.set(KEY_DEFAULT, ids.isEmpty() ? "" : ids.get(0));
+    }
+  }
+
+  /**
+   * Assigns {@code profile}'s id: keeps the current one if the name still slugs to the same base
+   * (so a cosmetic edit or reorder doesn't churn ids); otherwise mints a fresh unique slug and
+   * records the old id as an alias.
+   */
+  private void assignId(ConnectionProfile profile, Set<String> taken) {
+    String base = slugify(profile.getName());
+    String current = profile.getId();
+    if (current != null && !taken.contains(current)) {
+      String priorName = options.get(PROFILE_PREFIX + current + ".name", null);
+      if (priorName != null && slugify(priorName).equals(base)) {
+        return; // name unchanged — keep the existing (possibly suffixed) id
+      }
+    }
+    String id = makeUnique(base, taken);
+    profile.setId(id); // set first so addAlias doesn't reject the old id as "the current id"
+    if (current != null && !current.equals(id)) {
+      profile.addAlias(current);
+    }
+  }
+
+  private static String slugify(String name) {
+    if (name == null) {
+      return "server";
+    }
+    String slug = name.toLowerCase(Locale.ROOT)
+        .replaceAll("[^a-z0-9]+", "-")
+        .replaceAll("(^-+|-+$)", "");
+    return slug.isEmpty() ? "server" : slug;
+  }
+
+  private static String makeUnique(String base, Set<String> taken) {
+    if (!taken.contains(base)) {
+      return base;
+    }
+    for (int i = 2; ; i++) {
+      String candidate = base + "-" + i;
+      if (!taken.contains(candidate)) {
+        return candidate;
+      }
     }
   }
 
@@ -124,6 +176,57 @@ public final class ProfileStore {
 
   public void setDefaultProfileId(String id) {
     options.set(KEY_DEFAULT, id == null ? "" : id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Result-display preferences (global; the eXist-db Results view's starting state)
+  // ---------------------------------------------------------------------------
+
+  public String resultsMethod() {
+    return options.get("existdb.results.method", "adaptive");
+  }
+
+  public void setResultsMethod(String method) {
+    options.set("existdb.results.method", method);
+  }
+
+  public boolean resultsIndent() {
+    return Boolean.parseBoolean(options.get("existdb.results.indent", "true"));
+  }
+
+  public void setResultsIndent(boolean indent) {
+    options.set("existdb.results.indent", Boolean.toString(indent));
+  }
+
+  public int resultsPageSize() {
+    try {
+      return Integer.parseInt(options.get("existdb.results.pageSize", "10"));
+    } catch (NumberFormatException e) {
+      return 10;
+    }
+  }
+
+  public void setResultsPageSize(int pageSize) {
+    options.set("existdb.results.pageSize", Integer.toString(pageSize));
+  }
+
+  /** Where a query's results go by default: {@code "browse"} (Results view) or {@code "editor"}. */
+  public String resultsDestination() {
+    return options.get("existdb.results.destination", "browse");
+  }
+
+  public void setResultsDestination(String destination) {
+    options.set("existdb.results.destination", destination);
+  }
+
+  /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
+  public void addResultsPrefsListener(Runnable listener) {
+    resultsPrefsListeners.add(listener);
+  }
+
+  /** Signals that the result-display defaults were edited so listeners can re-apply them live. */
+  public void notifyResultsPrefsChanged() {
+    resultsPrefsListeners.forEach(Runnable::run);
   }
 
   // ---------------------------------------------------------------------------
@@ -169,7 +272,7 @@ public final class ProfileStore {
     } else {
       profile = new ConnectionProfile();
     }
-    profile.setId(newId());
+    // id left null so saveAll assigns the name-derived slug.
     List<ConnectionProfile> all = new ArrayList<>(List.of(profile));
     saveAll(all);
     setDefaultProfileId(profile.getId());
@@ -188,6 +291,10 @@ public final class ProfileStore {
         pass == null ? "" : pass,
         Boolean.parseBoolean(options.get(prefix + "acceptSelfSigned", "false")));
     profile.setId(id);
+    String aliases = options.get(prefix + "aliases", "");
+    if (!aliases.isBlank()) {
+      profile.setAliases(Arrays.asList(aliases.split(",")));
+    }
     return profile;
   }
 
@@ -199,10 +306,7 @@ public final class ProfileStore {
     String pass = profile.getPassword();
     options.set(prefix + "password", pass == null || pass.isEmpty() ? "" : encrypt.apply(pass));
     options.set(prefix + "acceptSelfSigned", Boolean.toString(profile.isAcceptSelfSigned()));
-  }
-
-  private static String newId() {
-    return UUID.randomUUID().toString();
+    options.set(prefix + "aliases", String.join(",", profile.getAliases()));
   }
 
   private static Options adapt(WSOptionsStorage storage) {

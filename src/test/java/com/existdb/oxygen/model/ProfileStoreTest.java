@@ -115,18 +115,19 @@ class ProfileStoreTest {
   }
 
   @Test
-  void backCompatSaveUpdatesDefaultProfileInPlace() {
+  void renameReslugsIdAndKeepsOldSlugAsAlias() {
     Map<String, String> backing = new HashMap<>();
     ProfileStore store = store(backing);
-    String originalId = store.load().getId();
+    String originalId = store.load().getId(); // "localhost-8080"
 
-    // ConnectionDialog produces a fresh profile with no id; save() must reuse the default's id.
     store.save(new ConnectionProfile("Renamed", "http://h/x", "admin", ""));
 
     List<ConnectionProfile> all = store.loadAll();
     assertEquals(1, all.size());
     assertEquals("Renamed", all.get(0).getName());
-    assertEquals(originalId, all.get(0).getId());
+    assertEquals("renamed", all.get(0).getId());
+    assertTrue(all.get(0).getAliases().contains(originalId));
+    assertEquals("renamed", store.defaultProfileId()); // the default follows the renamed server
   }
 
   @Test

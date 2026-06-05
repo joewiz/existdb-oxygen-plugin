@@ -99,7 +99,7 @@ public final class CompletionAction extends AbstractAction {
       @Override
       protected void done() {
         try {
-          List<ExistClient.Completion> proposals = LangServiceSupport.filterByPrefix(get(), prefix);
+          List<ExistClient.Completion> proposals = LangServiceSupport.filterAndSort(get(), prefix);
           if (proposals.isEmpty()) {
             workspace.showStatusMessage("eXist: no completions.");
           } else {

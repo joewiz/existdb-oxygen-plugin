@@ -21,18 +21,21 @@
  */
 package com.existdb.oxygen.ui;
 
-import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
-import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
-import java.awt.FlowLayout;
+import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,19 +44,24 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRadioButton;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
-import javax.swing.SwingWorker;
 import javax.swing.table.AbstractTableModel;
-import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.TableCellRenderer;
 
 /**
  * A single window for managing saved eXist servers — a Data Source Explorer-style "Connections"
@@ -64,23 +72,32 @@ import javax.swing.table.DefaultTableCellRenderer;
  */
 public final class ManageServersDialog {
 
+  private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
+  private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
+  private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
+
   private final transient Frame owner;
   private final transient ProfileStore store;
-  private final transient StandalonePluginWorkspace workspace;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
   // Oxygen's table paints the alternating row stripes and selection used across the workbench.
   private final JTable table = OxygenUIComponentsFactory.createTable(model);
+  private final JComboBox<String> methodPref =
+      OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(METHOD_LABELS));
+  private final JComboBox<Integer> pageSizePref =
+      OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
+  private final JRadioButton destBrowse = new JRadioButton("eXist-db Results pane");
+  private final JRadioButton destEditor = new JRadioButton("New editor window");
+  private final JCheckBox indentPref = new JCheckBox("Indent");
 
   private transient ConnectionProfile defaultProfile;
   private transient OKCancelDialog host;
   private transient Action moveUpAction;
   private transient Action moveDownAction;
 
-  private ManageServersDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
+  private ManageServersDialog(Frame owner, ProfileStore store) {
     this.owner = owner;
     this.store = store;
-    this.workspace = workspace;
     profiles.addAll(store.loadAll());
     String defaultId = store.defaultProfileId();
     for (ConnectionProfile p : profiles) {
@@ -94,8 +111,8 @@ public final class ManageServersDialog {
    * Opens the modal dialog. Returns {@code true} if the user clicked OK (changes persisted), so the
    * caller can refresh; {@code false} on Cancel/Escape.
    */
-  public static boolean open(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
-    ManageServersDialog controller = new ManageServersDialog(owner, store, workspace);
+  public static boolean open(Frame owner, ProfileStore store) {
+    ManageServersDialog controller = new ManageServersDialog(owner, store);
     return controller.show();
   }
 
@@ -119,24 +136,24 @@ public final class ManageServersDialog {
 
   private JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    // ApplicationTable stripes populated rows but not the empty area below the last row, even with
-    // fillsViewportHeight and Oxygen's scroll pane; the full-viewport striping the Data Source
-    // Explorer shows isn't reachable through the public SDK. Accepted as an SDK gap.
+    table.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        int row = table.rowAtPoint(e.getPoint());
+        if (e.getClickCount() == 2 && row >= 0) {
+          edit();
+        } else if (row >= 0 && table.columnAtPoint(e.getPoint()) == 2) {
+          setDefaultRow(row); // click the Default radio to choose the default server
+        }
+      }
+    });
     table.setFillsViewportHeight(true);
-    // Name compact, URL gets the room, Default a fixed narrow check column.
+    // Name compact, URL gets the room, Default a fixed narrow radio column.
     table.getColumnModel().getColumn(0).setPreferredWidth(150);
     table.getColumnModel().getColumn(1).setPreferredWidth(430);
     table.getColumnModel().getColumn(2).setMaxWidth(60);
     table.getColumnModel().getColumn(2).setPreferredWidth(60);
-    DefaultTableCellRenderer centered = new DefaultTableCellRenderer();
-    centered.setHorizontalAlignment(SwingConstants.CENTER);
-    table.getColumnModel().getColumn(2).setCellRenderer(centered);
-
-    // App-specific actions on the left as text buttons.
-    JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-    left.add(textButton("Sort A–Z", this::sort));
-    left.add(textButton("Set Default", this::setDefault));
-    left.add(textButton("Test", this::test));
+    table.getColumnModel().getColumn(2).setCellRenderer(radioRenderer());
 
     // Oxygen Data Sources-style flat icon toolbar on the right.
     JToolBar right = new JToolBar();
@@ -156,9 +173,10 @@ public final class ManageServersDialog {
     setDisabledIcon(down, "/images/DownGray16.png");
     right.add(up);
     right.add(down);
+    right.addSeparator();
+    right.add(iconButton("/images/Sort16.png", "Sort A–Z", this::sort));
 
     JPanel actions = new JPanel(new BorderLayout());
-    actions.add(left, BorderLayout.WEST);
     actions.add(right, BorderLayout.EAST);
 
     JPanel connections = new JPanel(new BorderLayout());
@@ -170,7 +188,96 @@ public final class ManageServersDialog {
 
     table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
     updateMoveEnabled();
-    return connections;
+
+    JPanel content = new JPanel(new BorderLayout());
+    content.add(connections, BorderLayout.CENTER);
+    content.add(buildResultPrefs(), BorderLayout.SOUTH);
+    return content;
+  }
+
+  /**
+   * The persisted query/result defaults (destination, serialization method, indent, page size).
+   * Laid out with {@link GridBagLayout} anchored {@code BASELINE_LEADING} so each row's labels,
+   * combos, and the (taller) Indent checkbox align on their text baseline — FlowLayout/BoxLayout
+   * only center vertically, which drops the checkbox's baseline below the labels'.
+   */
+  private JComponent buildResultPrefs() {
+    methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
+    indentPref.setSelected(store.resultsIndent());
+    pageSizePref.setSelectedItem(store.resultsPageSize());
+    boolean toEditor = "editor".equals(store.resultsDestination());
+    destEditor.setSelected(toEditor);
+    destBrowse.setSelected(!toEditor);
+    ButtonGroup destinationGroup = new ButtonGroup();
+    destinationGroup.add(destBrowse);
+    destinationGroup.add(destEditor);
+    // Compact, uniform combo widths (matching the results view); 90px fits the widest value, "100".
+    constrainWidth(methodPref, 120);
+    constrainWidth(pageSizePref, 90);
+
+    JPanel prefs = new JPanel(new GridBagLayout());
+    prefs.setBorder(BorderFactory.createTitledBorder("Query & result defaults"));
+    GridBagConstraints c = new GridBagConstraints();
+    c.insets = new Insets(2, 4, 2, 4);
+    c.anchor = GridBagConstraints.BASELINE_LEADING;
+
+    c.gridy = 0;
+    c.gridx = 0;
+    prefs.add(new JLabel("View results in:"), c);
+    c.gridx = 1;
+    prefs.add(destBrowse, c);
+    c.gridx = 2;
+    c.gridwidth = 3;
+    prefs.add(destEditor, c);
+    c.gridwidth = 1;
+
+    c.gridy = 1;
+    c.gridx = 0;
+    prefs.add(new JLabel("Serialization:"), c);
+    c.gridx = 1;
+    prefs.add(methodPref, c);
+    c.gridx = 2;
+    prefs.add(indentPref, c);
+    c.gridx = 3;
+    prefs.add(new JLabel("Results per page:"), c);
+    c.gridx = 4;
+    prefs.add(pageSizePref, c);
+    return prefs;
+  }
+
+  /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
+  private static void constrainWidth(JComponent component, int width) {
+    Dimension size = new Dimension(width, component.getPreferredSize().height);
+    component.setPreferredSize(size);
+    component.setMaximumSize(size);
+  }
+
+  private static int methodIndex(String method) {
+    for (int i = 0; i < METHOD_VALUES.length; i++) {
+      if (METHOD_VALUES[i].equals(method)) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  /** Renders the Default column as a centered radio button reflecting the chosen default server. */
+  private TableCellRenderer radioRenderer() {
+    return (table, value, selected, focused, row, column) -> {
+      JRadioButton radio = new JRadioButton();
+      radio.setHorizontalAlignment(SwingConstants.CENTER);
+      radio.setSelected(Boolean.TRUE.equals(value));
+      radio.setOpaque(true);
+      radio.setBackground(selected ? table.getSelectionBackground() : table.getBackground());
+      return radio;
+    };
+  }
+
+  private void setDefaultRow(int row) {
+    if (row >= 0 && row < profiles.size()) {
+      defaultProfile = profiles.get(row);
+      model.fireTableDataChanged();
+    }
   }
 
   /** Enables the move arrows only when the selection can actually move in that direction. */
@@ -178,15 +285,6 @@ public final class ManageServersDialog {
     int row = table.getSelectedRow();
     moveUpAction.setEnabled(row > 0);
     moveDownAction.setEnabled(row >= 0 && row < profiles.size() - 1);
-  }
-
-  private static JButton textButton(String label, Runnable action) {
-    return OxygenUIComponentsFactory.createButton(new AbstractAction(label) {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        action.run();
-      }
-    });
   }
 
   private static JButton iconButton(String resource, String tooltip, Runnable action) {
@@ -219,10 +317,16 @@ public final class ManageServersDialog {
     }
   }
 
-  /** Persists the working copy and the chosen default. */
+  /** Persists the working copy, the chosen default, and the result-display defaults. */
   private void commit() {
     store.saveAll(profiles);
     store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
+    store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
+    store.setResultsIndent(indentPref.isSelected());
+    store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
+    store.setResultsDestination(destEditor.isSelected() ? "editor" : "browse");
+    // Apply the new defaults to an already-open results view immediately, not just next restart.
+    store.notifyResultsPrefsChanged();
   }
 
   private ConnectionProfile selected() {
@@ -314,44 +418,6 @@ public final class ManageServersDialog {
     }
   }
 
-  private void setDefault() {
-    ConnectionProfile p = selected();
-    if (p != null) {
-      defaultProfile = p;
-      model.fireTableDataChanged();
-    }
-  }
-
-  private void test() {
-    ConnectionProfile p = selected();
-    if (p == null) {
-      return;
-    }
-    final ExistClient client = new ExistClient(p);
-    final String name = p.getName();
-    new SwingWorker<String, Void>() {
-      @Override
-      protected String doInBackground() throws Exception {
-        client.systemInfo();
-        return client.whoamiUser();
-      }
-
-      @Override
-      protected void done() {
-        try {
-          JOptionPane.showMessageDialog(host,
-              "Connected to \"" + name + "\". Authenticated as \"" + get() + "\".",
-              "Test connection", JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception ex) {
-          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-          JOptionPane.showMessageDialog(host, "Connection to \"" + name + "\" failed: "
-              + cause.getMessage(), "Test connection", JOptionPane.ERROR_MESSAGE);
-        }
-      }
-    }.execute();
-    workspace.showStatusMessage("Testing connection to " + name + "…");
-  }
-
   /** Table over the working profile list: Name, URL, and a check for the default server. */
   private final class ServerTableModel extends AbstractTableModel {
     private final String[] columns = {"Name", "URL", "Default"};
@@ -377,7 +443,7 @@ public final class ManageServersDialog {
       return switch (column) {
         case 0 -> p.getName();
         case 1 -> p.getBaseUrl();
-        default -> p == defaultProfile ? "✓" : "";
+        default -> p == defaultProfile; // Boolean: drives the Default-column radio
       };
     }
   }

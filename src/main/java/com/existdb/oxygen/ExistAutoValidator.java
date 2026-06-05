@@ -105,7 +105,13 @@ public final class ExistAutoValidator {
    * compile-checked as XQuery.
    */
   static boolean isAutoValidated(URL editorLocation) {
-    if (editorLocation == null || !"exist".equals(editorLocation.getProtocol())) {
+    return editorLocation != null && "exist".equals(editorLocation.getProtocol())
+        && isXQuery(editorLocation);
+  }
+
+  /** True if the location's extension is an XQuery one, regardless of protocol (exist:, file:, …). */
+  static boolean isXQuery(URL editorLocation) {
+    if (editorLocation == null) {
       return false;
     }
     String form = editorLocation.toExternalForm();

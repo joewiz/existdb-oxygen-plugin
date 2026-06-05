@@ -381,6 +381,38 @@ public final class ExistClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Search (existdb-openapi /api/search — sitewide full-text)
+  // ---------------------------------------------------------------------------
+
+  /** One full-text search hit: the owning app, a title, a highlighted snippet, and the DB path. */
+  public record SearchHit(String app, String title, String snippet, String path) {
+  }
+
+  /** A page of search results plus the total match count reported by the server. */
+  public record SearchResults(int total, List<SearchHit> hits) {
+  }
+
+  /**
+   * GET /api/search — sitewide full-text search. Returns up to {@code limit} hits (with snippets and
+   * DB paths) plus the total match count.
+   */
+  public SearchResults search(String query, int limit) throws IOException, InterruptedException {
+    HttpResponse<String> r =
+        send(request("/search?q=" + enc(query) + "&limit=" + limit).GET().build());
+    JSONObject o = new JSONObject(r.body());
+    JSONArray arr = o.optJSONArray("results");
+    List<SearchHit> hits = new ArrayList<>();
+    if (arr != null) {
+      for (int i = 0; i < arr.length(); i++) {
+        JSONObject h = arr.getJSONObject(i);
+        hits.add(new SearchHit(h.optString("app", ""), h.optString("title", ""),
+            h.optString("snippet", ""), h.optString("path", "")));
+      }
+    }
+    return new SearchResults(o.optInt("total", hits.size()), hits);
+  }
+
+  // ---------------------------------------------------------------------------
   // Language services (existdb-openapi /api/langservice/*, LSP-isomorphic shapes)
   // ---------------------------------------------------------------------------
 
@@ -388,9 +420,14 @@ public final class ExistClient {
   public record Diagnostic(int line, int column, int severity, String code, String message) {
   }
 
-  /** A completion proposal. {@code kind} is an LSP {@code CompletionItemKind}. */
+  /**
+   * A completion proposal. {@code kind} is an LSP {@code CompletionItemKind}; {@code filterText} is
+   * what the client matches the typed token against (the local name, so bare {@code cou} matches
+   * {@code fn:count}); {@code sortText} orders the list. Servers without existdb-openapi #42 omit the
+   * latter two, so they fall back to the label's local name and the label respectively.
+   */
   public record Completion(String label, int kind, String detail, String documentation,
-      String insertText) {
+      String insertText, String filterText, String sortText) {
   }
 
   /** Hover info for a position: signature/documentation text plus the symbol kind. */
@@ -423,11 +460,25 @@ public final class ExistClient {
     List<Completion> out = new ArrayList<>(arr.length());
     for (int i = 0; i < arr.length(); i++) {
       JSONObject o = arr.getJSONObject(i);
-      out.add(new Completion(o.optString("label", ""), o.optInt("kind", 0),
+      String label = o.optString("label", "");
+      out.add(new Completion(label, o.optInt("kind", 0),
           o.optString("detail", null), o.optString("documentation", null),
-          o.optString("insertText", o.optString("label", ""))));
+          o.optString("insertText", label),
+          o.optString("filterText", localName(label)),
+          o.optString("sortText", label)));
     }
     return out;
+  }
+
+  /** The local name of a completion label: drops any namespace prefix and {@code #arity} suffix. */
+  private static String localName(String label) {
+    String name = label;
+    int colon = name.lastIndexOf(':');
+    if (colon >= 0) {
+      name = name.substring(colon + 1);
+    }
+    int hash = name.indexOf('#');
+    return hash >= 0 ? name.substring(0, hash) : name;
   }
 
   /** POST /api/langservice/hover — signature/docs at a position, or {@code null} if none. */

@@ -32,6 +32,7 @@ import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
+import ro.sync.exml.workspace.api.listeners.WSEditorListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -144,6 +145,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     loadServers();
 
     // Link with Editor: when enabled, follow editor focus by revealing the matching tree node.
+    // Also: when an exist: editor opens, watch for saves so a newly-created resource appears in the
+    // tree without a manual Refresh.
     workspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorSelected(URL editorLocation) {
@@ -154,7 +157,49 @@ public final class ExistdbBrowserPanel extends JPanel {
       public void editorActivated(URL editorLocation) {
         revealIfLinked(editorLocation);
       }
+
+      @Override
+      public void editorOpened(URL editorLocation) {
+        watchForSaves(editorLocation);
+      }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+  }
+
+  /** Attaches a save listener to an {@code exist:} editor so saves refresh its collection in the tree. */
+  private void watchForSaves(URL editorLocation) {
+    if (editorLocation == null
+        || LangServiceSupport.serverId(editorLocation.toString()).isEmpty()) {
+      return; // not an exist: resource
+    }
+    WSEditor editor =
+        workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (editor != null) {
+      editor.addEditorListener(new WSEditorListener() {
+        @Override
+        public void editorSaved(int operationType) {
+          showSavedResource(editorLocation);
+        }
+      });
+    }
+  }
+
+  /** Inserts a just-saved resource into its (already-loaded) parent collection node if not shown. */
+  private void showSavedResource(URL editorLocation) {
+    String systemId = editorLocation.toString();
+    String serverId = LangServiceSupport.serverId(systemId);
+    String dbPath = LangServiceSupport.dbPath(systemId);
+    if (serverId.isEmpty() || dbPath.isEmpty()) {
+      return;
+    }
+    DefaultMutableTreeNode parentNode = findNode(serverId, parentPath(dbPath));
+    if (parentNode == null || !(parentNode.getUserObject() instanceof ExistNode parent)
+        || !parent.loaded) {
+      return;
+    }
+    String name = dbPath.substring(dbPath.lastIndexOf('/') + 1);
+    if (childNamed(parentNode, name) == null) {
+      insertChild(parentNode, serverId, dbPath, name, false);
+    }
   }
 
   private JComponent buildToolbar() {
@@ -177,6 +222,17 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     };
+    Action searchAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/Search16.png"));
+        putValue(SHORT_DESCRIPTION, "Search eXist-db (full-text)");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        SearchDialog.open(ownerFrame(), profileStore, workspace);
+      }
+    };
     Action gearAction = new AbstractAction() {
       {
         // The Data Source Explorer's gear-with-menu-lines glyph.
@@ -191,6 +247,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     };
 
     // Oxygen's factory buttons inherit the workbench's flat rollover (and toggle) styling exactly.
+    JButton search = OxygenUIComponentsFactory.createToolbarButton(searchAction, false);
     JButton link = OxygenUIComponentsFactory.createToolbarToggleButton(linkAction, false);
     JButton gear = OxygenUIComponentsFactory.createToolbarButton(gearAction, false);
 
@@ -198,6 +255,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     bar.setFloatable(false);
     bar.setRollover(true);
     bar.add(Box.createHorizontalGlue());
+    bar.add(search);
     bar.add(link);
     bar.addSeparator();
     bar.add(gear);
@@ -275,7 +333,7 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   /** Opens the unified server-management window, then rebuilds the tree if the user saved changes. */
   private void manageServers() {
-    if (ManageServersDialog.open(ownerFrame(), profileStore, workspace)) {
+    if (ManageServersDialog.open(ownerFrame(), profileStore)) {
       loadServers();
     }
   }
@@ -312,6 +370,9 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("Download…", () -> downloadResource(existNode)));
     }
     menu.add(menuItem("Copy Path", () -> copyToClipboard(existNode.path)));
+    if (!existNode.collection) {
+      menu.add(menuItem("Copy edit-in-oxygen Link", () -> copyToClipboard(editInOxygenLink(existNode))));
+    }
     if (!DB_ROOT.equals(existNode.path)) {
       menu.addSeparator();
       menu.add(menuItem("Rename…", () -> renameNode(node, existNode)));
@@ -325,6 +386,20 @@ public final class ExistdbBrowserPanel extends JPanel {
     JMenuItem item = new JMenuItem(label);
     item.addActionListener(e -> action.run());
     return item;
+  }
+
+  /**
+   * An {@code edit-in-oxygen:exist://…} deep link for a resource — Oxygen's OS-registered protocol
+   * (macOS) opens the wrapped {@code exist:} URL in the running editor, so the link can live in a web
+   * page, email, etc.
+   */
+  private String editInOxygenLink(ExistNode existNode) {
+    try {
+      return "edit-in-oxygen:"
+          + ExistURLStreamHandler.toUrl(existNode.serverId, existNode.path).toExternalForm();
+    } catch (IOException e) {
+      return "";
+    }
   }
 
   private void copyToClipboard(String text) {
@@ -396,6 +471,7 @@ public final class ExistdbBrowserPanel extends JPanel {
           if (parent != null) {
             treeModel.removeNodeFromParent(node);
           }
+          offerToCloseDeletedEditors(existNode);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Delete failed: " + cause.getMessage());
@@ -468,6 +544,57 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
       workspace.showStatusMessage("Duplicated as " + name);
     }, "Duplicate failed");
+  }
+
+  /**
+   * After a delete, offers to close any open editors that pointed at the removed resource (or, for a
+   * collection, anything under it). Choosing "No" keeps them open so the user can re-save and thereby
+   * re-create the resource — Oxygen otherwise gives no "Missing File" prompt for the {@code exist:}
+   * scheme.
+   */
+  private void offerToCloseDeletedEditors(ExistNode existNode) {
+    for (WSEditor editor : affectedEditors(existNode)) {
+      String dbPath = LangServiceSupport.dbPath(editor.getEditorLocation().toString());
+      // Mirror Oxygen's native Missing-File prompt (wording, Yes = keep open).
+      int choice = JOptionPane.showConfirmDialog(this,
+          "The following resource no longer exists in the database:\n" + dbPath
+              + "\n\nKeep it open in the editor?",
+          "Missing File", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+      if (choice == JOptionPane.YES_OPTION) {
+        editor.setModified(true); // mark dirty so a save re-creates the resource
+      } else {
+        editor.close(false);
+      }
+    }
+  }
+
+  private List<WSEditor> affectedEditors(ExistNode existNode) {
+    List<WSEditor> affected = new ArrayList<>();
+    URL[] locations = workspace.getAllEditorLocations(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (locations == null) {
+      return affected;
+    }
+    for (URL location : locations) {
+      if (matchesDeleted(existNode, location)) {
+        WSEditor editor =
+            workspace.getEditorAccess(location, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+        if (editor != null) {
+          affected.add(editor);
+        }
+      }
+    }
+    return affected;
+  }
+
+  private static boolean matchesDeleted(ExistNode existNode, URL location) {
+    String systemId = location.toString();
+    if (!existNode.serverId.equals(LangServiceSupport.serverId(systemId))) {
+      return false;
+    }
+    String dbPath = LangServiceSupport.dbPath(systemId);
+    return existNode.collection
+        ? dbPath.equals(existNode.path) || dbPath.startsWith(existNode.path + "/")
+        : dbPath.equals(existNode.path);
   }
 
   // ---------------------------------------------------------------------------

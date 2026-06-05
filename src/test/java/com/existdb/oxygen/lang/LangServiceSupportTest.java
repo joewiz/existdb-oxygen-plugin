@@ -23,7 +23,6 @@ package com.existdb.oxygen.lang;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.existdb.oxygen.client.ExistClient;
@@ -122,33 +121,46 @@ class LangServiceSupportTest {
     assertEquals("", LangServiceSupport.trailingIdentifier("1 + "));
   }
 
-  // ---- filterByPrefix ----
+  // ---- filterAndSort ----
 
   @Test
-  void filterByPrefixKeepsMatchingLabels() {
+  void filterAndSortMatchesLocalNameByFilterText() {
     List<ExistClient.Completion> all = List.of(
         completion("util:log"), completion("util:eval"), completion("fn:count"));
-    List<ExistClient.Completion> filtered = LangServiceSupport.filterByPrefix(all, "util:");
-    assertEquals(2, filtered.size());
-    assertTrue(filtered.stream().allMatch(c -> c.label().startsWith("util:")));
+    // Typed "util:lo" → local "lo" matches util:log's filterText "log" only.
+    List<ExistClient.Completion> filtered = LangServiceSupport.filterAndSort(all, "util:lo");
+    assertEquals(1, filtered.size());
+    assertEquals("util:log", filtered.get(0).label());
   }
 
   @Test
-  void filterByPrefixIsCaseInsensitive() {
+  void filterAndSortBarePrefixMatchesLocalName() {
     List<ExistClient.Completion> all = List.of(completion("util:log"), completion("fn:count"));
-    assertEquals(1, LangServiceSupport.filterByPrefix(all, "UTIL:").size());
+    // Bare "cou" matches fn:count's filterText "count".
+    List<ExistClient.Completion> filtered = LangServiceSupport.filterAndSort(all, "cou");
+    assertEquals(1, filtered.size());
+    assertEquals("fn:count", filtered.get(0).label());
   }
 
   @Test
-  void filterByPrefixReturnsAllWhenPrefixEmpty() {
+  void filterAndSortIsCaseInsensitive() {
     List<ExistClient.Completion> all = List.of(completion("util:log"), completion("fn:count"));
-    assertSame(all, LangServiceSupport.filterByPrefix(all, ""));
+    assertEquals(1, LangServiceSupport.filterAndSort(all, "COU").size());
   }
 
   @Test
-  void filterByPrefixFallsBackToAllWhenNothingMatches() {
+  void filterAndSortReturnsAllSortedWhenLocalEmpty() {
+    // A namespace-only token ("util:") has an empty local part; the server already scoped it.
+    List<ExistClient.Completion> all = List.of(completion("fn:count"), completion("util:eval"));
+    List<ExistClient.Completion> result = LangServiceSupport.filterAndSort(all, "util:");
+    assertEquals(2, result.size());
+    assertEquals("fn:count", result.get(0).label()); // sorted by sortText (= label)
+  }
+
+  @Test
+  void filterAndSortFallsBackToAllWhenNothingMatches() {
     List<ExistClient.Completion> all = List.of(completion("util:log"), completion("fn:count"));
-    assertSame(all, LangServiceSupport.filterByPrefix(all, "zzz"));
+    assertEquals(2, LangServiceSupport.filterAndSort(all, "zzz").size());
   }
 
   // ---- cleanMessage ----
@@ -186,6 +198,7 @@ class LangServiceSupportTest {
   }
 
   private static ExistClient.Completion completion(String label) {
-    return new ExistClient.Completion(label, 3, null, null, label);
+    String local = label.contains(":") ? label.substring(label.lastIndexOf(':') + 1) : label;
+    return new ExistClient.Completion(label, 3, null, null, label, local, label);
   }
 }
