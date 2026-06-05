@@ -42,10 +42,14 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
@@ -62,9 +66,11 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
+import javax.swing.JViewport;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -106,6 +112,12 @@ public final class ExistResultsView extends JPanel {
   private final JLabel metricsLabel = new JLabel(" ");
   private final JPanel rows = new JPanel();
   private final transient List<JPanel> rowPanels = new ArrayList<>();
+  private final transient List<QueryRunner.Item> pageItems = new ArrayList<>();
+  private final JScrollPane scrollPane = OxygenUIComponentsFactory.createScrollPane(rows,
+      ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+      ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+  private final JLayeredPane layered = new JLayeredPane();
+  private final JButton floatingCopy;
 
   private transient ExistClient client;
   private transient String serverId;
@@ -155,12 +167,80 @@ public final class ExistResultsView extends JPanel {
     rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
     rows.setBackground(Color.WHITE);
 
+    floatingCopy = buildFloatingCopy();
+    layered.add(scrollPane, JLayeredPane.DEFAULT_LAYER);
+    layered.add(floatingCopy, JLayeredPane.PALETTE_LAYER);
+    layered.addComponentListener(new ComponentAdapter() {
+      @Override
+      public void componentResized(ComponentEvent e) {
+        scrollPane.setBounds(0, 0, layered.getWidth(), layered.getHeight());
+        positionFloatingCopy();
+      }
+    });
+    // Keep the floating button glued to the viewport's right edge as the user scrolls.
+    scrollPane.getViewport().addChangeListener(e -> positionFloatingCopy());
+
     add(buildToolbar(), BorderLayout.NORTH);
-    add(OxygenUIComponentsFactory.createScrollPane(rows,
-        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
+    add(layered, BorderLayout.CENTER);
     add(buildMetricsBar(), BorderLayout.SOUTH);
     updateNavState();
+  }
+
+  /** A small copy button that floats over the right edge of the viewport for the selected result. */
+  private JButton buildFloatingCopy() {
+    JButton button = OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
+      {
+        ImageIcon ic = icon("/images/Copy16.png");
+        if (ic != null) {
+          putValue(SMALL_ICON, ic);
+        } else {
+          putValue(NAME, "Copy");
+        }
+        putValue(SHORT_DESCRIPTION, "Copy this result to the clipboard");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        copySelectedResult();
+      }
+    }, false);
+    button.setOpaque(true);
+    button.setBackground(Color.WHITE);
+    button.setBorder(BorderFactory.createLineBorder(new Color(0xC8, 0xCE, 0xD6)));
+    button.setVisible(false);
+    return button;
+  }
+
+  private void copySelectedResult() {
+    int i = selectedIndex - currentStart;
+    if (i >= 0 && i < pageItems.size()) {
+      Toolkit.getDefaultToolkit().getSystemClipboard()
+          .setContents(new StringSelection(pageItems.get(i).value()), null);
+      workspace.showStatusMessage("Copied result " + selectedIndex);
+    }
+  }
+
+  /** Places the floating copy button at the viewport's right edge, level with the selected row. */
+  private void positionFloatingCopy() {
+    int i = selectedIndex - currentStart;
+    if (i < 0 || i >= rowPanels.size()) {
+      floatingCopy.setVisible(false);
+      return;
+    }
+    JViewport viewport = scrollPane.getViewport();
+    Rectangle visible = viewport.getViewRect();
+    Rectangle rowBounds = rowPanels.get(i).getBounds();
+    if (!visible.intersects(rowBounds)) {
+      floatingCopy.setVisible(false);
+      return;
+    }
+    Point viewportTopLeft = SwingUtilities.convertPoint(viewport, 0, 0, layered);
+    int width = floatingCopy.getPreferredSize().width;
+    int height = floatingCopy.getPreferredSize().height;
+    int x = viewportTopLeft.x + viewport.getWidth() - width - 6;
+    int y = viewportTopLeft.y + Math.max(0, rowBounds.y - visible.y) + 4;
+    floatingCopy.setBounds(x, y, width, height);
+    floatingCopy.setVisible(true);
   }
 
   private JComponent buildToolbar() {
@@ -317,6 +397,8 @@ public final class ExistResultsView extends JPanel {
     currentStart = startIndex;
     rows.removeAll();
     rowPanels.clear();
+    pageItems.clear();
+    pageItems.addAll(items);
     for (int i = 0; i < items.size(); i++) {
       JPanel row = buildRow(startIndex + i, items.get(i), method);
       rowPanels.add(row);
@@ -356,7 +438,12 @@ public final class ExistResultsView extends JPanel {
     final JPanel target = selectedRow;
     if (target != null) {
       // getBounds() is in the rows panel's coordinate space, so scroll on the parent.
-      SwingUtilities.invokeLater(() -> rows.scrollRectToVisible(target.getBounds()));
+      SwingUtilities.invokeLater(() -> {
+        rows.scrollRectToVisible(target.getBounds());
+        positionFloatingCopy();
+      });
+    } else {
+      floatingCopy.setVisible(false);
     }
     updateNavState();
   }
@@ -386,30 +473,9 @@ public final class ExistResultsView extends JPanel {
     area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
     ResultHighlighter.apply(area.getStyledDocument(), value,
         ResultHighlighter.languageFor(method, value));
+    // Per-result copy is provided by the floating button that tracks the selected row, so it stays
+    // visible at the viewport's right edge even when a result is wider than the view.
     row.add(area, BorderLayout.CENTER);
-
-    JButton copy = OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
-      {
-        ImageIcon ic = icon("/images/Copy16.png");
-        if (ic != null) {
-          putValue(SMALL_ICON, ic);
-        } else {
-          putValue(NAME, "Copy");
-        }
-        putValue(SHORT_DESCRIPTION, "Copy this result to the clipboard");
-      }
-
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        Toolkit.getDefaultToolkit().getSystemClipboard()
-            .setContents(new StringSelection(value), null);
-        workspace.showStatusMessage("Copied result " + number);
-      }
-    }, false);
-    JPanel copyHolder = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
-    copyHolder.setOpaque(false);
-    copyHolder.add(copy);
-    row.add(copyHolder, BorderLayout.EAST);
     return row;
   }
 
