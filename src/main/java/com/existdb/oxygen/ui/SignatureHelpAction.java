@@ -32,9 +32,13 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.Color;
 import java.awt.Point;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowFocusListener;
 import java.awt.geom.Rectangle2D;
 import java.util.List;
 
@@ -65,6 +69,9 @@ public final class SignatureHelpAction extends AbstractAction {
   private transient Popup popup;
   /** Whether a hint is currently showing — gates the caret-driven active-parameter refresh. */
   private transient boolean showing;
+  /** While a hint is up, dismiss it when its top-level window is deactivated (app/window switch). */
+  private transient Window hintWindow;
+  private transient WindowFocusListener windowListener;
 
   public SignatureHelpAction(StandalonePluginWorkspace workspace) {
     super("Parameter Hints (eXist-db)");
@@ -144,6 +151,27 @@ public final class SignatureHelpAction extends AbstractAction {
       popup.hide();
       popup = null;
     }
+    if (hintWindow != null && windowListener != null) {
+      hintWindow.removeWindowFocusListener(windowListener);
+    }
+    hintWindow = null;
+    windowListener = null;
+  }
+
+  /** Hides the hint when its top-level window is deactivated (switching window/app, Apple menu, …). */
+  private void watchWindow(JTextComponent component) {
+    Window window = SwingUtilities.getWindowAncestor(component);
+    if (window == null) {
+      return;
+    }
+    windowListener = new WindowAdapter() {
+      @Override
+      public void windowLostFocus(WindowEvent e) {
+        hide();
+      }
+    };
+    hintWindow = window;
+    window.addWindowFocusListener(windowListener);
   }
 
   /**
@@ -240,6 +268,7 @@ public final class SignatureHelpAction extends AbstractAction {
       popup = PopupFactory.getSharedInstance().getPopup(component, label, x, y);
       popup.show();
       showing = true;
+      watchWindow(component);
     } catch (BadLocationException e) {
       hide();
     }
