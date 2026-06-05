@@ -187,6 +187,27 @@ public final class ExistClient {
         o.optString("mime-type", null));
   }
 
+  /** A resource's raw bytes plus the server-declared MIME type (from the streaming endpoint). */
+  public record RawResource(byte[] bytes, String mimeType) {
+  }
+
+  /**
+   * GET /api/db/resource/{path} — fetches the resource's <em>raw bytes</em> (path-in-URL streaming
+   * endpoint). Correct for binary resources (images, PDFs, fonts) where the JSON envelope's text
+   * {@code content} is lossy. Throws {@link ExistHttpException} on non-2xx (404 for a missing
+   * resource).
+   */
+  public RawResource getResourceBytes(String dbPath) throws IOException, InterruptedException {
+    HttpRequest req = request("/db/resource/" + encPath(dbPath)).GET().build();
+    HttpResponse<byte[]> resp = sendBytes(req);
+    int code = resp.statusCode();
+    if (code < 200 || code >= 300) {
+      throw new ExistHttpException(code, req.method() + " " + req.uri().getPath(),
+          new String(resp.body(), StandardCharsets.UTF_8));
+    }
+    return new RawResource(resp.body(), resp.headers().firstValue("Content-Type").orElse(null));
+  }
+
   /** DELETE /api/db/resource?path=… — removes a stored resource. Throws on non-2xx. */
   public void deleteResource(String dbPath) throws IOException, InterruptedException {
     send(request("/db/resource?path=" + enc(dbPath)).DELETE().build());
@@ -584,5 +605,36 @@ public final class ExistClient {
 
   private static String enc(String s) {
     return URLEncoder.encode(s, StandardCharsets.UTF_8);
+  }
+
+  /** Encodes a DB path for a path-in-URL endpoint: per-segment, preserving slashes (space → %20). */
+  private static String encPath(String dbPath) {
+    String path = dbPath.startsWith("/") ? dbPath.substring(1) : dbPath;
+    StringBuilder out = new StringBuilder();
+    for (String segment : path.split("/")) {
+      if (out.length() > 0) {
+        out.append('/');
+      }
+      out.append(enc(segment).replace("+", "%20"));
+    }
+    return out.toString();
+  }
+
+  private HttpResponse<byte[]> sendBytes(HttpRequest req) throws IOException, InterruptedException {
+    try {
+      return java.security.AccessController.doPrivileged(
+          (java.security.PrivilegedExceptionAction<HttpResponse<byte[]>>) () ->
+              http.send(req, HttpResponse.BodyHandlers.ofByteArray()));
+    } catch (java.security.PrivilegedActionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof IOException io) {
+        throw io;
+      }
+      if (cause instanceof InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        throw ie;
+      }
+      throw new IOException(cause);
+    }
   }
 }

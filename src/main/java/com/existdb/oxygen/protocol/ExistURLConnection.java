@@ -65,9 +65,11 @@ final class ExistURLConnection extends URLConnection {
     }
     ExistClient client = requireClient();
     try {
-      ExistClient.ResourceContent rc = client.getResource(dbPath());
-      this.mimeType = rc.mimeType();
-      this.content = rc.content().getBytes(StandardCharsets.UTF_8);
+      // Fetch raw bytes (streaming endpoint) so binary resources — images referenced from an
+      // Author-mode document, PDFs, fonts — aren't corrupted by the JSON envelope's text content.
+      ExistClient.RawResource rr = client.getResourceBytes(dbPath());
+      this.mimeType = rr.mimeType();
+      this.content = rr.bytes();
     } catch (ExistHttpException e) {
       // Honor the URLConnection contract: a missing resource is FileNotFoundException, not a
       // generic error. This lets Oxygen show its "Missing File — keep open?" prompt and still
