@@ -47,7 +47,7 @@ class MarkdownRendererTest {
   void rendersCodeBlockBoldListAndInlineCode() {
     String html = MarkdownRenderer.toHtml(HOVER);
     assertTrue(html.startsWith("<html>"), "wrapped in html");
-    assertTrue(html.contains("<pre"), "fenced block becomes <pre>");
+    assertTrue(html.contains("font-family:monospace"), "fenced block becomes a monospace block");
     assertTrue(html.contains("util:log($priority as xs:string"), "signature preserved");
     assertTrue(html.contains("<b>Parameters</b>"), "**Parameters** becomes bold");
     assertTrue(html.contains("<ul"), "bullets become a list");

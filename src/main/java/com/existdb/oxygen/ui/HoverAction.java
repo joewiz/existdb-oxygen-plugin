@@ -97,12 +97,12 @@ public final class HoverAction extends AbstractAction {
         try {
           ExistClient.Hover hover = get();
           if (hover == null) {
-            workspace.showStatusMessage("eXist: no documentation for the symbol under the caret.");
+            workspace.showStatusMessage("eXist-db: no documentation for the symbol under the caret.");
           } else {
             showHoverPopup(component, caret, hover.contents());
           }
         } catch (Exception e) {
-          workspace.showErrorMessage("eXist function documentation failed: " + e.getMessage());
+          workspace.showErrorMessage("eXist-db function documentation failed: " + e.getMessage());
         }
       }
     }.execute();
@@ -117,8 +117,11 @@ public final class HoverAction extends AbstractAction {
 
     JScrollPane scroll = new JScrollPane(pane);
     scroll.setBorder(BorderFactory.createLineBorder(new Color(0xC8, 0xCE, 0xD6)));
-    int lines = contents.split("\n").length + 2;
-    scroll.setPreferredSize(new Dimension(460, Math.min(240, Math.max(56, lines * 18))));
+    // No horizontal scrollbar: the HTML wraps to the popup's width instead of spilling over; a
+    // vertical scrollbar appears only if the (wrapped) content is taller than the cap.
+    scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+    int lines = contents.split("\n").length + 3; // a little headroom for wrapped long lines
+    scroll.setPreferredSize(new Dimension(460, Math.min(260, Math.max(56, lines * 18))));
 
     JPopupMenu popup = new JPopupMenu();
     popup.setLayout(new BorderLayout());

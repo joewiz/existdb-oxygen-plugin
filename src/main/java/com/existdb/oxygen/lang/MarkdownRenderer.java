@@ -87,8 +87,10 @@ public final class MarkdownRenderer {
   }
 
   private static void appendCode(StringBuilder out, StringBuilder code) {
-    out.append("<pre style='font-family:monospace;font-size:11px;margin:2px 0'>")
-        .append(escape(code.toString().stripTrailing())).append("</pre>");
+    // A monospace block that *wraps* (unlike <pre>), so a long signature reflows instead of forcing
+    // a horizontal scrollbar in the hover popup. Internal newlines are kept as <br>.
+    out.append("<div style='font-family:monospace;font-size:11px;margin:2px 0'>")
+        .append(escape(code.toString().stripTrailing()).replace("\n", "<br>")).append("</div>");
   }
 
   private static void closeList(StringBuilder out, State state) {

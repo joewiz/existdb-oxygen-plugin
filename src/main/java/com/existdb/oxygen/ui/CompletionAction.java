@@ -113,12 +113,12 @@ public final class CompletionAction extends AbstractAction {
           // the field with the local name already typed before the caret (e.g. "w" of "util:w").
           List<ExistClient.Completion> proposals = LangServiceSupport.filterAndSort(get(), "");
           if (proposals.isEmpty()) {
-            workspace.showStatusMessage("eXist: no completions.");
+            workspace.showStatusMessage("eXist-db: no completions.");
           } else {
             showPopup(component, caret, proposals, LangServiceSupport.localName(prefix));
           }
         } catch (Exception e) {
-          workspace.showErrorMessage("eXist completion failed: " + e.getMessage());
+          workspace.showErrorMessage("eXist-db completion failed: " + e.getMessage());
         }
       }
     }.execute();
