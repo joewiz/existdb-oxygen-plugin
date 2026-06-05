@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.lang.LangServiceSupport;
+import com.existdb.oxygen.lang.MarkdownRenderer;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.editor.page.WSEditorPage;
@@ -108,7 +109,7 @@ public final class HoverAction extends AbstractAction {
   }
 
   private static void showHoverPopup(JTextComponent component, int caret, String contents) {
-    JEditorPane pane = new JEditorPane("text/html", toHtml(contents));
+    JEditorPane pane = new JEditorPane("text/html", MarkdownRenderer.toHtml(contents));
     pane.setEditable(false);
     pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
     pane.setBackground(Color.WHITE);
@@ -117,7 +118,7 @@ public final class HoverAction extends AbstractAction {
     JScrollPane scroll = new JScrollPane(pane);
     scroll.setBorder(BorderFactory.createLineBorder(new Color(0xC8, 0xCE, 0xD6)));
     int lines = contents.split("\n").length + 2;
-    scroll.setPreferredSize(new Dimension(460, Math.min(220, Math.max(56, lines * 18))));
+    scroll.setPreferredSize(new Dimension(460, Math.min(240, Math.max(56, lines * 18))));
 
     JPopupMenu popup = new JPopupMenu();
     popup.setLayout(new BorderLayout());
@@ -129,39 +130,6 @@ public final class HoverAction extends AbstractAction {
     } catch (BadLocationException e) {
       // Cannot place the popup; skip.
     }
-  }
-
-  /**
-   * Renders hover {@code contents} (a signature line, a blank line, then a description) as a small
-   * HTML card: a bold monospace signature above a sans-serif description, like eXide's F1 doc.
-   */
-  private static String toHtml(String contents) {
-    String signature = contents;
-    String body = "";
-    int blank = contents.indexOf("\n\n");
-    if (blank >= 0) {
-      signature = contents.substring(0, blank).strip();
-      body = contents.substring(blank + 2).strip();
-    } else {
-      int nl = contents.indexOf('\n');
-      if (nl >= 0) {
-        signature = contents.substring(0, nl).strip();
-        body = contents.substring(nl + 1).strip();
-      }
-    }
-    StringBuilder html = new StringBuilder(
-        "<html><body style='font-family:sans-serif;font-size:11px;margin:7px'>");
-    html.append("<div style='font-family:monospace;font-weight:bold;color:#202020'>")
-        .append(escape(signature)).append("</div>");
-    if (!body.isEmpty()) {
-      html.append("<div style='margin-top:7px;color:#333333'>")
-          .append(escape(body).replace("\n", "<br>")).append("</div>");
-    }
-    return html.append("</body></html>").toString();
-  }
-
-  private static String escape(String s) {
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
   }
 
   private static WSTextEditorPage textPage(WSEditor editor) {

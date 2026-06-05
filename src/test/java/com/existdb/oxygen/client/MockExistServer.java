@@ -135,7 +135,19 @@ public final class MockExistServer implements AutoCloseable {
     });
     handle(prefix + "/langservice/hover", ex -> {
       lastLangBody = readBody(ex);
-      respond(ex, 200, "{\"contents\":\"fn:count(...)\",\"kind\":\"function\"}");
+      // LSP MarkupContent (existdb-openapi #44): contents is an object, not a flat string.
+      respond(ex, 200, "{\"contents\":{\"kind\":\"markdown\","
+          + "\"value\":\"```xquery\\nfn:count($arg as item()*) as xs:integer\\n```\\n\\n"
+          + "Returns the number of items.\"}}");
+    });
+    handle(prefix + "/langservice/signature-help", ex -> {
+      lastLangBody = readBody(ex);
+      respond(ex, 200, "{\"signatures\":[{\"label\":"
+          + "\"fn:count($arg as item()*) as xs:integer\","
+          + "\"documentation\":{\"kind\":\"markdown\",\"value\":\"Counts items.\"},"
+          + "\"parameters\":[{\"label\":\"$arg as item()*\","
+          + "\"documentation\":{\"kind\":\"markdown\",\"value\":\"The input sequence\"}}]}],"
+          + "\"activeSignature\":0,\"activeParameter\":0}");
     });
     handle(prefix + "/langservice/definition", ex -> {
       lastLangBody = readBody(ex);

@@ -485,8 +485,21 @@ public final class ExistClient {
       String insertText, String filterText, String sortText) {
   }
 
-  /** Hover info for a position: signature/documentation text plus the symbol kind. */
-  public record Hover(String contents, String kind) {
+  /** Hover info for a position: the symbol's documentation as LSP {@code MarkupContent} Markdown. */
+  public record Hover(String contents) {
+  }
+
+  /** LSP {@code SignatureHelp}: the candidate signatures and which signature/parameter is active. */
+  public record SignatureHelp(List<SignatureInfo> signatures, int activeSignature,
+      int activeParameter) {
+  }
+
+  /** One signature: its full label, Markdown documentation, and ordered parameters. */
+  public record SignatureInfo(String label, String documentation, List<ParameterInfo> parameters) {
+  }
+
+  /** One parameter of a signature: its label (e.g. {@code $arg as xs:string}) and Markdown docs. */
+  public record ParameterInfo(String label, String documentation) {
   }
 
   /** A definition location. {@code line}/{@code column} are 0-based; {@code uri} is the DB path. */
@@ -546,8 +559,55 @@ public final class ExistClient {
     if (o == null) {
       return null;
     }
-    String contents = o.optString("contents", "");
-    return contents.isEmpty() ? null : new Hover(contents, o.optString("kind", null));
+    // LSP MarkupContent (existdb-openapi PR #44): contents is {kind: "markdown", value: "…"}.
+    JSONObject markup = o.optJSONObject("contents");
+    if (markup == null) {
+      return null;
+    }
+    String value = markup.optString("value", "");
+    return value.isEmpty() ? null : new Hover(value);
+  }
+
+  /**
+   * POST /api/langservice/signature-help — the signature(s) for the call enclosing the cursor, with
+   * the active parameter index (existdb-openapi PR #44). Returns {@code null} when the cursor isn't
+   * inside a function call's argument list (the server replies with {@code null}).
+   */
+  public SignatureHelp signatureHelp(String expression, int line, int column, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONObject body = langBody(expression, moduleLoadPath);
+    body.put("line", line);
+    body.put("column", column);
+    JSONObject o = asObject(postLang("/langservice/signature-help", body));
+    if (o == null) {
+      return null;
+    }
+    JSONArray sigs = o.optJSONArray("signatures");
+    if (sigs == null || sigs.isEmpty()) {
+      return null;
+    }
+    List<SignatureInfo> signatures = new ArrayList<>(sigs.length());
+    for (int i = 0; i < sigs.length(); i++) {
+      JSONObject sig = sigs.getJSONObject(i);
+      JSONArray params = sig.optJSONArray("parameters");
+      List<ParameterInfo> parameters = new ArrayList<>(params == null ? 0 : params.length());
+      for (int j = 0; params != null && j < params.length(); j++) {
+        JSONObject p = params.getJSONObject(j);
+        parameters.add(new ParameterInfo(p.optString("label", ""), markupValue(p.opt("documentation"))));
+      }
+      signatures.add(new SignatureInfo(sig.optString("label", ""),
+          markupValue(sig.opt("documentation")), parameters));
+    }
+    return new SignatureHelp(signatures, o.optInt("activeSignature", 0),
+        o.optInt("activeParameter", 0));
+  }
+
+  /** The text of an LSP documentation field, which is either a {@code MarkupContent} or a string. */
+  private static String markupValue(Object value) {
+    if (value instanceof JSONObject markup) {
+      return markup.optString("value", "");
+    }
+    return value == null || JSONObject.NULL.equals(value) ? "" : value.toString();
   }
 
   /** POST /api/langservice/definition — the symbol's definition site, or {@code null} if none. */

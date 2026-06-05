@@ -204,12 +204,24 @@ class ExistClientTest {
   }
 
   @Test
-  void hoverSendsPositionAndParsesContents() throws Exception {
+  void hoverSendsPositionAndParsesMarkdownContents() throws Exception {
     ExistClient.Hover h = client.hover("fn:count(1)", 0, 3, null);
-    assertEquals("function", h.kind());
     assertTrue(h.contents().contains("fn:count"));
+    assertTrue(h.contents().contains("```xquery"));
     assertTrue(server.lastLangBody().contains("\"line\":0"));
     assertTrue(server.lastLangBody().contains("\"column\":3"));
+  }
+
+  @Test
+  void signatureHelpParsesSignaturesAndActiveParameter() throws Exception {
+    ExistClient.SignatureHelp help = client.signatureHelp("fn:count(", 0, 9, null);
+    assertEquals(1, help.signatures().size());
+    assertEquals(0, help.activeParameter());
+    ExistClient.SignatureInfo sig = help.signatures().get(0);
+    assertTrue(sig.label().contains("fn:count"));
+    assertEquals(1, sig.parameters().size());
+    assertEquals("$arg as item()*", sig.parameters().get(0).label());
+    assertEquals("The input sequence", sig.parameters().get(0).documentation());
   }
 
   @Test

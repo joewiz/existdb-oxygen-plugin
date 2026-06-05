@@ -30,6 +30,7 @@ import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 import com.existdb.oxygen.ui.RunInResultsViewAction;
+import com.existdb.oxygen.ui.SignatureHelpAction;
 
 import ro.sync.ecss.extensions.api.AuthorAccess;
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
@@ -113,6 +114,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
+    final SignatureHelpAction signatureHelpAction = new SignatureHelpAction(pluginWorkspace);
 
     // Wire editor shortcuts onto each text page as it opens / switches to Text mode (the menu was
     // removed, so accelerators are bound on the editor component): Cmd/Ctrl+Enter evaluates the
@@ -123,6 +125,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK);
     final KeyStroke completionShortcutAlt = KeyStroke.getKeyStroke(KeyEvent.VK_SLASH,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.ALT_DOWN_MASK);
+    // Cmd/Ctrl+Shift+Space re-summons parameter hints (they also pop automatically while typing).
+    final KeyStroke signatureShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_SPACE,
+        Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK);
     evaluateQueryAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
     installFunctionDocF1(pluginWorkspace, hoverAction);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
@@ -130,6 +135,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       public void editorOpened(URL editorLocation) {
         bindShortcuts(pluginWorkspace, editorLocation);
         watchSelection(pluginWorkspace, editorLocation, evaluateQueryAction);
+        watchSignatureHelp(pluginWorkspace, editorLocation, signatureHelpAction);
         evaluateQueryAction.refreshEnabled();
       }
 
@@ -137,6 +143,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       public void editorPageChanged(URL editorLocation) {
         bindShortcuts(pluginWorkspace, editorLocation);
         watchSelection(pluginWorkspace, editorLocation, evaluateQueryAction);
+        watchSignatureHelp(pluginWorkspace, editorLocation, signatureHelpAction);
         evaluateQueryAction.refreshEnabled();
       }
 
@@ -161,6 +168,8 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             completionAction);
         bindShortcut(workspace, editorLocation, completionShortcutAlt, "existComplete",
             completionAction);
+        bindShortcut(workspace, editorLocation, signatureShortcut, "existSignatureHelp",
+            signatureHelpAction);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
 
@@ -174,6 +183,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             popUp.add(evaluateQueryAction);
             popUp.add(goToDefinitionAction);
             popUp.add(completionAction);
+            popUp.add(signatureHelpAction);
             popUp.add(hoverAction);
           }
 
@@ -257,6 +267,20 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         && component.getClientProperty(SELECTION_WATCH_KEY) == null) {
       component.putClientProperty(SELECTION_WATCH_KEY, Boolean.TRUE);
       component.addCaretListener(e -> action.refreshEnabled());
+    }
+  }
+
+  /** Attaches the auto parameter-hint trigger to an XQuery editor's text component (idempotent). */
+  private static void watchSignatureHelp(StandalonePluginWorkspace workspace, URL editorLocation,
+      SignatureHelpAction action) {
+    if (!ExistAutoValidator.isXQuery(editorLocation)) {
+      return;
+    }
+    WSEditor editor =
+        workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
+        && page.getTextComponent() instanceof JTextComponent component) {
+      action.watch(component);
     }
   }
 
