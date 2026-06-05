@@ -152,15 +152,18 @@ public final class SignatureHelpAction extends AbstractAction {
     final int caret = component.getCaretPosition();
     final String text = component.getText();
     final String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
-    final int line;
-    final int column;
-    try {
-      // Oxygen positions are 1-based; the language service expects 0-based.
-      line = page.getLineOfOffset(caret) - 1;
-      column = page.getColumnOfOffset(caret) - 1;
-    } catch (BadLocationException e) {
-      return;
+    // Compute the 0-based line/column directly from the caret offset. Signature-help needs the exact
+    // position (the column right after the call's "("); Oxygen's getColumnOfOffset is off by one for
+    // this purpose, and hover only tolerates it because it snaps to the surrounding token.
+    int lineStart = text.lastIndexOf('\n', caret - 1) + 1;
+    final int column = caret - lineStart;
+    int newlines = 0;
+    for (int i = 0; i < caret && i < text.length(); i++) {
+      if (text.charAt(i) == '\n') {
+        newlines++;
+      }
     }
+    final int line = newlines;
 
     new SwingWorker<ExistClient.SignatureHelp, Void>() {
       @Override
