@@ -43,6 +43,7 @@ import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -337,6 +338,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   private JPopupMenu contextMenu(DefaultMutableTreeNode node, ExistNode existNode) {
     JPopupMenu menu = new JPopupMenu();
     if (existNode.collection) {
+      menu.add(menuItem("New File…", () -> newResource(node, existNode)));
+      menu.add(menuItem("New Collection…", () -> newCollection(node, existNode)));
+      menu.addSeparator();
       menu.add(menuItem("Refresh", () -> reloadNode(node)));
     } else {
       menu.add(menuItem("Open", this::openSelected));
@@ -345,6 +349,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     menu.add(menuItem("Copy Path", () -> copyToClipboard(existNode.path)));
     if (!DB_ROOT.equals(existNode.path)) {
       menu.addSeparator();
+      menu.add(menuItem("Rename…", () -> renameNode(node, existNode)));
+      menu.add(menuItem("Duplicate", () -> duplicateNode(node, existNode)));
       menu.add(menuItem("Delete…", () -> deleteNode(node, existNode)));
     }
     return menu;
@@ -431,6 +437,207 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
+  }
+
+  private void newResource(DefaultMutableTreeNode node, ExistNode coll) {
+    final ExistClient client = clientOrWarn(coll.serverId);
+    if (client == null) {
+      return;
+    }
+    String name = promptName("New File", "File name (e.g. data.xml):", "");
+    if (name == null) {
+      return;
+    }
+    final String path = coll.path + "/" + name;
+    final String mime = MimeTypes.byName(name);
+    final String content = seedContent(name, mime);
+    runMutation(() -> client.putResource(path, content, mime), () -> {
+      showNewChild(node, coll, name, false);
+      openPath(coll.serverId, path);
+      workspace.showStatusMessage("Created " + path);
+    }, "Could not create file");
+  }
+
+  private void newCollection(DefaultMutableTreeNode node, ExistNode coll) {
+    final ExistClient client = clientOrWarn(coll.serverId);
+    if (client == null) {
+      return;
+    }
+    String name = promptName("New Collection", "Collection name:", "");
+    if (name == null) {
+      return;
+    }
+    final String path = coll.path + "/" + name;
+    runMutation(() -> client.createCollection(path), () -> {
+      showNewChild(node, coll, name, true);
+      workspace.showStatusMessage("Created " + path);
+    }, "Could not create collection");
+  }
+
+  private void renameNode(DefaultMutableTreeNode node, ExistNode existNode) {
+    final ExistClient client = clientOrWarn(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    String name = promptName("Rename", "New name:", existNode.name);
+    if (name == null || name.equals(existNode.name)) {
+      return;
+    }
+    final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
+    runMutation(() -> client.rename(existNode.path, name), () -> {
+      if (parent != null) {
+        treeModel.removeNodeFromParent(node);
+        insertChild(parent, existNode.serverId, parentPath(existNode.path) + "/" + name, name,
+            existNode.collection);
+      }
+      workspace.showStatusMessage("Renamed to " + name);
+    }, "Rename failed");
+  }
+
+  private void duplicateNode(DefaultMutableTreeNode node, ExistNode existNode) {
+    final ExistClient client = clientOrWarn(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
+    final String name = uniqueName(parent, "copy-of-" + existNode.name);
+    runMutation(() -> client.duplicate(existNode.path, name), () -> {
+      if (parent != null) {
+        insertChild(parent, existNode.serverId, parentPath(existNode.path) + "/" + name, name,
+            existNode.collection);
+      }
+      workspace.showStatusMessage("Duplicated as " + name);
+    }, "Duplicate failed");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Context-menu helpers
+  // ---------------------------------------------------------------------------
+
+  private ExistClient clientOrWarn(String serverId) {
+    ExistClient client = ExistContext.clientById(serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+    }
+    return client;
+  }
+
+  /** Prompts for a single path segment, rejecting blanks and names containing {@code /}. */
+  private String promptName(String title, String prompt, String initial) {
+    Object input = JOptionPane.showInputDialog(this, prompt, title,
+        JOptionPane.PLAIN_MESSAGE, null, null, initial);
+    if (input == null) {
+      return null;
+    }
+    String name = input.toString().trim();
+    if (name.isEmpty() || name.contains("/")) {
+      workspace.showErrorMessage("Please enter a name without a '/'.");
+      return null;
+    }
+    return name;
+  }
+
+  /** Minimal valid content for a new resource: empty XML is rejected, so seed a root element. */
+  private static String seedContent(String name, String mime) {
+    if (mime == null || !mime.contains("xml")) {
+      return "";
+    }
+    String base = name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name;
+    String root = base.matches("[A-Za-z_][\\w.-]*") ? base : "root";
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<" + root + "/>\n";
+  }
+
+  /** A name not already used by a sibling under {@code parent}, appending {@code -N} as needed. */
+  private static String uniqueName(DefaultMutableTreeNode parent, String desired) {
+    if (parent == null || !hasChildNamed(parent, desired)) {
+      return desired;
+    }
+    int dot = desired.lastIndexOf('.');
+    String stem = dot > 0 ? desired.substring(0, dot) : desired;
+    String ext = dot > 0 ? desired.substring(dot) : "";
+    for (int i = 2; ; i++) {
+      String candidate = stem + "-" + i + ext;
+      if (!hasChildNamed(parent, candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  private static boolean hasChildNamed(DefaultMutableTreeNode parent, String name) {
+    for (int i = 0; i < parent.getChildCount(); i++) {
+      if (parent.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode existNode
+          && existNode.name.equals(name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Inserts a freshly created child into a loaded collection node, sorted; expands if collapsed. */
+  private void showNewChild(DefaultMutableTreeNode node, ExistNode coll, String name,
+      boolean collection) {
+    if (coll.loaded) {
+      if (!hasChildNamed(node, name)) {
+        insertChild(node, coll.serverId, coll.path + "/" + name, name, collection);
+      }
+      tree.expandPath(new TreePath(node.getPath()));
+    } else {
+      // Not yet loaded — expanding loads its children, which will include the new one.
+      tree.expandPath(new TreePath(node.getPath()));
+    }
+  }
+
+  private void insertChild(DefaultMutableTreeNode parent, String serverId, String path, String name,
+      boolean collection) {
+    DefaultMutableTreeNode child =
+        new DefaultMutableTreeNode(new ExistNode(serverId, path, name, collection));
+    if (collection) {
+      addPlaceholder(child);
+    }
+    treeModel.insertNodeInto(child, parent, insertionIndex(parent, name, collection));
+  }
+
+  private void openPath(String serverId, String path) {
+    try {
+      openUrl(ExistURLStreamHandler.toUrl(serverId, path), path);
+    } catch (IOException ex) {
+      workspace.showErrorMessage("Created, but could not open " + path + ": " + ex.getMessage());
+    }
+  }
+
+  private void openUrl(URL url, String path) {
+    if (!workspace.open(url)) {
+      workspace.showErrorMessage("Oxygen declined to open " + path);
+    }
+  }
+
+  /** Runs a database mutation off the EDT, then {@code onSuccess} on the EDT, or reports the error. */
+  private void runMutation(Mutation mutation, Runnable onSuccess, String errorPrefix) {
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() throws Exception {
+        mutation.run();
+        return null;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          get();
+          onSuccess.run();
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage(errorPrefix + ": " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /** A database mutation that may fail with a checked exception. */
+  @FunctionalInterface
+  private interface Mutation {
+    void run() throws IOException, InterruptedException;
   }
 
   // ---------------------------------------------------------------------------
@@ -707,7 +914,7 @@ public final class ExistdbBrowserPanel extends JPanel {
    */
   private static void relocate(ExistClient from, ExistClient to, ExistNodeRef source,
       String dest, String parent, boolean copy, boolean sameServer)
-      throws java.io.IOException, InterruptedException {
+      throws IOException, InterruptedException {
     if (sameServer) {
       try {
         if (copy) {
@@ -728,7 +935,7 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   /** Recursively copies a resource/collection from one server to another (client-side). */
   private static void crossServerCopy(ExistClient from, ExistClient to, String sourcePath,
-      String destPath, boolean collection) throws java.io.IOException, InterruptedException {
+      String destPath, boolean collection) throws IOException, InterruptedException {
     if (collection) {
       to.createCollection(destPath);
       for (ExistClient.ChildEntry child : from.listChildren(sourcePath)) {
@@ -746,7 +953,7 @@ public final class ExistdbBrowserPanel extends JPanel {
    * XML — e.g. non-well-formed HTML, which eXist would otherwise try to parse as XML and reject.
    */
   private static void putResourceTolerant(ExistClient client, String path, String content,
-      String mime) throws java.io.IOException, InterruptedException {
+      String mime) throws IOException, InterruptedException {
     try {
       client.putResource(path, content, mime);
     } catch (ExistHttpException e) {
@@ -764,7 +971,7 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private static void deleteFrom(ExistClient client, String path, boolean collection)
-      throws java.io.IOException, InterruptedException {
+      throws IOException, InterruptedException {
     if (collection) {
       client.deleteCollection(path);
     } else {
@@ -886,7 +1093,7 @@ public final class ExistdbBrowserPanel extends JPanel {
    * collected in {@code skipped}.
    */
   private static int uploadRecursive(ExistClient client, String parentPath, File file,
-      List<String> skipped) throws java.io.IOException, InterruptedException {
+      List<String> skipped) throws IOException, InterruptedException {
     if (file.isDirectory()) {
       String collection = parentPath + "/" + file.getName();
       client.createCollection(collection);
