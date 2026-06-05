@@ -44,6 +44,7 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -74,9 +75,6 @@ public final class ManageServersDialog {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
-  private static final String[] DESTINATION_LABELS =
-      {"Browse Query Results", "Save Query Results to New Editor"};
-  private static final String[] DESTINATION_VALUES = {"browse", "editor"};
 
   private final transient Frame owner;
   private final transient ProfileStore store;
@@ -88,8 +86,8 @@ public final class ManageServersDialog {
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(METHOD_LABELS));
   private final JComboBox<Integer> pageSizePref =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
-  private final JComboBox<String> destinationPref =
-      OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(DESTINATION_LABELS));
+  private final JRadioButton destBrowse = new JRadioButton("eXist-db Results pane");
+  private final JRadioButton destEditor = new JRadioButton("New editor window");
   private final JCheckBox indentPref = new JCheckBox("Indent");
 
   private transient ConnectionProfile defaultProfile;
@@ -207,11 +205,15 @@ public final class ManageServersDialog {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
     indentPref.setSelected(store.resultsIndent());
     pageSizePref.setSelectedItem(store.resultsPageSize());
-    destinationPref.setSelectedIndex(destinationIndex(store.resultsDestination()));
+    boolean toEditor = "editor".equals(store.resultsDestination());
+    destEditor.setSelected(toEditor);
+    destBrowse.setSelected(!toEditor);
+    ButtonGroup destinationGroup = new ButtonGroup();
+    destinationGroup.add(destBrowse);
+    destinationGroup.add(destEditor);
     // Compact, uniform combo widths (matching the results view); 90px fits the widest value, "100".
     constrainWidth(methodPref, 120);
     constrainWidth(pageSizePref, 90);
-    constrainWidth(destinationPref, 230);
 
     JPanel prefs = new JPanel(new GridBagLayout());
     prefs.setBorder(BorderFactory.createTitledBorder("Query & result defaults"));
@@ -221,10 +223,12 @@ public final class ManageServersDialog {
 
     c.gridy = 0;
     c.gridx = 0;
-    prefs.add(new JLabel("Run queries:"), c);
+    prefs.add(new JLabel("View results in:"), c);
     c.gridx = 1;
-    c.gridwidth = 4;
-    prefs.add(destinationPref, c);
+    prefs.add(destBrowse, c);
+    c.gridx = 2;
+    c.gridwidth = 3;
+    prefs.add(destEditor, c);
     c.gridwidth = 1;
 
     c.gridy = 1;
@@ -239,15 +243,6 @@ public final class ManageServersDialog {
     c.gridx = 4;
     prefs.add(pageSizePref, c);
     return prefs;
-  }
-
-  private static int destinationIndex(String destination) {
-    for (int i = 0; i < DESTINATION_VALUES.length; i++) {
-      if (DESTINATION_VALUES[i].equals(destination)) {
-        return i;
-      }
-    }
-    return 0;
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
@@ -329,7 +324,7 @@ public final class ManageServersDialog {
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
     store.setResultsIndent(indentPref.isSelected());
     store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
-    store.setResultsDestination(DESTINATION_VALUES[destinationPref.getSelectedIndex()]);
+    store.setResultsDestination(destEditor.isSelected() ? "editor" : "browse");
     // Apply the new defaults to an already-open results view immediately, not just next restart.
     store.notifyResultsPrefsChanged();
   }
