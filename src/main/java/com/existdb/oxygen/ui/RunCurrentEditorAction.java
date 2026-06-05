@@ -155,8 +155,11 @@ public final class RunCurrentEditorAction extends AbstractAction {
     // 1-based line where the first item begins; the <results> wrapper, if added, occupies line 1.
     int line = wrapped ? 2 : 1;
     for (QueryRunner.Item item : items) {
-      rows.add(new DocumentPositionedInfo(
-          DocumentPositionedInfo.SEVERITY_INFO, rowMessage(item), systemId, line, 1));
+      // line/column = where the item begins (column 1, since items start a line); length = the
+      // item's full serialized character count, so double-clicking selects the whole element/value
+      // rather than just its first line.
+      rows.add(new DocumentPositionedInfo(DocumentPositionedInfo.SEVERITY_INFO, rowMessage(item),
+          systemId, line, 1, item.value().length()));
       line += lineAdvance(item.value());
     }
     ResultsManager resultsManager = workspace.getResultsManager();
