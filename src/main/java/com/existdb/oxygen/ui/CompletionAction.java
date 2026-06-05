@@ -293,6 +293,10 @@ public final class CompletionAction extends AbstractAction {
       }
       doc.remove(start, caret - start);
       doc.insertString(start, insertText, null);
+      // For a function call, drop the caret inside the parentheses (template-style) so the user can
+      // type arguments straight away; otherwise leave it at the end of the inserted text.
+      int paren = insertText.indexOf('(');
+      component.setCaretPosition(paren >= 0 ? start + paren + 1 : start + insertText.length());
       component.requestFocusInWindow();
     } catch (BadLocationException e) {
       // Insertion failed; leave the document unchanged.
