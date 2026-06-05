@@ -52,11 +52,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
-import javax.swing.ButtonGroup;
+import javax.swing.AbstractButton;
+import javax.swing.Box;
 import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -66,9 +71,9 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JToggleButton;
+import javax.swing.JToolBar;
 import javax.swing.JTree;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -101,6 +106,10 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** eXist's "X" logo for the top-level server nodes (falls back to Oxygen's DB-connection icon). */
   private static final ImageIcon SERVER_ICON =
       loadFirstIcon("/images/exist-server.png", "/images/DBConnection16.png");
+
+  /** Maps a file extension (lower-case) to one of Oxygen's bundled file-type icons, and caches them. */
+  private static final Map<String, String> TYPE_ICON_RESOURCES = buildTypeIconResources();
+  private static final Map<String, ImageIcon> TYPE_ICON_CACHE = new ConcurrentHashMap<>();
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -142,7 +151,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
   }
 
-  private JPanel buildToolbar() {
+  private JComponent buildToolbar() {
     JButton gear = new JButton();
     ImageIcon icon = loadFirstIcon("/images/Settings16.png");
     if (icon != null) {
@@ -172,10 +181,22 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
     });
 
-    JPanel bar = new JPanel(new BorderLayout());
-    bar.add(link, BorderLayout.WEST);
-    bar.add(gear, BorderLayout.EAST);
+    // Flat, compact buttons grouped on the right, matching Oxygen's Project view toolbar.
+    flatten(link);
+    flatten(gear);
+    JToolBar bar = new JToolBar();
+    bar.setFloatable(false);
+    bar.setRollover(true);
+    bar.add(Box.createHorizontalGlue());
+    bar.add(link);
+    bar.addSeparator();
+    bar.add(gear);
     return bar;
+  }
+
+  /** Drops the focus ring; the enclosing JToolBar gives the flat/rollover look like Oxygen's views. */
+  private static void flatten(AbstractButton button) {
+    button.setFocusable(false);
   }
 
   private void configureTree() {
@@ -249,114 +270,14 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private JPopupMenu gearMenu() {
     JPopupMenu menu = new JPopupMenu();
-    String selectedId = selectedServerId();
-    menu.add(menuItem("Add server…", this::addServer));
-    menu.add(menuItem("Edit server…", () -> editServer(selectedId)));
-    menu.add(menuItem("Duplicate server", () -> duplicateServer(selectedId)));
-    menu.add(menuItem("Remove server…", () -> removeServer(selectedId)));
-    menu.addSeparator();
-    menu.add(menuItem("Test connection", () -> testConnection(selectedId)));
-    List<ConnectionProfile> profiles = profileStore.loadAll();
-    if (profiles.size() > 1) {
-      menu.add(defaultServerMenu(profiles));
-    }
+    menu.add(menuItem("Manage servers…", this::manageServers));
     return menu;
   }
 
-  private JMenu defaultServerMenu(List<ConnectionProfile> profiles) {
-    JMenu submenu = new JMenu("Default server for unsaved queries");
-    ButtonGroup group = new ButtonGroup();
-    String defaultId = profileStore.defaultProfileId();
-    for (ConnectionProfile profile : profiles) {
-      JRadioButtonMenuItem item = new JRadioButtonMenuItem(profile.getName());
-      item.setSelected(profile.getId().equals(defaultId));
-      item.addActionListener(e -> {
-        profileStore.setDefaultProfileId(profile.getId());
-        ExistContext.setProfiles(profileStore.loadAll(), profile.getId());
-      });
-      group.add(item);
-      submenu.add(item);
-    }
-    return submenu;
-  }
-
-  private void addServer() {
-    ConnectionProfile created = ConnectionDialog.edit(ownerFrame(), new ConnectionProfile());
-    if (created != null) {
-      List<ConnectionProfile> profiles = profileStore.loadAll();
-      profiles.add(created);
-      profileStore.saveAll(profiles);
-      loadServers();
-    }
-  }
-
-  private void editServer(String serverId) {
-    ConnectionProfile profile = profileById(serverId);
-    if (profile == null) {
-      return;
-    }
-    ConnectionProfile edited = ConnectionDialog.edit(ownerFrame(), profile);
-    if (edited != null) {
-      edited.setId(serverId);
-      profileStore.saveAll(replace(profileStore.loadAll(), edited));
-      loadServers();
-    }
-  }
-
-  private void duplicateServer(String serverId) {
-    ConnectionProfile profile = profileById(serverId);
-    if (profile == null) {
-      return;
-    }
-    ConnectionProfile copy = new ConnectionProfile(profile.getName() + " copy",
-        profile.getBaseUrl(), profile.getUser(), profile.getPassword(), profile.isAcceptSelfSigned());
-    List<ConnectionProfile> profiles = profileStore.loadAll();
-    profiles.add(copy);
-    profileStore.saveAll(profiles);
+  /** Opens the unified server-management window, then rebuilds the tree from the saved servers. */
+  private void manageServers() {
+    ManageServersDialog.open(ownerFrame(), profileStore, workspace);
     loadServers();
-  }
-
-  private void removeServer(String serverId) {
-    ConnectionProfile profile = profileById(serverId);
-    if (profile == null) {
-      return;
-    }
-    int choice = JOptionPane.showConfirmDialog(this,
-        "Remove the server \"" + profile.getName() + "\"?",
-        "Remove server", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-    if (choice != JOptionPane.OK_OPTION) {
-      return;
-    }
-    List<ConnectionProfile> profiles = new ArrayList<>(profileStore.loadAll());
-    profiles.removeIf(p -> serverId.equals(p.getId()));
-    profileStore.saveAll(profiles);
-    loadServers();
-  }
-
-  private void testConnection(String serverId) {
-    final ExistClient client = ExistContext.clientById(serverId);
-    if (client == null) {
-      workspace.showInformationMessage("Select a server first.");
-      return;
-    }
-    workspace.showStatusMessage("Testing connection…");
-    new SwingWorker<String, Void>() {
-      @Override
-      protected String doInBackground() throws Exception {
-        client.systemInfo();
-        return client.whoamiUser();
-      }
-
-      @Override
-      protected void done() {
-        try {
-          workspace.showInformationMessage("Connected. Authenticated as: " + get());
-        } catch (Exception ex) {
-          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-          workspace.showErrorMessage("Connection failed: " + cause.getMessage());
-        }
-      }
-    }.execute();
   }
 
   // ---------------------------------------------------------------------------
@@ -1360,37 +1281,6 @@ public final class ExistdbBrowserPanel extends JPanel {
   // ---------------------------------------------------------------------------
 
   /** The server id of the selected node (walking up to its top-level server), or the first server. */
-  private String selectedServerId() {
-    if (tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
-        && node.getUserObject() instanceof ExistNode existNode) {
-      return existNode.serverId;
-    }
-    return rootNode.getChildCount() > 0
-        && ((DefaultMutableTreeNode) rootNode.getChildAt(0)).getUserObject() instanceof ExistNode first
-        ? first.serverId : null;
-  }
-
-  private ConnectionProfile profileById(String serverId) {
-    if (serverId == null) {
-      return null;
-    }
-    return profileStore.loadAll().stream()
-        .filter(p -> serverId.equals(p.getId()))
-        .findFirst()
-        .orElse(null);
-  }
-
-  private static List<ConnectionProfile> replace(List<ConnectionProfile> profiles,
-      ConnectionProfile edited) {
-    List<ConnectionProfile> out = new ArrayList<>(profiles);
-    for (int i = 0; i < out.size(); i++) {
-      if (out.get(i).getId() != null && out.get(i).getId().equals(edited.getId())) {
-        out.set(i, edited);
-      }
-    }
-    return out;
-  }
-
   private static void addPlaceholder(DefaultMutableTreeNode node) {
     node.add(new DefaultMutableTreeNode("Loading…"));
   }
@@ -1435,7 +1325,7 @@ public final class ExistdbBrowserPanel extends JPanel {
       return this;
     }
 
-    /** Server nodes get the DB-connection icon; collections folders; resources files. */
+    /** Server nodes get the eXist icon; collections folders; resources a per-extension type icon. */
     private javax.swing.Icon iconFor(ExistNode existNode, boolean expanded) {
       if (DB_ROOT.equals(existNode.path) && SERVER_ICON != null) {
         return SERVER_ICON;
@@ -1443,8 +1333,55 @@ public final class ExistdbBrowserPanel extends JPanel {
       if (existNode.collection) {
         return expanded ? getDefaultOpenIcon() : getDefaultClosedIcon();
       }
-      return getDefaultLeafIcon();
+      return fileIcon(existNode.name, getDefaultLeafIcon());
     }
+  }
+
+  private static Map<String, String> buildTypeIconResources() {
+    Map<String, String> m = new HashMap<>();
+    m.put("xml", "/images/XmlIcon16.png");
+    m.put("xq", "/images/XqueryIcon16.png");
+    m.put("xql", "/images/XqueryIcon16.png");
+    m.put("xqm", "/images/XqueryIcon16.png");
+    m.put("xquery", "/images/XqueryIcon16.png");
+    m.put("xsd", "/images/XsdIcon16.png");
+    m.put("xsl", "/images/XslIcon16.png");
+    m.put("xslt", "/images/XslIcon16.png");
+    m.put("html", "/images/HtmlIcon16.png");
+    m.put("htm", "/images/HtmlIcon16.png");
+    m.put("xhtml", "/images/XhtmlIcon16.png");
+    m.put("css", "/images/CssIcon16.png");
+    m.put("js", "/images/JsIcon16.png");
+    m.put("mjs", "/images/JsIcon16.png");
+    m.put("json", "/images/JsonIcon16.png");
+    m.put("dtd", "/images/DtdIcon16.png");
+    m.put("rng", "/images/RngIcon16.png");
+    m.put("rnc", "/images/RncIcon16.png");
+    m.put("sch", "/images/SchIcon16.png");
+    m.put("md", "/images/MDIcon16.png");
+    m.put("markdown", "/images/MDIcon16.png");
+    m.put("txt", "/images/TxtIcon16.png");
+    m.put("sql", "/images/SqlIcon16.png");
+    m.put("wsdl", "/images/WsdlIcon16.png");
+    m.put("yaml", "/images/YAMLIcon16.png");
+    m.put("yml", "/images/YAMLIcon16.png");
+    m.put("php", "/images/PhpIcon16.png");
+    return m;
+  }
+
+  /** The type icon for a resource name by extension, or {@code fallback} when none is mapped. */
+  private static javax.swing.Icon fileIcon(String name, javax.swing.Icon fallback) {
+    int dot = name.lastIndexOf('.');
+    if (dot < 0 || dot == name.length() - 1) {
+      return fallback;
+    }
+    String ext = name.substring(dot + 1).toLowerCase(Locale.ROOT);
+    String resource = TYPE_ICON_RESOURCES.get(ext);
+    if (resource == null) {
+      return fallback;
+    }
+    ImageIcon icon = TYPE_ICON_CACHE.computeIfAbsent(ext, k -> loadFirstIcon(resource));
+    return icon != null ? icon : fallback;
   }
 
   /** Tree node payload: which server it belongs to, its DB path/name, and lazy-load state. */
