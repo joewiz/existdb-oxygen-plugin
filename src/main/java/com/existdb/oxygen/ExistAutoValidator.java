@@ -112,7 +112,7 @@ public final class ExistAutoValidator {
   }
 
   /** True if the location's extension is an XQuery one, regardless of protocol (exist:, file:, …). */
-  static boolean isXQuery(URL editorLocation) {
+  public static boolean isXQuery(URL editorLocation) {
     if (editorLocation == null) {
       return false;
     }

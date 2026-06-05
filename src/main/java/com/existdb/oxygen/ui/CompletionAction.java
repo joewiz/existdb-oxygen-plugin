@@ -78,7 +78,7 @@ public final class CompletionAction extends AbstractAction {
   private final transient StandalonePluginWorkspace workspace;
 
   public CompletionAction(StandalonePluginWorkspace workspace) {
-    super("eXist Completion");
+    super("Content Completion (eXist-db)");
     this.workspace = workspace;
   }
 

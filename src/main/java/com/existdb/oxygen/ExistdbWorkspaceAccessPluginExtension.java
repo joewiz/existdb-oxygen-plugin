@@ -23,6 +23,7 @@ package com.existdb.oxygen;
 
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.ui.CompletionAction;
+import com.existdb.oxygen.ui.EvaluateQueryAction;
 import com.existdb.oxygen.ui.ExistResultsView;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
@@ -54,6 +55,7 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPopupMenu;
 import javax.swing.KeyStroke;
+import javax.swing.text.JTextComponent;
 
 /**
  * Wires the plugin into the Oxygen workspace: contributes the eXist-db collection view, the editor
@@ -65,6 +67,8 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
   /** Must match the view ids declared in plugin.xml. */
   private static final String VIEW_ID = "ExistdbBrowserViewID";
   private static final String RESULTS_VIEW_ID = "ExistdbResultsViewID";
+  /** Client-property flag so a text component's selection watcher is attached at most once. */
+  private static final String SELECTION_WATCH_KEY = "existdb.selectionWatch";
 
   @Override
   public void applicationStarted(final StandalonePluginWorkspace pluginWorkspace) {
@@ -96,32 +100,51 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       }
     });
 
-    final Action runCurrentEditorAction = new RunCurrentEditorAction(pluginWorkspace);
-    final Action runInResultsViewAction =
+    final RunCurrentEditorAction runCurrentEditorAction =
+        new RunCurrentEditorAction(pluginWorkspace);
+    final RunInResultsViewAction runInResultsViewAction =
         new RunInResultsViewAction(pluginWorkspace, resultsView, RESULTS_VIEW_ID);
+    // The single user-facing "evaluate" action routes results to the destination chosen in
+    // Configure eXist-db Connections (Browse Query Results / Save Query Results to New Editor).
+    final EvaluateQueryAction evaluateQueryAction = new EvaluateQueryAction(
+        pluginWorkspace, profileStore, runInResultsViewAction, runCurrentEditorAction);
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
 
     // Wire editor shortcuts onto each text page as it opens / switches to Text mode (the menu was
-    // removed, so accelerators are bound on the editor component): Cmd/Ctrl+Enter runs into the
-    // Results view; Ctrl+Space and Cmd/Ctrl+Alt+Slash trigger eXist-aware completion.
+    // removed, so accelerators are bound on the editor component): Cmd/Ctrl+Enter evaluates the
+    // query; Ctrl+Space and Cmd/Ctrl+Alt+Slash trigger eXist-aware completion.
     final KeyStroke runShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
     final KeyStroke completionShortcut =
         KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK);
     final KeyStroke completionShortcutAlt = KeyStroke.getKeyStroke(KeyEvent.VK_SLASH,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.ALT_DOWN_MASK);
-    runInResultsViewAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
+    evaluateQueryAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorOpened(URL editorLocation) {
         bindShortcuts(pluginWorkspace, editorLocation);
+        watchSelection(pluginWorkspace, editorLocation, evaluateQueryAction);
+        evaluateQueryAction.refreshEnabled();
       }
 
       @Override
       public void editorPageChanged(URL editorLocation) {
         bindShortcuts(pluginWorkspace, editorLocation);
+        watchSelection(pluginWorkspace, editorLocation, evaluateQueryAction);
+        evaluateQueryAction.refreshEnabled();
+      }
+
+      @Override
+      public void editorActivated(URL editorLocation) {
+        evaluateQueryAction.refreshEnabled();
+      }
+
+      @Override
+      public void editorClosed(URL editorLocation) {
+        evaluateQueryAction.refreshEnabled();
       }
 
       private void bindShortcuts(StandalonePluginWorkspace workspace, URL editorLocation) {
@@ -130,7 +153,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         if (!ExistAutoValidator.isXQuery(editorLocation)) {
           return;
         }
-        bindShortcut(workspace, editorLocation, runShortcut, "existRun", runInResultsViewAction);
+        bindShortcut(workspace, editorLocation, runShortcut, "existRun", evaluateQueryAction);
         bindShortcut(workspace, editorLocation, completionShortcut, "existComplete",
             completionAction);
         bindShortcut(workspace, editorLocation, completionShortcutAlt, "existComplete",
@@ -143,9 +166,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         new MenusAndToolbarsContributorCustomizer() {
           @Override
           public void customizeTextPopUpMenu(JPopupMenu popUp, WSTextEditorPage textPage) {
+            evaluateQueryAction.refreshEnabled();
             popUp.addSeparator();
-            popUp.add(runCurrentEditorAction);
-            popUp.add(runInResultsViewAction);
+            popUp.add(evaluateQueryAction);
             popUp.add(goToDefinitionAction);
             popUp.add(completionAction);
             popUp.add(hoverAction);
@@ -157,14 +180,14 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
           }
         });
 
-    // A toolbar button for one-click "Run Current Editor".
+    // A toolbar button for one-click "Evaluate Query with eXist-db".
     pluginWorkspace.addToolbarComponentsCustomizer(new ToolbarComponentsCustomizer() {
       @Override
       public void customizeToolbar(ToolbarInfo toolbarInfo) {
         if (!ToolbarComponentsCustomizer.CUSTOM.equals(toolbarInfo.getToolbarID())) {
           return;
         }
-        JButton runButton = new JButton(runCurrentEditorAction);
+        JButton runButton = new JButton(evaluateQueryAction);
         runButton.setHideActionText(true);
         JComponent[] existing = toolbarInfo.getComponents();
         JComponent[] updated = existing == null ? new JComponent[1]
@@ -188,6 +211,22 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       component.getInputMap(JComponent.WHEN_FOCUSED).put(shortcut, key);
       component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(shortcut, key);
       component.getActionMap().put(key, action);
+    }
+  }
+
+  /**
+   * Refreshes {@code action}'s enabled state as the selection changes in this editor, so the
+   * "Evaluate Query" toolbar button/menu enable when text is selected. Attached once per component.
+   */
+  private static void watchSelection(StandalonePluginWorkspace workspace, URL editorLocation,
+      EvaluateQueryAction action) {
+    WSEditor editor =
+        workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
+        && page.getTextComponent() instanceof JTextComponent component
+        && component.getClientProperty(SELECTION_WATCH_KEY) == null) {
+      component.putClientProperty(SELECTION_WATCH_KEY, Boolean.TRUE);
+      component.addCaretListener(e -> action.refreshEnabled());
     }
   }
 
