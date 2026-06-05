@@ -22,7 +22,9 @@
 package com.existdb.oxygen.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -48,5 +50,27 @@ class MimeTypesTest {
     assertNull(MimeTypes.byName("Makefile"));
     assertNull(MimeTypes.byName("/db/dir.with.dots/noext"));
     assertNull(MimeTypes.byName(null));
+  }
+
+  @Test
+  void textualForXQueryAndTextTypesEvenThoughEXistStoresXQueryAsBinary() {
+    // The crux of the .xq/.xqm open fix: eXist flags XQuery as binary, but it's textual source —
+    // so it must be read from the JSON envelope, not the (module-executing) streaming endpoint.
+    assertTrue(MimeTypes.isTextual("application/xquery"));
+    assertTrue(MimeTypes.isTextual("text/plain"));
+    assertTrue(MimeTypes.isTextual("application/xml"));
+    assertTrue(MimeTypes.isTextual("application/json"));
+    assertTrue(MimeTypes.isTextual("application/javascript"));
+    assertTrue(MimeTypes.isTextual("image/svg+xml"));
+    assertTrue(MimeTypes.isTextual("APPLICATION/XQUERY"));
+  }
+
+  @Test
+  void notTextualForGenuineBinaryTypes() {
+    assertFalse(MimeTypes.isTextual("image/png"));
+    assertFalse(MimeTypes.isTextual("application/pdf"));
+    assertFalse(MimeTypes.isTextual("application/octet-stream"));
+    assertFalse(MimeTypes.isTextual("font/woff2"));
+    assertFalse(MimeTypes.isTextual(null));
   }
 }

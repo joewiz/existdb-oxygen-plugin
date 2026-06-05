@@ -136,12 +136,17 @@ public final class LangServiceSupport {
   }
 
   /** The local name of a token: the part after the last {@code :} (a namespace prefix), if any. */
-  private static String localName(String token) {
+  public static String localName(String token) {
     if (token == null) {
       return "";
     }
     int colon = token.lastIndexOf(':');
     return colon >= 0 ? token.substring(colon + 1) : token;
+  }
+
+  /** Whether a proposal's local name starts with {@code lowerPrefix} (used for live type-to-filter). */
+  public static boolean matchesLocal(ExistClient.Completion c, String lowerPrefix) {
+    return lowerPrefix.isEmpty() || matchText(c).toLowerCase(Locale.ROOT).startsWith(lowerPrefix);
   }
 
   private static String matchText(ExistClient.Completion c) {

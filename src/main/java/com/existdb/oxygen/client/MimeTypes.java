@@ -58,6 +58,28 @@ public final class MimeTypes {
   private MimeTypes() {
   }
 
+  /**
+   * Whether a mime-type's content is textual UTF-8 source, so it can be read from the JSON
+   * envelope's {@code content} rather than the raw streaming endpoint. This matters because eXist
+   * stores XQuery (and some other text resources) as <em>binary</em> documents, yet the raw
+   * streaming endpoint <em>executes</em> {@code .xq}/{@code .xqm} on GET instead of returning their
+   * source — so XQuery (and any text type) must be read as text even when flagged binary.
+   */
+  public static boolean isTextual(String mimeType) {
+    if (mimeType == null) {
+      return false;
+    }
+    String m = mimeType.toLowerCase(Locale.ROOT);
+    return m.startsWith("text/")
+        || m.equals("application/xquery")
+        || m.equals("application/json")
+        || m.equals("application/javascript")
+        || m.equals("application/ecmascript")
+        || m.equals("application/xml")
+        || m.endsWith("+xml")
+        || m.endsWith("+json");
+  }
+
   /** The mime-type for a file name/path's extension, or {@code null} for an unknown extension. */
   public static String byName(String name) {
     if (name == null) {

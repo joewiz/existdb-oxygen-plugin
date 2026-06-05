@@ -199,6 +199,6 @@ class LangServiceSupportTest {
 
   private static ExistClient.Completion completion(String label) {
     String local = label.contains(":") ? label.substring(label.lastIndexOf(':') + 1) : label;
-    return new ExistClient.Completion(label, 3, null, null, label, local, label);
+    return new ExistClient.Completion(label, 3, null, null, label, local, label, 1);
   }
 }

@@ -124,7 +124,7 @@ public final class RunCurrentEditorAction extends AbstractAction {
 
   private void openResults(QueryRunner.QueryResult result, String serverId) {
     if (result.totalItems() == 0) {
-      workspace.showStatusMessage("eXist: the query returned no results.");
+      workspace.showStatusMessage("eXist-db: the query returned no results.");
       return;
     }
     boolean xml = QueryRunner.looksLikeXml(result.output());
@@ -143,10 +143,10 @@ public final class RunCurrentEditorAction extends AbstractAction {
       depositResults(resultsUrl, result.items(), wrapped, serverId);
     }
     if (result.truncated()) {
-      workspace.showStatusMessage("eXist: showing the first " + QueryRunner.MAX_ITEMS
+      workspace.showStatusMessage("eXist-db: showing the first " + QueryRunner.MAX_ITEMS
           + " of " + result.totalItems() + " items.");
     } else {
-      workspace.showStatusMessage("eXist: " + result.totalItems() + " item(s).");
+      workspace.showStatusMessage("eXist-db: " + result.totalItems() + " item(s).");
     }
   }
 

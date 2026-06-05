@@ -33,6 +33,20 @@ There are two ways to run a query through the plugin, and they behave differentl
 
 **Jumping to a result's source node.** From the **eXist-db XQuery Results** tab (Run Current Editor), double-clicking a row that came from a stored database node opens that node's source document and selects the originating element — in both Text and Author mode. This uses each result's `documentURI` + `nodeId` (from [existdb-openapi #43](https://github.com/eXist-db/existdb-openapi/pull/43), closing #40): the plugin resolves the node's canonical `fn:path()` XPath on demand and locates it in the opened document. It needs a server with #43; without it, those rows fall back to selecting the value in the serialized-output editor. (Oxygen's own **XPath/XQuery Builder** uses its built-in Results integration, which doesn't expose this stored-node jump — for source navigation, prefer Run Current Editor.)
 
+## Editor actions (XQuery)
+
+Right-click in an XQuery editor (or use the keyboard shortcuts) for the eXist-db language-service actions. They run against the editor's own `exist://` server, or the default server for a local file, so connect first via the eXist-db view. Shortcuts are shown for macOS; on Windows/Linux substitute Ctrl for ⌘ and Alt for ⌥. The actions appear in the order you typically reach for them while writing a query:
+
+| Action | Shortcut | What it does |
+|---|---|---|
+| **Content Completion (eXist-db)** | ⌥⌘/ | eXist-aware function/variable proposals from the connected server, scoped to what you've typed (a filter field narrows the list further). Accepting a function inserts its call with the argument placeholders, the first one selected to type over. (macOS reserves ⌃Space for input-source switching, so ⌥⌘/ is the reliable trigger.) |
+| **Parameter Hints (eXist-db)** | ⇧⌘Space | Shows the enclosing call's signature with the **active parameter** highlighted; also pops automatically as you type `(` and `,`, and follows the caret as you fill in arguments. |
+| **Hover Documentation (eXist-db)** | F1 | Documentation for the symbol under the caret — a function's signature + description, or a variable's inferred type (LSP `textDocument/hover`). Overrides Oxygen's default F1 help while an XQuery editor is focused. |
+| **Go to Definition (eXist-db)** | — | Jumps to where the symbol under the caret is defined (opening its source document if needed). |
+| **Evaluate Query (eXist-db)** | ⌘↩ | Runs the active editor (or its selection) and shows the results where you chose in **Configure eXist-db Connections** — the eXist-db Results pane or a new editor. |
+
+The completion, hover (rich Markdown with Parameters/Returns), parameter hints, and variable-type hover need a server with existdb-openapi [#42](https://github.com/eXist-db/existdb-openapi/pull/42), [#44](https://github.com/eXist-db/existdb-openapi/pull/44), and [#45](https://github.com/eXist-db/existdb-openapi/pull/45); they degrade gracefully (show nothing) against older servers.
+
 ## Roadmap
 
 Notional development goals, roughly by priority vs. effort. **P0 is the current MVP** (the Features above); P1–P4 are planned and may change.

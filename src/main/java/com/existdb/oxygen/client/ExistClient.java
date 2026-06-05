@@ -187,6 +187,27 @@ public final class ExistClient {
         o.optString("mime-type", null));
   }
 
+  /** A resource's raw bytes plus the server-declared MIME type (from the streaming endpoint). */
+  public record RawResource(byte[] bytes, String mimeType) {
+  }
+
+  /**
+   * GET /api/db/resource/{path} — fetches the resource's <em>raw bytes</em> (path-in-URL streaming
+   * endpoint). Correct for binary resources (images, PDFs, fonts) where the JSON envelope's text
+   * {@code content} is lossy. Throws {@link ExistHttpException} on non-2xx (404 for a missing
+   * resource).
+   */
+  public RawResource getResourceBytes(String dbPath) throws IOException, InterruptedException {
+    HttpRequest req = request("/db/resource/" + encPath(dbPath)).GET().build();
+    HttpResponse<byte[]> resp = sendBytes(req);
+    int code = resp.statusCode();
+    if (code < 200 || code >= 300) {
+      throw new ExistHttpException(code, req.method() + " " + req.uri().getPath(),
+          new String(resp.body(), StandardCharsets.UTF_8));
+    }
+    return new RawResource(resp.body(), resp.headers().firstValue("Content-Type").orElse(null));
+  }
+
   /** DELETE /api/db/resource?path=… — removes a stored resource. Throws on non-2xx. */
   public void deleteResource(String dbPath) throws IOException, InterruptedException {
     send(request("/db/resource?path=" + enc(dbPath)).DELETE().build());
@@ -269,6 +290,40 @@ public final class ExistClient {
         .header("Content-Type", "application/json")
         .PUT(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
         .build());
+  }
+
+  /**
+   * PUT /api/db/resource/{path} — stores a resource's <em>raw bytes</em> (path-in-URL streaming
+   * endpoint). Binary-safe, so use it for genuinely-binary resources (images, PDFs, fonts) that the
+   * JSON {@link #putResource} would corrupt by round-tripping through text. Throws on non-2xx.
+   */
+  public void putResourceBytes(String dbPath, byte[] bytes, String mimeType)
+      throws IOException, InterruptedException {
+    send(request("/db/resource/" + encPath(dbPath))
+        .header("Content-Type", mimeType != null && !mimeType.isEmpty()
+            ? mimeType : "application/octet-stream")
+        .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes))
+        .build());
+  }
+
+  /** A resource read as bytes (correctly text-or-binary) with its mime-type and binary flag. */
+  public record ResourceBytes(byte[] bytes, String mimeType, boolean binary) {
+  }
+
+  /**
+   * Reads a resource's bytes correctly for round-tripping: textual types (XQuery, XML, JSON,
+   * {@code text/*}) from the JSON envelope's UTF-8 content, and genuinely-binary types from the raw
+   * streaming endpoint. This avoids both lossy text round-tripping of binaries and the streaming
+   * endpoint's execution of XQuery modules.
+   */
+  public ResourceBytes readResource(String dbPath) throws IOException, InterruptedException {
+    ResourceContent rc = getResource(dbPath);
+    String mime = rc.mimeType() != null ? rc.mimeType() : MimeTypes.byName(dbPath);
+    if (rc.binary() && !MimeTypes.isTextual(mime)) {
+      RawResource raw = getResourceBytes(dbPath);
+      return new ResourceBytes(raw.bytes(), raw.mimeType() != null ? raw.mimeType() : mime, true);
+    }
+    return new ResourceBytes(rc.content().getBytes(StandardCharsets.UTF_8), mime, false);
   }
 
   // ---------------------------------------------------------------------------
@@ -427,11 +482,29 @@ public final class ExistClient {
    * latter two, so they fall back to the label's local name and the label respectively.
    */
   public record Completion(String label, int kind, String detail, String documentation,
-      String insertText, String filterText, String sortText) {
+      String insertText, String filterText, String sortText, int insertTextFormat) {
+
+    /** Whether {@code insertText} is an LSP snippet ({@code insertTextFormat == 2}, with tab stops). */
+    public boolean isSnippet() {
+      return insertTextFormat == 2;
+    }
   }
 
-  /** Hover info for a position: signature/documentation text plus the symbol kind. */
-  public record Hover(String contents, String kind) {
+  /** Hover info for a position: the symbol's documentation as LSP {@code MarkupContent} Markdown. */
+  public record Hover(String contents) {
+  }
+
+  /** LSP {@code SignatureHelp}: the candidate signatures and which signature/parameter is active. */
+  public record SignatureHelp(List<SignatureInfo> signatures, int activeSignature,
+      int activeParameter) {
+  }
+
+  /** One signature: its full label, Markdown documentation, and ordered parameters. */
+  public record SignatureInfo(String label, String documentation, List<ParameterInfo> parameters) {
+  }
+
+  /** One parameter of a signature: its label (e.g. {@code $arg as xs:string}) and Markdown docs. */
+  public record ParameterInfo(String label, String documentation) {
   }
 
   /** A definition location. {@code line}/{@code column} are 0-based; {@code uri} is the DB path. */
@@ -465,7 +538,8 @@ public final class ExistClient {
           o.optString("detail", null), o.optString("documentation", null),
           o.optString("insertText", label),
           o.optString("filterText", localName(label)),
-          o.optString("sortText", label)));
+          o.optString("sortText", label),
+          o.optInt("insertTextFormat", 1)));
     }
     return out;
   }
@@ -491,8 +565,55 @@ public final class ExistClient {
     if (o == null) {
       return null;
     }
-    String contents = o.optString("contents", "");
-    return contents.isEmpty() ? null : new Hover(contents, o.optString("kind", null));
+    // LSP MarkupContent (existdb-openapi PR #44): contents is {kind: "markdown", value: "…"}.
+    JSONObject markup = o.optJSONObject("contents");
+    if (markup == null) {
+      return null;
+    }
+    String value = markup.optString("value", "");
+    return value.isEmpty() ? null : new Hover(value);
+  }
+
+  /**
+   * POST /api/langservice/signature-help — the signature(s) for the call enclosing the cursor, with
+   * the active parameter index (existdb-openapi PR #44). Returns {@code null} when the cursor isn't
+   * inside a function call's argument list (the server replies with {@code null}).
+   */
+  public SignatureHelp signatureHelp(String expression, int line, int column, String moduleLoadPath)
+      throws IOException, InterruptedException {
+    JSONObject body = langBody(expression, moduleLoadPath);
+    body.put("line", line);
+    body.put("column", column);
+    JSONObject o = asObject(postLang("/langservice/signature-help", body));
+    if (o == null) {
+      return null;
+    }
+    JSONArray sigs = o.optJSONArray("signatures");
+    if (sigs == null || sigs.isEmpty()) {
+      return null;
+    }
+    List<SignatureInfo> signatures = new ArrayList<>(sigs.length());
+    for (int i = 0; i < sigs.length(); i++) {
+      JSONObject sig = sigs.getJSONObject(i);
+      JSONArray params = sig.optJSONArray("parameters");
+      List<ParameterInfo> parameters = new ArrayList<>(params == null ? 0 : params.length());
+      for (int j = 0; params != null && j < params.length(); j++) {
+        JSONObject p = params.getJSONObject(j);
+        parameters.add(new ParameterInfo(p.optString("label", ""), markupValue(p.opt("documentation"))));
+      }
+      signatures.add(new SignatureInfo(sig.optString("label", ""),
+          markupValue(sig.opt("documentation")), parameters));
+    }
+    return new SignatureHelp(signatures, o.optInt("activeSignature", 0),
+        o.optInt("activeParameter", 0));
+  }
+
+  /** The text of an LSP documentation field, which is either a {@code MarkupContent} or a string. */
+  private static String markupValue(Object value) {
+    if (value instanceof JSONObject markup) {
+      return markup.optString("value", "");
+    }
+    return value == null || JSONObject.NULL.equals(value) ? "" : value.toString();
   }
 
   /** POST /api/langservice/definition — the symbol's definition site, or {@code null} if none. */
@@ -584,5 +705,36 @@ public final class ExistClient {
 
   private static String enc(String s) {
     return URLEncoder.encode(s, StandardCharsets.UTF_8);
+  }
+
+  /** Encodes a DB path for a path-in-URL endpoint: per-segment, preserving slashes (space → %20). */
+  private static String encPath(String dbPath) {
+    String path = dbPath.startsWith("/") ? dbPath.substring(1) : dbPath;
+    StringBuilder out = new StringBuilder();
+    for (String segment : path.split("/")) {
+      if (out.length() > 0) {
+        out.append('/');
+      }
+      out.append(enc(segment).replace("+", "%20"));
+    }
+    return out.toString();
+  }
+
+  private HttpResponse<byte[]> sendBytes(HttpRequest req) throws IOException, InterruptedException {
+    try {
+      return java.security.AccessController.doPrivileged(
+          (java.security.PrivilegedExceptionAction<HttpResponse<byte[]>>) () ->
+              http.send(req, HttpResponse.BodyHandlers.ofByteArray()));
+    } catch (java.security.PrivilegedActionException e) {
+      Throwable cause = e.getCause();
+      if (cause instanceof IOException io) {
+        throw io;
+      }
+      if (cause instanceof InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        throw ie;
+      }
+      throw new IOException(cause);
+    }
   }
 }

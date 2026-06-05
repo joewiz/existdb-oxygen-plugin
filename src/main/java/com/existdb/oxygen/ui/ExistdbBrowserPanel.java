@@ -417,10 +417,10 @@ public final class ExistdbBrowserPanel extends JPanel {
     new SwingWorker<Void, Void>() {
       @Override
       protected Void doInBackground() throws Exception {
-        // existdb-openapi returns resource content as text (even for "binary" types like .xq),
-        // matching how the exist: URL connection reads it; write it back out as UTF-8.
-        ExistClient.ResourceContent content = client.getResource(existNode.path);
-        Files.write(target, content.content().getBytes(StandardCharsets.UTF_8));
+        // Read bytes correctly (raw bytes for binary, UTF-8 content for text) so downloaded images
+        // and other binaries aren't corrupted by a text round-trip.
+        ExistClient.ResourceBytes resource = client.readResource(existNode.path);
+        Files.write(target, resource.bytes());
         return null;
       }
 
@@ -1172,9 +1172,15 @@ public final class ExistdbBrowserPanel extends JPanel {
         crossServerCopy(from, to, child.path(), destPath + "/" + child.name(), child.collection());
       }
     } else {
-      ExistClient.ResourceContent content = from.getResource(sourcePath);
-      String mime = content.mimeType() != null ? content.mimeType() : MimeTypes.byName(destPath);
-      putResourceTolerant(to, destPath, content.content(), mime);
+      // Read/write bytes correctly so binary resources (images, PDFs, fonts) aren't corrupted by a
+      // text round-trip across servers; textual resources still go through the tolerant text PUT.
+      ExistClient.ResourceBytes resource = from.readResource(sourcePath);
+      String mime = resource.mimeType() != null ? resource.mimeType() : MimeTypes.byName(destPath);
+      if (resource.binary()) {
+        to.putResourceBytes(destPath, resource.bytes(), mime);
+      } else {
+        putResourceTolerant(to, destPath, new String(resource.bytes(), StandardCharsets.UTF_8), mime);
+      }
     }
   }
 
@@ -1275,7 +1281,6 @@ public final class ExistdbBrowserPanel extends JPanel {
       workspace.showInformationMessage("Connect to eXist-db first.");
       return;
     }
-    final List<String> skipped = new ArrayList<>();
     new SwingWorker<Integer, Void>() {
       @Override
       protected Integer doInBackground() throws Exception {
@@ -1289,7 +1294,7 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
         int count = 0;
         for (File file : files) {
-          count += uploadRecursive(client, target.path, file, skipped);
+          count += uploadRecursive(client, target.path, file);
         }
         return count;
       }
@@ -1301,13 +1306,7 @@ public final class ExistdbBrowserPanel extends JPanel {
           if (count < 0) {
             return; // overwrite cancelled
           }
-          StringBuilder message = new StringBuilder("Uploaded ").append(count)
-              .append(" file(s) to ").append(target.path);
-          if (!skipped.isEmpty()) {
-            message.append("; skipped ").append(skipped.size())
-                .append(" binary file(s) (not yet supported): ").append(String.join(", ", skipped));
-          }
-          workspace.showStatusMessage(message.toString());
+          workspace.showStatusMessage("Uploaded " + count + " file(s) to " + target.path);
           reloadNode(targetNode);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
@@ -1319,11 +1318,11 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   /**
    * Uploads a file (or, recursively, a directory) under {@code parentPath}; returns the count
-   * uploaded. Binary files are skipped (existdb-openapi's resource PUT is text-only) and their names
-   * collected in {@code skipped}.
+   * uploaded. Binary files are stored via the raw streaming PUT; text files via the tolerant text
+   * PUT. {@code skipped} collects the names of any files that couldn't be stored.
    */
-  private static int uploadRecursive(ExistClient client, String parentPath, File file,
-      List<String> skipped) throws IOException, InterruptedException {
+  private static int uploadRecursive(ExistClient client, String parentPath, File file)
+      throws IOException, InterruptedException {
     if (file.isDirectory()) {
       String collection = parentPath + "/" + file.getName();
       client.createCollection(collection);
@@ -1331,20 +1330,21 @@ public final class ExistdbBrowserPanel extends JPanel {
       File[] children = file.listFiles();
       if (children != null) {
         for (File child : children) {
-          count += uploadRecursive(client, collection, child, skipped);
+          count += uploadRecursive(client, collection, child);
         }
       }
       return count;
     }
     byte[] bytes = Files.readAllBytes(file.toPath());
-    if (isBinary(bytes)) {
-      skipped.add(file.getName());
-      return 0;
-    }
-    // A known extension picks the right mime; otherwise store as plain text (never XML-parsed).
+    String path = parentPath + "/" + file.getName();
     String mime = MimeTypes.byName(file.getName());
-    putResourceTolerant(client, parentPath + "/" + file.getName(),
-        new String(bytes, StandardCharsets.UTF_8), mime != null ? mime : "text/plain");
+    if (isBinary(bytes)) {
+      client.putResourceBytes(path, bytes, mime); // null mime → application/octet-stream
+    } else {
+      // A known extension picks the right mime; otherwise store as plain text (never XML-parsed).
+      putResourceTolerant(client, path, new String(bytes, StandardCharsets.UTF_8),
+          mime != null ? mime : "text/plain");
+    }
     return 1;
   }
 

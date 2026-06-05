@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.lang.LangServiceSupport;
+import com.existdb.oxygen.lang.MarkdownRenderer;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.editor.page.WSEditorPage;
@@ -31,30 +32,32 @@ import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.geom.Rectangle2D;
 
 import javax.swing.AbstractAction;
+import javax.swing.BorderFactory;
+import javax.swing.JEditorPane;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 import javax.swing.SwingWorker;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.JTextComponent;
 
 /**
- * "eXist Quick Documentation": shows eXist's signature and documentation for the symbol under the
- * caret, via {@code /api/langservice/hover}. A dedicated action (Oxygen owns native hover for
- * XQuery); the result appears in a small popup at the caret.
+ * "Hover Documentation (eXist-db)": shows eXist's documentation for the symbol under the caret
+ * (LSP {@code textDocument/hover}) — a function's signature + docs, or a variable's type — via
+ * {@code /api/langservice/hover}. A dedicated action (Oxygen owns native hover for XQuery); the
+ * result appears in a small popup at the caret.
  */
 public final class HoverAction extends AbstractAction {
 
   private final transient StandalonePluginWorkspace workspace;
 
   public HoverAction(StandalonePluginWorkspace workspace) {
-    super("eXist Quick Documentation");
+    super("Hover Documentation (eXist-db)");
     this.workspace = workspace;
   }
 
@@ -95,30 +98,35 @@ public final class HoverAction extends AbstractAction {
         try {
           ExistClient.Hover hover = get();
           if (hover == null) {
-            workspace.showStatusMessage("eXist: no documentation for the symbol under the caret.");
+            workspace.showStatusMessage("eXist-db: no documentation for the symbol under the caret.");
           } else {
             showHoverPopup(component, caret, hover.contents());
           }
         } catch (Exception e) {
-          workspace.showErrorMessage("eXist quick documentation failed: " + e.getMessage());
+          workspace.showErrorMessage("eXist-db hover documentation failed: " + e.getMessage());
         }
       }
     }.execute();
   }
 
   private static void showHoverPopup(JTextComponent component, int caret, String contents) {
-    JTextArea area = new JTextArea(contents);
-    area.setEditable(false);
-    area.setLineWrap(true);
-    area.setWrapStyleWord(true);
-    area.setMargin(new Insets(6, 8, 6, 8));
+    JEditorPane pane = new JEditorPane("text/html", MarkdownRenderer.toHtml(contents));
+    pane.setEditable(false);
+    pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+    pane.setBackground(Color.WHITE);
+    pane.setCaretPosition(0);
 
-    JScrollPane scroll = new JScrollPane(area);
-    int rows = Math.min(12, contents.split("\n").length + 2);
-    scroll.setPreferredSize(new Dimension(480, Math.max(48, rows * 16)));
+    JScrollPane scroll = new JScrollPane(pane);
+    scroll.setBorder(BorderFactory.createLineBorder(new Color(0xC8, 0xCE, 0xD6)));
+    // No horizontal scrollbar: the HTML wraps to the popup's width instead of spilling over; a
+    // vertical scrollbar appears only if the (wrapped) content is taller than the cap.
+    scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+    int lines = contents.split("\n").length + 3; // a little headroom for wrapped long lines
+    scroll.setPreferredSize(new Dimension(460, Math.min(260, Math.max(56, lines * 18))));
 
     JPopupMenu popup = new JPopupMenu();
     popup.setLayout(new BorderLayout());
+    popup.setBorder(BorderFactory.createEmptyBorder());
     popup.add(scroll, BorderLayout.CENTER);
     try {
       Rectangle2D r = component.modelToView2D(caret);
