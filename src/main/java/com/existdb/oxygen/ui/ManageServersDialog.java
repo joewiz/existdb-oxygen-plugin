@@ -33,6 +33,8 @@ import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -119,6 +121,14 @@ public final class ManageServersDialog {
 
   private JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+    table.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        if (e.getClickCount() == 2 && table.getSelectedRow() >= 0) {
+          edit();
+        }
+      }
+    });
     // ApplicationTable stripes populated rows but not the empty area below the last row, even with
     // fillsViewportHeight and Oxygen's scroll pane; the full-viewport striping the Data Source
     // Explorer shows isn't reachable through the public SDK. Accepted as an SDK gap.
