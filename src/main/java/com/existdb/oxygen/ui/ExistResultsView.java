@@ -177,8 +177,13 @@ public final class ExistResultsView extends JPanel {
     JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 2));
     right.add(pageSizeCombo);
 
-    // Equal-weight side cells keep the navigation group centered in the window, regardless of how
-    // wide the left/right controls are.
+    // Equal-weight side cells alone don't center the nav: GridBag only splits the *extra* space
+    // equally, so unequal preferred widths still bias it. Force both sides to the same preferred
+    // width (the larger one) so the navigation group is truly window-centered.
+    int side = Math.max(left.getPreferredSize().width, right.getPreferredSize().width);
+    left.setPreferredSize(new Dimension(side, left.getPreferredSize().height));
+    right.setPreferredSize(new Dimension(side, right.getPreferredSize().height));
+
     JPanel bar = new JPanel(new GridBagLayout());
     GridBagConstraints c = new GridBagConstraints();
     c.fill = GridBagConstraints.HORIZONTAL;
