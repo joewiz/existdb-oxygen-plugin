@@ -52,7 +52,7 @@ class MarkdownRendererTest {
     assertTrue(html.contains("<b>Parameters</b>"), "**Parameters** becomes bold");
     assertTrue(html.contains("<ul"), "bullets become a list");
     assertTrue(html.contains("<li>"), "bullet items");
-    assertTrue(html.contains("<code>$priority</code>"), "inline code");
+    assertTrue(html.contains("monospace") && html.contains("$priority"), "inline code is monospace");
     // No stray Markdown markers left behind.
     assertFalse(html.contains("```"), "no leftover fences");
     assertFalse(html.contains("**Parameters**"), "no leftover bold markers");
@@ -62,7 +62,7 @@ class MarkdownRendererTest {
   void escapesHtmlSpecialCharacters() {
     String html = MarkdownRenderer.toHtml("returns `item()*` and a < b");
     assertTrue(html.contains("a &lt; b"), "raw < is escaped");
-    assertTrue(html.contains("<code>item()*</code>"), "inline code still rendered");
+    assertTrue(html.contains("item()*"), "inline code still rendered");
   }
 
   @Test

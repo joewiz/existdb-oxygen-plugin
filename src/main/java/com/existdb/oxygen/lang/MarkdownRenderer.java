@@ -110,7 +110,10 @@ public final class MarkdownRenderer {
       if (c == '`') {
         int end = escaped.indexOf('`', i + 1);
         if (end > i) {
-          out.append("<code>").append(escaped, i + 1, end).append("</code>");
+          // An explicit 11px monospace span (not <code>, whose Swing default renders smaller than
+          // the body text, making surrounding words look oversized).
+          out.append("<span style='font-family:monospace;font-size:11px'>")
+              .append(escaped, i + 1, end).append("</span>");
           i = end + 1;
           continue;
         }
