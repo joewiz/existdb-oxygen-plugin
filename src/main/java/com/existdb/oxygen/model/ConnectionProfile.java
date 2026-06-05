@@ -43,7 +43,7 @@ public final class ConnectionProfile {
   private boolean acceptSelfSigned;
 
   public ConnectionProfile() {
-    this("Local eXist", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "", false);
+    this("localhost 8080", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "", false);
   }
 
   public ConnectionProfile(String name, String baseUrl, String user, String password) {

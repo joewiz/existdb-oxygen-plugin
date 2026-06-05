@@ -46,12 +46,14 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.DefaultTableCellRenderer;
 
 /**
  * A single window for managing saved eXist servers — a Data Source Explorer-style "Connections"
@@ -98,7 +100,8 @@ public final class ManageServersDialog {
   }
 
   private boolean show() {
-    host = OxygenUIComponentsFactory.createOkCancelDialog(owner, "Configure eXist-db Servers", true);
+    host =
+        OxygenUIComponentsFactory.createOkCancelDialog(owner, "Configure eXist-db Connections", true);
     host.getContentPane().add(buildContent(), BorderLayout.CENTER);
     if (!profiles.isEmpty()) {
       table.setRowSelectionInterval(0, 0);
@@ -123,6 +126,9 @@ public final class ManageServersDialog {
     table.getColumnModel().getColumn(1).setPreferredWidth(430);
     table.getColumnModel().getColumn(2).setMaxWidth(60);
     table.getColumnModel().getColumn(2).setPreferredWidth(60);
+    DefaultTableCellRenderer centered = new DefaultTableCellRenderer();
+    centered.setHorizontalAlignment(SwingConstants.CENTER);
+    table.getColumnModel().getColumn(2).setCellRenderer(centered);
 
     // App-specific actions on the left as text buttons.
     JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
@@ -155,7 +161,9 @@ public final class ManageServersDialog {
 
     JPanel connections = new JPanel(new BorderLayout());
     connections.setBorder(BorderFactory.createTitledBorder("Connections"));
-    connections.add(new JScrollPane(table), BorderLayout.CENTER);
+    connections.add(OxygenUIComponentsFactory.createScrollPane(table,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
 
     table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
@@ -330,7 +338,7 @@ public final class ManageServersDialog {
       protected void done() {
         try {
           JOptionPane.showMessageDialog(host,
-              "Connected to \"" + name + "\". Authenticated as: " + get(),
+              "Connected to \"" + name + "\". Authenticated as \"" + get() + "\".",
               "Test connection", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;

@@ -62,7 +62,7 @@ class ProfileStoreTest {
     List<ConnectionProfile> first = store.loadAll();
     assertEquals(1, first.size());
     assertNotNull(first.get(0).getId());
-    assertEquals("Local eXist", first.get(0).getName());
+    assertEquals("localhost 8080", first.get(0).getName());
     assertEquals(first.get(0).getId(), store.defaultProfileId());
 
     // The generated id is persisted, so a second load returns the same id.
