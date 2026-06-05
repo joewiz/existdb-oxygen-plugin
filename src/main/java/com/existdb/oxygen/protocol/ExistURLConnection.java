@@ -65,23 +65,13 @@ final class ExistURLConnection extends URLConnection {
     }
     ExistClient client = requireClient();
     try {
-      // eXist stores XQuery (and some other text resources) as *binary* documents, so the JSON
-      // envelope's `binary` flag is true for them — but its `content` is still the real UTF-8
-      // source, and crucially the raw streaming endpoint would *execute* an .xq/.xqm module rather
-      // than return its source. So branch on whether the mime-type is textual, not on `binary`:
-      // read text (XQuery, XML, JSON, …) from the JSON content; fetch only genuinely-binary
-      // resources (images, PDFs, fonts) as raw bytes via the streaming endpoint.
-      ExistClient.ResourceContent rc = client.getResource(dbPath());
-      this.mimeType = rc.mimeType() != null ? rc.mimeType() : MimeTypes.byName(dbPath());
-      if (rc.binary() && !MimeTypes.isTextual(this.mimeType)) {
-        ExistClient.RawResource raw = client.getResourceBytes(dbPath());
-        this.content = raw.bytes();
-        if (raw.mimeType() != null) {
-          this.mimeType = raw.mimeType();
-        }
-      } else {
-        this.content = rc.content().getBytes(StandardCharsets.UTF_8);
-      }
+      // Read bytes correctly for the resource type: textual resources (XQuery, XML, JSON, …) come
+      // from the JSON envelope's UTF-8 content — eXist flags XQuery as binary, yet its content is
+      // real source, and the raw streaming endpoint would *execute* an .xq/.xqm rather than return
+      // it — while genuinely-binary resources (images, PDFs, fonts) come back as raw bytes.
+      ExistClient.ResourceBytes rb = client.readResource(dbPath());
+      this.content = rb.bytes();
+      this.mimeType = rb.mimeType();
     } catch (ExistHttpException e) {
       // Honor the URLConnection contract: a missing resource is FileNotFoundException, not a
       // generic error. This lets Oxygen show its "Missing File — keep open?" prompt and still

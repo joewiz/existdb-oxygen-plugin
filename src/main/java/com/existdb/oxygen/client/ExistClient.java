@@ -292,6 +292,40 @@ public final class ExistClient {
         .build());
   }
 
+  /**
+   * PUT /api/db/resource/{path} — stores a resource's <em>raw bytes</em> (path-in-URL streaming
+   * endpoint). Binary-safe, so use it for genuinely-binary resources (images, PDFs, fonts) that the
+   * JSON {@link #putResource} would corrupt by round-tripping through text. Throws on non-2xx.
+   */
+  public void putResourceBytes(String dbPath, byte[] bytes, String mimeType)
+      throws IOException, InterruptedException {
+    send(request("/db/resource/" + encPath(dbPath))
+        .header("Content-Type", mimeType != null && !mimeType.isEmpty()
+            ? mimeType : "application/octet-stream")
+        .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes))
+        .build());
+  }
+
+  /** A resource read as bytes (correctly text-or-binary) with its mime-type and binary flag. */
+  public record ResourceBytes(byte[] bytes, String mimeType, boolean binary) {
+  }
+
+  /**
+   * Reads a resource's bytes correctly for round-tripping: textual types (XQuery, XML, JSON,
+   * {@code text/*}) from the JSON envelope's UTF-8 content, and genuinely-binary types from the raw
+   * streaming endpoint. This avoids both lossy text round-tripping of binaries and the streaming
+   * endpoint's execution of XQuery modules.
+   */
+  public ResourceBytes readResource(String dbPath) throws IOException, InterruptedException {
+    ResourceContent rc = getResource(dbPath);
+    String mime = rc.mimeType() != null ? rc.mimeType() : MimeTypes.byName(dbPath);
+    if (rc.binary() && !MimeTypes.isTextual(mime)) {
+      RawResource raw = getResourceBytes(dbPath);
+      return new ResourceBytes(raw.bytes(), raw.mimeType() != null ? raw.mimeType() : mime, true);
+    }
+    return new ResourceBytes(rc.content().getBytes(StandardCharsets.UTF_8), mime, false);
+  }
+
   // ---------------------------------------------------------------------------
   // Query execution (cursor-based)
   // ---------------------------------------------------------------------------
