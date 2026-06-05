@@ -56,6 +56,8 @@ class QueryRunnerTest {
     assertEquals("1\n2\n3", result.output());
     assertEquals(3, result.totalItems());
     assertFalse(result.truncated());
+    assertEquals(3, result.items().size());
+    assertEquals("2", result.items().get(1).value());
   }
 
   @Test

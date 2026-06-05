@@ -129,6 +129,30 @@ class ExistClientTest {
   }
 
   @Test
+  void runQueryIncludesContextItemWhenSupplied() throws Exception {
+    client.runQuery("//para", null, "<doc><para>hi</para></doc>");
+    assertTrue(server.lastQueryBody().contains("\"context-item\""));
+    assertTrue(server.lastQueryBody().contains("<para>hi"));
+  }
+
+  @Test
+  void runQueryOmitsContextItemWhenBlank() throws Exception {
+    client.runQuery("1 to 3", null, "  ");
+    assertFalse(server.lastQueryBody().contains("context-item"));
+  }
+
+  @Test
+  void nodePathBuildsFnPathQueryAndReturnsValue() throws Exception {
+    String path = client.nodePath("/db/a/x.xml", "3.9");
+    assertTrue(server.lastQueryBody().contains("fn:path"));
+    assertTrue(server.lastQueryBody().contains("util:node-by-id"));
+    assertTrue(server.lastQueryBody().contains("/db/a/x.xml"));
+    assertTrue(server.lastQueryBody().contains("3.9"));
+    // The canned cursor yields "1" as the first item's value; nodePath returns it unwrapped.
+    assertEquals("1", path);
+  }
+
+  @Test
   void nonSuccessStatusRaisesExistHttpException() {
     ExistHttpException ex = org.junit.jupiter.api.Assertions.assertThrows(
         ExistHttpException.class, () -> client.getResource("/db/missing.xq"));

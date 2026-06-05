@@ -260,10 +260,25 @@ public final class ExistClient {
   /** POST /api/query — compiles and evaluates, returning a cursor over the results. */
   public QueryHandle runQuery(String query, String moduleLoadPath)
       throws IOException, InterruptedException {
+    return runQuery(query, moduleLoadPath, null);
+  }
+
+  /**
+   * POST /api/query with an optional {@code context-item} — a serialized node supplied as the
+   * evaluation context so context-dependent expressions (e.g. {@code //para}) run against the
+   * document the user is querying. When {@code contextItem} is null/blank the query evaluates with
+   * no context item (the editor-content-is-the-query case). Servers without existdb-openapi PR #41
+   * simply ignore the unknown field, so this is safe against older deployments.
+   */
+  public QueryHandle runQuery(String query, String moduleLoadPath, String contextItem)
+      throws IOException, InterruptedException {
     JSONObject body = new JSONObject();
     body.put("query", query);
     if (moduleLoadPath != null && !moduleLoadPath.isEmpty()) {
       body.put("module-load-path", moduleLoadPath);
+    }
+    if (contextItem != null && !contextItem.isBlank()) {
+      body.put("context-item", contextItem);
     }
     HttpResponse<String> r = send(request("/query")
         .header("Content-Type", "application/json")
@@ -287,6 +302,42 @@ public final class ExistClient {
   /** DELETE /api/query/{id} — releases the server-side cursor. */
   public void closeCursor(String cursor) throws IOException, InterruptedException {
     send(request("/query/" + enc(cursor)).DELETE().build());
+  }
+
+  /**
+   * Resolves a stored node's canonical path (the {@code fn:path()} XPath, e.g.
+   * {@code /Q{ns}article[1]/Q{ns}para[3]}) from its document URI and eXist node id — both returned
+   * by the cursor results. Used to locate the originating element in the opened source document.
+   * Returns null when the node can no longer be resolved (e.g. the document changed).
+   */
+  public String nodePath(String documentUri, String nodeId)
+      throws IOException, InterruptedException {
+    String query = "fn:path(util:node-by-id(doc(\"" + xqEscape(documentUri) + "\"), \""
+        + xqEscape(nodeId) + "\"))";
+    QueryHandle handle = runQuery(query, null);
+    if (handle.cursor() == null || handle.items() == 0) {
+      return null;
+    }
+    try {
+      String body = fetchResultsRaw(handle.cursor(), 1, 1, "adaptive");
+      JSONArray array = new JSONArray(body);
+      if (array.isEmpty()) {
+        return null;
+      }
+      String value = array.getJSONObject(0).optString("value", "");
+      // Adaptive serialization quotes strings; unwrap to the bare path.
+      if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+        value = value.substring(1, value.length() - 1);
+      }
+      return value.isEmpty() ? null : value;
+    } finally {
+      closeCursor(handle.cursor());
+    }
+  }
+
+  /** Escapes a string for embedding in an XQuery double-quoted literal. */
+  private static String xqEscape(String s) {
+    return s.replace("\"", "\"\"");
   }
 
   // ---------------------------------------------------------------------------
