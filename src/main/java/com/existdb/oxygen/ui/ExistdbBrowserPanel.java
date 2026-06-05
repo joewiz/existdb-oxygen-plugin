@@ -370,6 +370,9 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("Download…", () -> downloadResource(existNode)));
     }
     menu.add(menuItem("Copy Path", () -> copyToClipboard(existNode.path)));
+    if (!existNode.collection) {
+      menu.add(menuItem("Copy edit-in-oxygen Link", () -> copyToClipboard(editInOxygenLink(existNode))));
+    }
     if (!DB_ROOT.equals(existNode.path)) {
       menu.addSeparator();
       menu.add(menuItem("Rename…", () -> renameNode(node, existNode)));
@@ -383,6 +386,20 @@ public final class ExistdbBrowserPanel extends JPanel {
     JMenuItem item = new JMenuItem(label);
     item.addActionListener(e -> action.run());
     return item;
+  }
+
+  /**
+   * An {@code edit-in-oxygen:exist://…} deep link for a resource — Oxygen's OS-registered protocol
+   * (macOS) opens the wrapped {@code exist:} URL in the running editor, so the link can live in a web
+   * page, email, etc.
+   */
+  private String editInOxygenLink(ExistNode existNode) {
+    try {
+      return "edit-in-oxygen:"
+          + ExistURLStreamHandler.toUrl(existNode.serverId, existNode.path).toExternalForm();
+    } catch (IOException e) {
+      return "";
+    }
   }
 
   private void copyToClipboard(String text) {
