@@ -119,7 +119,9 @@ public final class ManageServersDialog {
 
   private JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    // Fill the viewport so the alternating row stripes extend below the last row, like Data Sources.
+    // ApplicationTable stripes populated rows but not the empty area below the last row, even with
+    // fillsViewportHeight and Oxygen's scroll pane; the full-viewport striping the Data Source
+    // Explorer shows isn't reachable through the public SDK. Accepted as an SDK gap.
     table.setFillsViewportHeight(true);
     // Name compact, URL gets the room, Default a fixed narrow check column.
     table.getColumnModel().getColumn(0).setPreferredWidth(150);
