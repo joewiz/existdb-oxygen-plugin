@@ -381,6 +381,38 @@ public final class ExistClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Search (existdb-openapi /api/search — sitewide full-text)
+  // ---------------------------------------------------------------------------
+
+  /** One full-text search hit: the owning app, a title, a highlighted snippet, and the DB path. */
+  public record SearchHit(String app, String title, String snippet, String path) {
+  }
+
+  /** A page of search results plus the total match count reported by the server. */
+  public record SearchResults(int total, List<SearchHit> hits) {
+  }
+
+  /**
+   * GET /api/search — sitewide full-text search. Returns up to {@code limit} hits (with snippets and
+   * DB paths) plus the total match count.
+   */
+  public SearchResults search(String query, int limit) throws IOException, InterruptedException {
+    HttpResponse<String> r =
+        send(request("/search?q=" + enc(query) + "&limit=" + limit).GET().build());
+    JSONObject o = new JSONObject(r.body());
+    JSONArray arr = o.optJSONArray("results");
+    List<SearchHit> hits = new ArrayList<>();
+    if (arr != null) {
+      for (int i = 0; i < arr.length(); i++) {
+        JSONObject h = arr.getJSONObject(i);
+        hits.add(new SearchHit(h.optString("app", ""), h.optString("title", ""),
+            h.optString("snippet", ""), h.optString("path", "")));
+      }
+    }
+    return new SearchResults(o.optInt("total", hits.size()), hits);
+  }
+
+  // ---------------------------------------------------------------------------
   // Language services (existdb-openapi /api/langservice/*, LSP-isomorphic shapes)
   // ---------------------------------------------------------------------------
 

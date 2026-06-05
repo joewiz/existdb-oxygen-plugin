@@ -164,6 +164,15 @@ class ExistClientTest {
   }
 
   @Test
+  void searchParsesTotalAndHits() throws Exception {
+    ExistClient.SearchResults results = client.search("index", 50);
+    assertEquals(7, results.total());
+    assertEquals(2, results.hits().size());
+    assertEquals("/db/apps/doc/indexing.xml", results.hits().get(0).path());
+    assertEquals("range index", results.hits().get(1).snippet());
+  }
+
+  @Test
   void nonSuccessStatusRaisesExistHttpException() {
     ExistHttpException ex = org.junit.jupiter.api.Assertions.assertThrows(
         ExistHttpException.class, () -> client.getResource("/db/missing.xq"));

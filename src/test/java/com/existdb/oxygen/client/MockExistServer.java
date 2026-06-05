@@ -115,6 +115,13 @@ public final class MockExistServer implements AutoCloseable {
       }
     });
 
+    handle(prefix + "/search", ex -> respond(ex, 200,
+        "{\"total\":7,\"query\":\"index\",\"results\":["
+            + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
+            + "\"path\":\"/db/apps/doc/indexing.xml\"},"
+            + "{\"app\":\"doc\",\"title\":\"Tuning\",\"snippet\":\"range index\","
+            + "\"path\":\"/db/apps/doc/tuning.xml\"}]}"));
+
     handle(prefix + "/langservice/diagnostics", ex -> {
       lastLangBody = readBody(ex);
       respond(ex, 200, "[{\"line\":0,\"column\":5,\"severity\":1,"

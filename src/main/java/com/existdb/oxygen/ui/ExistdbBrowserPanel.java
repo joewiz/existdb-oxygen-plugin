@@ -222,6 +222,17 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     };
+    Action searchAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/Search16.png"));
+        putValue(SHORT_DESCRIPTION, "Search eXist-db (full-text)");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        SearchDialog.open(ownerFrame(), profileStore, workspace);
+      }
+    };
     Action gearAction = new AbstractAction() {
       {
         // The Data Source Explorer's gear-with-menu-lines glyph.
@@ -236,6 +247,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     };
 
     // Oxygen's factory buttons inherit the workbench's flat rollover (and toggle) styling exactly.
+    JButton search = OxygenUIComponentsFactory.createToolbarButton(searchAction, false);
     JButton link = OxygenUIComponentsFactory.createToolbarToggleButton(linkAction, false);
     JButton gear = OxygenUIComponentsFactory.createToolbarButton(gearAction, false);
 
@@ -243,6 +255,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     bar.setFloatable(false);
     bar.setRollover(true);
     bar.add(Box.createHorizontalGlue());
+    bar.add(search);
     bar.add(link);
     bar.addSeparator();
     bar.add(gear);
