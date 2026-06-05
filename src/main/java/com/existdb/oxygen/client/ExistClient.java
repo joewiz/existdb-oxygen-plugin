@@ -275,8 +275,12 @@ public final class ExistClient {
   // Query execution (cursor-based)
   // ---------------------------------------------------------------------------
 
-  /** A server-side query cursor with the total item count. */
-  public record QueryHandle(String cursor, int items) {
+  /**
+   * A server-side query cursor with the total item count and the server's timing breakdown (all in
+   * milliseconds): {@code compileMs} + {@code evalMs} ≈ {@code totalMs}. Older servers that don't
+   * report timings yield zeros.
+   */
+  public record QueryHandle(String cursor, int items, int compileMs, int evalMs, int totalMs) {
   }
 
   /** POST /api/query — compiles and evaluates, returning a cursor over the results. */
@@ -307,7 +311,11 @@ public final class ExistClient {
         .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
         .build());
     JSONObject o = new JSONObject(r.body());
-    return new QueryHandle(o.optString("cursor", null), o.optInt("items", 0));
+    JSONObject timing = o.optJSONObject("timing");
+    int compile = timing != null ? timing.optInt("compile", 0) : 0;
+    int eval = timing != null ? timing.optInt("evaluate", 0) : 0;
+    int total = timing != null ? timing.optInt("total", o.optInt("elapsed", 0)) : o.optInt("elapsed", 0);
+    return new QueryHandle(o.optString("cursor", null), o.optInt("items", 0), compile, eval, total);
   }
 
   /**
@@ -316,8 +324,18 @@ public final class ExistClient {
    */
   public String fetchResultsRaw(String cursor, int start, int count, String method)
       throws IOException, InterruptedException {
+    return fetchResultsRaw(cursor, start, count, method, true);
+  }
+
+  /**
+   * As {@link #fetchResultsRaw(String, int, int, String)}, controlling pretty-printing via the
+   * {@code indent} serialization parameter.
+   */
+  public String fetchResultsRaw(String cursor, int start, int count, String method, boolean indent)
+      throws IOException, InterruptedException {
     String path = "/query/" + enc(cursor) + "/results"
-        + "?start=" + start + "&count=" + count + "&method=" + enc(method);
+        + "?start=" + start + "&count=" + count + "&method=" + enc(method)
+        + "&indent=" + (indent ? "yes" : "no");
     return send(request(path).GET().build()).body();
   }
 
