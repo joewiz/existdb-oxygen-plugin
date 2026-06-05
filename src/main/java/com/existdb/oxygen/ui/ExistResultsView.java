@@ -29,11 +29,16 @@ import org.json.JSONObject;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
@@ -48,6 +53,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -127,13 +133,15 @@ public final class ExistResultsView extends JPanel {
       }
     }, false);
 
-    firstButton = navButton("⏮", "First page", () -> goToPage(1));
-    prevButton = navButton("◀", "Previous page", () -> goToPage(page - 1));
-    prevItemButton = navButton("▴", "Previous result", () -> stepItem(-1));
-    nextItemButton = navButton("▾", "Next result", () -> stepItem(1));
-    nextButton = navButton("▶", "Next page", () -> goToPage(page + 1));
-    lastButton = navButton("⏭", "Last page", () -> goToPage(pageCount()));
+    firstButton = navButton(ChevronIcon.DOUBLE_LEFT, "First page", () -> goToPage(1));
+    prevButton = navButton(ChevronIcon.LEFT, "Previous page", () -> goToPage(page - 1));
+    prevItemButton = navButton(ChevronIcon.UP, "Previous result", () -> stepItem(-1));
+    nextItemButton = navButton(ChevronIcon.DOWN, "Next result", () -> stepItem(1));
+    nextButton = navButton(ChevronIcon.RIGHT, "Next page", () -> goToPage(page + 1));
+    lastButton = navButton(ChevronIcon.DOUBLE_RIGHT, "Last page", () -> goToPage(pageCount()));
 
+    constrainWidth(methodCombo, 120);
+    constrainWidth(pageSizeCombo, 64);
     methodCombo.addActionListener(e -> refreshPage());
     pageSizeCombo.setSelectedItem(pageSize);
     pageSizeCombo.addActionListener(e -> {
@@ -156,9 +164,10 @@ public final class ExistResultsView extends JPanel {
     JToolBar bar = new JToolBar();
     bar.setFloatable(false);
     bar.setRollover(true);
+    // Left: serialization controls. Center (glue both sides): page/result navigation. Right: page size.
     bar.add(methodCombo);
     bar.add(indentButton);
-    bar.addSeparator();
+    bar.add(Box.createHorizontalGlue());
     bar.add(firstButton);
     bar.add(prevButton);
     bar.add(prevItemButton);
@@ -167,9 +176,14 @@ public final class ExistResultsView extends JPanel {
     bar.add(nextButton);
     bar.add(lastButton);
     bar.add(Box.createHorizontalGlue());
-    bar.add(new JLabel("Page size:"));
     bar.add(pageSizeCombo);
     return bar;
+  }
+
+  private static void constrainWidth(JComponent component, int width) {
+    Dimension size = new Dimension(width, component.getPreferredSize().height);
+    component.setPreferredSize(size);
+    component.setMaximumSize(size);
   }
 
   private JComponent buildMetricsBar() {
@@ -178,10 +192,10 @@ public final class ExistResultsView extends JPanel {
     return south;
   }
 
-  private JButton navButton(String label, String tooltip, Runnable action) {
+  private JButton navButton(Icon icon, String tooltip, Runnable action) {
     return OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
       {
-        putValue(NAME, label);
+        putValue(SMALL_ICON, icon);
         putValue(SHORT_DESCRIPTION, tooltip);
       }
 
@@ -189,7 +203,7 @@ public final class ExistResultsView extends JPanel {
       public void actionPerformed(ActionEvent e) {
         action.run();
       }
-    }, true);
+    }, false);
   }
 
   /** Runs {@code query} on {@code client}, opening a fresh cursor and showing the first page. */
@@ -415,5 +429,62 @@ public final class ExistResultsView extends JPanel {
   public Dimension getPreferredSize() {
     Dimension d = super.getPreferredSize();
     return new Dimension(Math.max(d.width, 400), Math.max(d.height, 240));
+  }
+
+  /** A uniform, vector chevron icon for the navigation buttons (so widths match, unlike glyphs). */
+  private static final class ChevronIcon implements Icon {
+    private enum Kind { LEFT, RIGHT, UP, DOWN, DOUBLE_LEFT, DOUBLE_RIGHT }
+
+    static final Icon LEFT = new ChevronIcon(Kind.LEFT);
+    static final Icon RIGHT = new ChevronIcon(Kind.RIGHT);
+    static final Icon UP = new ChevronIcon(Kind.UP);
+    static final Icon DOWN = new ChevronIcon(Kind.DOWN);
+    static final Icon DOUBLE_LEFT = new ChevronIcon(Kind.DOUBLE_LEFT);
+    static final Icon DOUBLE_RIGHT = new ChevronIcon(Kind.DOUBLE_RIGHT);
+
+    private static final int SIZE = 16;
+    private final transient Kind kind;
+
+    private ChevronIcon(Kind kind) {
+      this.kind = kind;
+    }
+
+    @Override
+    public int getIconWidth() {
+      return SIZE;
+    }
+
+    @Override
+    public int getIconHeight() {
+      return SIZE;
+    }
+
+    @Override
+    public void paintIcon(Component c, Graphics g, int x, int y) {
+      Graphics2D g2 = (Graphics2D) g.create();
+      g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+      g2.setColor(c.isEnabled() ? new Color(0x55, 0x5F, 0x6D) : new Color(0xB8, 0xBE, 0xC6));
+      g2.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+      switch (kind) {
+        case LEFT -> chevron(g2, x + 10, y + 3, x + 6, y + 8, x + 10, y + 13);
+        case RIGHT -> chevron(g2, x + 6, y + 3, x + 10, y + 8, x + 6, y + 13);
+        case UP -> chevron(g2, x + 3, y + 10, x + 8, y + 6, x + 13, y + 10);
+        case DOWN -> chevron(g2, x + 3, y + 6, x + 8, y + 10, x + 13, y + 6);
+        case DOUBLE_LEFT -> {
+          chevron(g2, x + 8, y + 3, x + 4, y + 8, x + 8, y + 13);
+          chevron(g2, x + 12, y + 3, x + 8, y + 8, x + 12, y + 13);
+        }
+        case DOUBLE_RIGHT -> {
+          chevron(g2, x + 4, y + 3, x + 8, y + 8, x + 4, y + 13);
+          chevron(g2, x + 8, y + 3, x + 12, y + 8, x + 8, y + 13);
+        }
+        default -> { /* unreachable */ }
+      }
+      g2.dispose();
+    }
+
+    private static void chevron(Graphics2D g2, int x1, int y1, int x2, int y2, int x3, int y3) {
+      g2.drawPolyline(new int[] {x1, x2, x3}, new int[] {y1, y2, y3}, 3);
+    }
   }
 }
