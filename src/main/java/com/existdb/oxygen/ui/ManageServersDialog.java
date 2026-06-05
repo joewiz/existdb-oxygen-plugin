@@ -28,6 +28,7 @@ import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
@@ -41,6 +42,7 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -194,14 +196,25 @@ public final class ManageServersDialog {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
     indentPref.setSelected(store.resultsIndent());
     pageSizePref.setSelectedItem(store.resultsPageSize());
-    JPanel prefs = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+    // Compact, uniform combo widths (matching the results view) so the row lines up cleanly.
+    constrainWidth(methodPref, 120);
+    constrainWidth(pageSizePref, 70);
+    JPanel prefs = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
     prefs.setBorder(BorderFactory.createTitledBorder("Result display defaults"));
     prefs.add(new JLabel("Serialization:"));
     prefs.add(methodPref);
     prefs.add(indentPref);
+    prefs.add(Box.createHorizontalStrut(12));
     prefs.add(new JLabel("Results per page:"));
     prefs.add(pageSizePref);
     return prefs;
+  }
+
+  /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
+  private static void constrainWidth(JComponent component, int width) {
+    Dimension size = new Dimension(width, component.getPreferredSize().height);
+    component.setPreferredSize(size);
+    component.setMaximumSize(size);
   }
 
   private static int methodIndex(String method) {
@@ -276,6 +289,8 @@ public final class ManageServersDialog {
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
     store.setResultsIndent(indentPref.isSelected());
     store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
+    // Apply the new defaults to an already-open results view immediately, not just next restart.
+    store.notifyResultsPrefsChanged();
   }
 
   private ConnectionProfile selected() {

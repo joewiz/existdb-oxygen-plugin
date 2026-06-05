@@ -57,6 +57,8 @@ public final class ProfileStore {
   private final Options options;
   private final UnaryOperator<String> encrypt;
   private final UnaryOperator<String> decrypt;
+  /** Notified when the result-display defaults change, so an open results view can re-apply them. */
+  private final List<Runnable> resultsPrefsListeners = new ArrayList<>();
 
   /** Minimal string options backend, so the storage logic is testable without Oxygen. */
   public interface Options {
@@ -206,6 +208,16 @@ public final class ProfileStore {
 
   public void setResultsPageSize(int pageSize) {
     options.set("existdb.results.pageSize", Integer.toString(pageSize));
+  }
+
+  /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
+  public void addResultsPrefsListener(Runnable listener) {
+    resultsPrefsListeners.add(listener);
+  }
+
+  /** Signals that the result-display defaults were edited so listeners can re-apply them live. */
+  public void notifyResultsPrefsChanged() {
+    resultsPrefsListeners.forEach(Runnable::run);
   }
 
   // ---------------------------------------------------------------------------

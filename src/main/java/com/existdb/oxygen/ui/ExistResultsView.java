@@ -58,6 +58,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import javax.swing.AbstractAction;
+import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
@@ -97,6 +98,7 @@ public final class ExistResultsView extends JPanel {
   private static final Color SELECTION = new Color(0xD6, 0xE6, 0xFB);
 
   private final transient StandalonePluginWorkspace workspace;
+  private final transient ProfileStore profileStore;
 
   private final JComboBox<String> methodCombo =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(METHOD_LABELS));
@@ -129,10 +131,13 @@ public final class ExistResultsView extends JPanel {
   private boolean indent = true;
   private int selectedIndex;
   private int currentStart;
+  /** Suppresses combo action-listener refreshes while {@link #applyPreferences()} sets values. */
+  private transient boolean applyingPrefs;
 
   public ExistResultsView(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
     this.workspace = workspace;
+    this.profileStore = profileStore;
     // Start from the saved result-display preferences (persist across restarts).
     this.indent = profileStore.resultsIndent();
     this.pageSize = profileStore.resultsPageSize();
@@ -163,9 +168,16 @@ public final class ExistResultsView extends JPanel {
     constrainWidth(methodCombo, 120);
     constrainWidth(pageSizeCombo, 80);
     methodCombo.setSelectedIndex(methodIndex(profileStore.resultsMethod()));
-    methodCombo.addActionListener(e -> refreshPage());
+    methodCombo.addActionListener(e -> {
+      if (!applyingPrefs) {
+        refreshPage();
+      }
+    });
     pageSizeCombo.setSelectedItem(pageSize);
     pageSizeCombo.addActionListener(e -> {
+      if (applyingPrefs) {
+        return;
+      }
       pageSize = (Integer) pageSizeCombo.getSelectedItem();
       goToPage(1);
     });
@@ -190,6 +202,28 @@ public final class ExistResultsView extends JPanel {
     add(layered, BorderLayout.CENTER);
     add(buildMetricsBar(), BorderLayout.SOUTH);
     updateNavState();
+
+    // Re-apply the defaults live when they're edited in "Configure eXist-db Connections".
+    profileStore.addResultsPrefsListener(this::applyPreferences);
+  }
+
+  /**
+   * Re-reads the saved result-display defaults (serialization method, indent, page size) into this
+   * view's controls and re-renders, so edits in the connections dialog take effect immediately
+   * instead of only on the next restart.
+   */
+  public void applyPreferences() {
+    applyingPrefs = true;
+    try {
+      indent = profileStore.resultsIndent();
+      indentButton.getAction().putValue(Action.SELECTED_KEY, indent);
+      methodCombo.setSelectedIndex(methodIndex(profileStore.resultsMethod()));
+      pageSize = profileStore.resultsPageSize();
+      pageSizeCombo.setSelectedItem(pageSize);
+    } finally {
+      applyingPrefs = false;
+    }
+    goToPage(1);
   }
 
   /** A small copy button that floats over the right edge of the viewport for the selected result. */
