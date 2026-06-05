@@ -30,6 +30,7 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.event.KeyEvent;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,21 +39,24 @@ import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.table.AbstractTableModel;
 
 /**
- * A single window for managing saved eXist servers — a Data Source Explorer-style table (Name, URL,
- * Default) with a toolbar for Add / Edit / Duplicate / Remove, reordering (Move Up/Down, Sort A–Z),
- * choosing the default server, and testing a connection. Every action applies immediately to the
- * {@link ProfileStore}; the eXist-db pane reloads its tree after the dialog closes.
+ * A single window for managing saved eXist servers — a Data Source Explorer-style "Connections"
+ * table (Name, URL, Default) with a flat icon toolbar for Add / Edit / Duplicate / Remove and
+ * reordering (Move Up/Down, Sort A–Z), plus choosing the default server and testing a connection.
+ * Edits are made on a working copy and persisted only on <b>OK</b>; <b>Cancel</b> (or Escape)
+ * discards them.
  */
 public final class ManageServersDialog extends JDialog {
 
@@ -62,12 +66,21 @@ public final class ManageServersDialog extends JDialog {
   private final ServerTableModel model = new ServerTableModel();
   private final JTable table = new JTable(model);
 
+  private transient ConnectionProfile defaultProfile;
+  private boolean committed;
+
   private ManageServersDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
     super(owner, "Manage Servers", true);
     this.store = store;
     this.workspace = workspace;
+    profiles.addAll(store.loadAll());
+    String defaultId = store.defaultProfileId();
+    for (ConnectionProfile p : profiles) {
+      if (p.getId() != null && p.getId().equals(defaultId)) {
+        defaultProfile = p;
+      }
+    }
     buildUi();
-    reload();
     if (!profiles.isEmpty()) {
       table.setRowSelectionInterval(0, 0);
     }
@@ -75,9 +88,14 @@ public final class ManageServersDialog extends JDialog {
     setLocationRelativeTo(owner);
   }
 
-  /** Opens the modal dialog; changes are persisted to {@code store} as they are made. */
-  public static void open(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
-    new ManageServersDialog(owner, store, workspace).setVisible(true);
+  /**
+   * Opens the modal dialog. Returns {@code true} if the user committed changes (OK), so the caller
+   * can refresh; {@code false} on Cancel/Escape.
+   */
+  public static boolean open(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
+    ManageServersDialog dialog = new ManageServersDialog(owner, store, workspace);
+    dialog.setVisible(true);
+    return dialog.committed;
   }
 
   private void buildUi() {
@@ -111,15 +129,21 @@ public final class ManageServersDialog extends JDialog {
     connections.add(new JScrollPane(table), BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
 
-    JButton close = new JButton("Close");
-    close.addActionListener(e -> dispose());
-    JPanel south = new JPanel();
-    south.add(close);
+    JButton ok = new JButton("OK");
+    ok.addActionListener(e -> commit());
+    JButton cancel = new JButton("Cancel");
+    cancel.addActionListener(e -> dispose());
+    JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+    south.add(ok);
+    south.add(cancel);
 
     setLayout(new BorderLayout());
     add(connections, BorderLayout.CENTER);
     add(south, BorderLayout.SOUTH);
-    getRootPane().setDefaultButton(close);
+    getRootPane().setDefaultButton(ok);
+    // Escape closes (cancel).
+    getRootPane().registerKeyboardAction(e -> dispose(),
+        KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
   }
 
   private static JButton textButton(String label, Runnable action) {
@@ -143,10 +167,12 @@ public final class ManageServersDialog extends JDialog {
     return b;
   }
 
-  private void reload() {
-    profiles.clear();
-    profiles.addAll(store.loadAll());
-    model.fireTableDataChanged();
+  /** Persists the working copy and the chosen default, then closes. */
+  private void commit() {
+    store.saveAll(profiles);
+    store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
+    committed = true;
+    dispose();
   }
 
   private ConnectionProfile selected() {
@@ -167,8 +193,7 @@ public final class ManageServersDialog extends JDialog {
     ConnectionProfile created = ConnectionDialog.edit(ownerFrame(), new ConnectionProfile());
     if (created != null) {
       profiles.add(created);
-      store.saveAll(profiles);
-      reload();
+      model.fireTableDataChanged();
       selectByName(created.getName());
     }
   }
@@ -178,12 +203,15 @@ public final class ManageServersDialog extends JDialog {
     if (current == null) {
       return;
     }
+    int row = table.getSelectedRow();
     ConnectionProfile edited = ConnectionDialog.edit(ownerFrame(), current);
     if (edited != null) {
       edited.setId(current.getId());
-      profiles.set(table.getSelectedRow(), edited);
-      store.saveAll(profiles);
-      reload();
+      profiles.set(row, edited);
+      if (current == defaultProfile) {
+        defaultProfile = edited;
+      }
+      model.fireTableDataChanged();
       selectByName(edited.getName());
     }
   }
@@ -196,8 +224,7 @@ public final class ManageServersDialog extends JDialog {
     ConnectionProfile copy = new ConnectionProfile(p.getName() + " copy", p.getBaseUrl(),
         p.getUser(), p.getPassword(), p.isAcceptSelfSigned());
     profiles.add(copy);
-    store.saveAll(profiles);
-    reload();
+    model.fireTableDataChanged();
     selectByName(copy.getName());
   }
 
@@ -210,8 +237,10 @@ public final class ManageServersDialog extends JDialog {
         "Remove server", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
     if (choice == JOptionPane.OK_OPTION) {
       profiles.remove(p);
-      store.saveAll(profiles);
-      reload();
+      if (p == defaultProfile) {
+        defaultProfile = null;
+      }
+      model.fireTableDataChanged();
     }
   }
 
@@ -222,16 +251,14 @@ public final class ManageServersDialog extends JDialog {
       return;
     }
     profiles.add(to, profiles.remove(from));
-    store.saveAll(profiles);
-    reload();
+    model.fireTableDataChanged();
     table.setRowSelectionInterval(to, to);
   }
 
   private void sort() {
     ConnectionProfile keep = selected();
     profiles.sort(Comparator.comparing(ConnectionProfile::getName, String.CASE_INSENSITIVE_ORDER));
-    store.saveAll(profiles);
-    reload();
+    model.fireTableDataChanged();
     if (keep != null) {
       selectByName(keep.getName());
     }
@@ -239,8 +266,8 @@ public final class ManageServersDialog extends JDialog {
 
   private void setDefault() {
     ConnectionProfile p = selected();
-    if (p != null && p.getId() != null) {
-      store.setDefaultProfileId(p.getId());
+    if (p != null) {
+      defaultProfile = p;
       model.fireTableDataChanged();
     }
   }
@@ -304,7 +331,7 @@ public final class ManageServersDialog extends JDialog {
       return switch (column) {
         case 0 -> p.getName();
         case 1 -> p.getBaseUrl();
-        default -> p.getId() != null && p.getId().equals(store.defaultProfileId()) ? "✓" : "";
+        default -> p == defaultProfile ? "✓" : "";
       };
     }
   }

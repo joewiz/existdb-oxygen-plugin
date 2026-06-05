@@ -274,10 +274,11 @@ public final class ExistdbBrowserPanel extends JPanel {
     return menu;
   }
 
-  /** Opens the unified server-management window, then rebuilds the tree from the saved servers. */
+  /** Opens the unified server-management window, then rebuilds the tree if the user saved changes. */
   private void manageServers() {
-    ManageServersDialog.open(ownerFrame(), profileStore, workspace);
-    loadServers();
+    if (ManageServersDialog.open(ownerFrame(), profileStore, workspace)) {
+      loadServers();
+    }
   }
 
   // ---------------------------------------------------------------------------
