@@ -38,6 +38,8 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -50,7 +52,6 @@ import java.util.List;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
-import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.Icon;
@@ -61,8 +62,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
-import javax.swing.JToolBar;
+import javax.swing.JTextPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -141,7 +141,7 @@ public final class ExistResultsView extends JPanel {
     lastButton = navButton(ChevronIcon.DOUBLE_RIGHT, "Last page", () -> goToPage(pageCount()));
 
     constrainWidth(methodCombo, 120);
-    constrainWidth(pageSizeCombo, 64);
+    constrainWidth(pageSizeCombo, 80);
     methodCombo.addActionListener(e -> refreshPage());
     pageSizeCombo.setSelectedItem(pageSize);
     pageSizeCombo.addActionListener(e -> {
@@ -161,22 +161,37 @@ public final class ExistResultsView extends JPanel {
   }
 
   private JComponent buildToolbar() {
-    JToolBar bar = new JToolBar();
-    bar.setFloatable(false);
-    bar.setRollover(true);
-    // Left: serialization controls. Center (glue both sides): page/result navigation. Right: page size.
-    bar.add(methodCombo);
-    bar.add(indentButton);
-    bar.add(Box.createHorizontalGlue());
-    bar.add(firstButton);
-    bar.add(prevButton);
-    bar.add(prevItemButton);
-    bar.add(rangeLabel);
-    bar.add(nextItemButton);
-    bar.add(nextButton);
-    bar.add(lastButton);
-    bar.add(Box.createHorizontalGlue());
-    bar.add(pageSizeCombo);
+    JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+    left.add(methodCombo);
+    left.add(indentButton);
+
+    JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 2));
+    nav.add(firstButton);
+    nav.add(prevButton);
+    nav.add(prevItemButton);
+    nav.add(rangeLabel);
+    nav.add(nextItemButton);
+    nav.add(nextButton);
+    nav.add(lastButton);
+
+    JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 2));
+    right.add(pageSizeCombo);
+
+    // Equal-weight side cells keep the navigation group centered in the window, regardless of how
+    // wide the left/right controls are.
+    JPanel bar = new JPanel(new GridBagLayout());
+    GridBagConstraints c = new GridBagConstraints();
+    c.fill = GridBagConstraints.HORIZONTAL;
+    c.gridy = 0;
+    c.gridx = 0;
+    c.weightx = 1.0;
+    bar.add(left, c);
+    c.gridx = 1;
+    c.weightx = 0;
+    bar.add(nav, c);
+    c.gridx = 2;
+    c.weightx = 1.0;
+    bar.add(right, c);
     return bar;
   }
 
@@ -274,7 +289,7 @@ public final class ExistResultsView extends JPanel {
       @Override
       protected void done() {
         try {
-          renderRows(get(), start);
+          renderRows(get(), start, method);
           rangeLabel.setText(
               "Showing results " + start + " to " + (start + count - 1) + " of " + totalItems);
         } catch (Exception e) {
@@ -286,12 +301,12 @@ public final class ExistResultsView extends JPanel {
     }.execute();
   }
 
-  private void renderRows(List<String> values, int startIndex) {
+  private void renderRows(List<String> values, int startIndex, String method) {
     currentStart = startIndex;
     rows.removeAll();
     rowPanels.clear();
     for (int i = 0; i < values.size(); i++) {
-      JPanel row = buildRow(startIndex + i, values.get(i));
+      JPanel row = buildRow(startIndex + i, values.get(i), method);
       rowPanels.add(row);
       rows.add(row);
     }
@@ -334,7 +349,7 @@ public final class ExistResultsView extends JPanel {
     updateNavState();
   }
 
-  private JPanel buildRow(int number, String value) {
+  private JPanel buildRow(int number, String value, String method) {
     JPanel row = new JPanel(new BorderLayout(8, 0));
     row.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
     row.addMouseListener(new MouseAdapter() {
@@ -351,11 +366,17 @@ public final class ExistResultsView extends JPanel {
     num.setForeground(Color.GRAY);
     row.add(num, BorderLayout.WEST);
 
-    JTextArea area = new JTextArea(value);
+    JTextPane area = new JTextPane() {
+      @Override
+      public boolean getScrollableTracksViewportWidth() {
+        return false; // no wrapping — long values get a horizontal scrollbar
+      }
+    };
     area.setEditable(false);
     area.setOpaque(false);
     area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-    area.setLineWrap(false);
+    ResultHighlighter.apply(area.getStyledDocument(), value,
+        ResultHighlighter.languageFor(method, value));
     row.add(area, BorderLayout.CENTER);
 
     JButton copy = OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
