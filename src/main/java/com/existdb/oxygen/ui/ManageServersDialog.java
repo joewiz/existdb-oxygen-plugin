@@ -28,11 +28,15 @@ import com.existdb.oxygen.model.ProfileStore;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.BorderLayout;
+import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import javax.swing.BorderFactory;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
@@ -80,19 +84,32 @@ public final class ManageServersDialog extends JDialog {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     table.getColumnModel().getColumn(2).setMaxWidth(70);
 
-    JToolBar bar = new JToolBar();
-    bar.setFloatable(false);
-    bar.add(button("Add…", this::add));
-    bar.add(button("Edit…", this::edit));
-    bar.add(button("Duplicate", this::duplicate));
-    bar.add(button("Remove…", this::remove));
-    bar.addSeparator();
-    bar.add(button("Move Up", () -> move(-1)));
-    bar.add(button("Move Down", () -> move(1)));
-    bar.add(button("Sort A–Z", this::sort));
-    bar.addSeparator();
-    bar.add(button("Set Default", this::setDefault));
-    bar.add(button("Test", this::test));
+    // App-specific actions on the left as text buttons.
+    JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+    left.add(textButton("Sort A–Z", this::sort));
+    left.add(textButton("Set Default", this::setDefault));
+    left.add(textButton("Test", this::test));
+
+    // Oxygen Data Sources-style flat icon toolbar on the right.
+    JToolBar right = new JToolBar();
+    right.setFloatable(false);
+    right.setRollover(true);
+    right.add(iconButton("/images/Add16.png", "Add server…", this::add));
+    right.add(iconButton("/images/Wrench16.png", "Edit server…", this::edit));
+    right.add(iconButton("/images/Copy16.png", "Duplicate server", this::duplicate));
+    right.add(iconButton("/images/Remove16.png", "Remove server…", this::remove));
+    right.addSeparator();
+    right.add(iconButton("/images/MoveUp16.png", "Move up", () -> move(-1)));
+    right.add(iconButton("/images/MoveDown16.png", "Move down", () -> move(1)));
+
+    JPanel actions = new JPanel(new BorderLayout());
+    actions.add(left, BorderLayout.WEST);
+    actions.add(right, BorderLayout.EAST);
+
+    JPanel connections = new JPanel(new BorderLayout());
+    connections.setBorder(BorderFactory.createTitledBorder("Connections"));
+    connections.add(new JScrollPane(table), BorderLayout.CENTER);
+    connections.add(actions, BorderLayout.SOUTH);
 
     JButton close = new JButton("Close");
     close.addActionListener(e -> dispose());
@@ -100,14 +117,27 @@ public final class ManageServersDialog extends JDialog {
     south.add(close);
 
     setLayout(new BorderLayout());
-    add(bar, BorderLayout.NORTH);
-    add(new JScrollPane(table), BorderLayout.CENTER);
+    add(connections, BorderLayout.CENTER);
     add(south, BorderLayout.SOUTH);
     getRootPane().setDefaultButton(close);
   }
 
-  private static JButton button(String label, Runnable action) {
+  private static JButton textButton(String label, Runnable action) {
     JButton b = new JButton(label);
+    b.setFocusable(false);
+    b.addActionListener(e -> action.run());
+    return b;
+  }
+
+  private static JButton iconButton(String resource, String tooltip, Runnable action) {
+    JButton b = new JButton();
+    URL url = ManageServersDialog.class.getResource(resource);
+    if (url != null) {
+      b.setIcon(new ImageIcon(url));
+    } else {
+      b.setText(tooltip);
+    }
+    b.setToolTipText(tooltip);
     b.setFocusable(false);
     b.addActionListener(e -> action.run());
     return b;
