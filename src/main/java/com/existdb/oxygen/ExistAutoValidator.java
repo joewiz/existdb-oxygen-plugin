@@ -73,6 +73,8 @@ public final class ExistAutoValidator {
   private final Map<String, List<DocumentPositionedInfo>> problemsByFile = new HashMap<>();
   /** Per-editor hooks, kept so they can be detached when the editor closes. */
   private final Map<URL, EditorHooks> hooks = new HashMap<>();
+  /** Whether our Results tab currently shows problems — so we don't surface an empty pane. */
+  private boolean hasShownProblems;
 
   public ExistAutoValidator(StandalonePluginWorkspace workspace) {
     this.workspace = workspace;
@@ -202,8 +204,13 @@ public final class ExistAutoValidator {
     for (List<DocumentPositionedInfo> fileProblems : problemsByFile.values()) {
       all.addAll(fileProblems);
     }
-    ResultsManager results = workspace.getResultsManager();
-    results.setResults(RESULTS_TAB, all, ResultType.PROBLEM);
+    // Don't surface (pop up) the Results view when a clean file is opened/validated: only push when
+    // there are problems, or to clear ones we previously showed.
+    if (all.isEmpty() && !hasShownProblems) {
+      return;
+    }
+    workspace.getResultsManager().setResults(RESULTS_TAB, all, ResultType.PROBLEM);
+    hasShownProblems = !all.isEmpty();
   }
 
   private JTextComponent textComponent(URL location) {
