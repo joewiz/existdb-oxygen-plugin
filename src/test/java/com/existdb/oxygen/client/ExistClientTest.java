@@ -200,7 +200,8 @@ class ExistClientTest {
     assertEquals(1, items.size());
     assertEquals("fn:count#1", items.get(0).label());
     assertEquals(3, items.get(0).kind());
-    assertEquals("fn:count()", items.get(0).insertText());
+    assertEquals("fn:count(${1:\\$arg})", items.get(0).insertText());
+    assertTrue(items.get(0).isSnippet());
   }
 
   @Test

@@ -482,7 +482,12 @@ public final class ExistClient {
    * latter two, so they fall back to the label's local name and the label respectively.
    */
   public record Completion(String label, int kind, String detail, String documentation,
-      String insertText, String filterText, String sortText) {
+      String insertText, String filterText, String sortText, int insertTextFormat) {
+
+    /** Whether {@code insertText} is an LSP snippet ({@code insertTextFormat == 2}, with tab stops). */
+    public boolean isSnippet() {
+      return insertTextFormat == 2;
+    }
   }
 
   /** Hover info for a position: the symbol's documentation as LSP {@code MarkupContent} Markdown. */
@@ -533,7 +538,8 @@ public final class ExistClient {
           o.optString("detail", null), o.optString("documentation", null),
           o.optString("insertText", label),
           o.optString("filterText", localName(label)),
-          o.optString("sortText", label)));
+          o.optString("sortText", label),
+          o.optInt("insertTextFormat", 1)));
     }
     return out;
   }

@@ -131,7 +131,8 @@ public final class MockExistServer implements AutoCloseable {
       lastLangBody = readBody(ex);
       respond(ex, 200, "[{\"label\":\"fn:count#1\",\"kind\":3,"
           + "\"detail\":\"fn:count($arg as item()*) as xs:integer\","
-          + "\"documentation\":\"Returns the number of items\",\"insertText\":\"fn:count()\"}]");
+          + "\"documentation\":\"Returns the number of items\","
+          + "\"insertText\":\"fn:count(${1:\\\\$arg})\",\"insertTextFormat\":2}]");
     });
     handle(prefix + "/langservice/hover", ex -> {
       lastLangBody = readBody(ex);

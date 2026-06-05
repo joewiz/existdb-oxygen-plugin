@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.lang.LangServiceSupport;
+import com.existdb.oxygen.lang.SnippetExpander;
 
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.editor.page.WSEditorPage;
@@ -252,7 +253,7 @@ public final class CompletionAction extends AbstractAction {
       JTextComponent component, int caret) {
     ExistClient.Completion selected = list.getSelectedValue();
     if (selected != null) {
-      insert(component, caret, selected.insertText());
+      insert(component, caret, selected);
     }
     popup.setVisible(false);
   }
@@ -284,7 +285,7 @@ public final class CompletionAction extends AbstractAction {
   }
 
   /** Replaces the identifier prefix immediately before the caret with the proposal's insert text. */
-  private static void insert(JTextComponent component, int caret, String insertText) {
+  private static void insert(JTextComponent component, int caret, ExistClient.Completion proposal) {
     try {
       Document doc = component.getDocument();
       int start = caret;
@@ -292,11 +293,20 @@ public final class CompletionAction extends AbstractAction {
         start--;
       }
       doc.remove(start, caret - start);
-      doc.insertString(start, insertText, null);
-      // For a function call, drop the caret inside the parentheses (template-style) so the user can
-      // type arguments straight away; otherwise leave it at the end of the inserted text.
-      int paren = insertText.indexOf('(');
-      component.setCaretPosition(paren >= 0 ? start + paren + 1 : start + insertText.length());
+      if (proposal.isSnippet()) {
+        // LSP snippet (existdb-openapi #45): expand the ${n:default} placeholders and select the
+        // first argument so the user can type over it (template-style).
+        SnippetExpander.Expansion ex = SnippetExpander.expand(proposal.insertText());
+        doc.insertString(start, ex.text(), null);
+        component.select(start + ex.selStart(), start + ex.selEnd());
+      } else {
+        String insertText = proposal.insertText();
+        doc.insertString(start, insertText, null);
+        // For a function call, drop the caret inside the parentheses so arguments can be typed
+        // straight away; otherwise leave it at the end of the inserted text.
+        int paren = insertText.indexOf('(');
+        component.setCaretPosition(paren >= 0 ? start + paren + 1 : start + insertText.length());
+      }
       component.requestFocusInWindow();
     } catch (BadLocationException e) {
       // Insertion failed; leave the document unchanged.
