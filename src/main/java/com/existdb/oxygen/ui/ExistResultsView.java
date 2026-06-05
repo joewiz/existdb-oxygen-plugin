@@ -34,9 +34,12 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
-import java.awt.event.ActionEvent;
-import java.awt.datatransfer.StringSelection;
 import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
+import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -73,6 +76,7 @@ public final class ExistResultsView extends JPanel {
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
   private static final Color STRIPE = new Color(0, 0, 0, 12);
+  private static final Color SELECTION = new Color(51, 102, 204, 48);
 
   private final transient StandalonePluginWorkspace workspace;
 
@@ -83,11 +87,14 @@ public final class ExistResultsView extends JPanel {
   private final JButton indentButton;
   private final JButton firstButton;
   private final JButton prevButton;
+  private final JButton prevItemButton;
+  private final JButton nextItemButton;
   private final JButton nextButton;
   private final JButton lastButton;
   private final JLabel rangeLabel = new JLabel("No results");
   private final JLabel metricsLabel = new JLabel(" ");
   private final JPanel rows = new JPanel();
+  private final transient List<JPanel> rowPanels = new ArrayList<>();
 
   private transient ExistClient client;
   private transient String cursor;
@@ -95,6 +102,8 @@ public final class ExistResultsView extends JPanel {
   private int page = 1;
   private int pageSize = 10;
   private boolean indent = true;
+  private int selectedIndex;
+  private int currentStart;
 
   public ExistResultsView(StandalonePluginWorkspace workspace) {
     super(new BorderLayout());
@@ -117,6 +126,8 @@ public final class ExistResultsView extends JPanel {
 
     firstButton = navButton("⏮", "First page", () -> goToPage(1));
     prevButton = navButton("◀", "Previous page", () -> goToPage(page - 1));
+    prevItemButton = navButton("▴", "Previous result", () -> stepItem(-1));
+    nextItemButton = navButton("▾", "Next result", () -> stepItem(1));
     nextButton = navButton("▶", "Next page", () -> goToPage(page + 1));
     lastButton = navButton("⏭", "Last page", () -> goToPage(pageCount()));
 
@@ -147,7 +158,9 @@ public final class ExistResultsView extends JPanel {
     bar.addSeparator();
     bar.add(firstButton);
     bar.add(prevButton);
+    bar.add(prevItemButton);
     bar.add(rangeLabel);
+    bar.add(nextItemButton);
     bar.add(nextButton);
     bar.add(lastButton);
     bar.add(Box.createHorizontalGlue());
@@ -196,6 +209,7 @@ public final class ExistResultsView extends JPanel {
           metricsLabel.setText("Compile: " + handle.compileMs() + " ms Eval: "
               + handle.evalMs() + " ms Total: " + handle.totalMs() + " ms Items: "
               + totalItems);
+          selectedIndex = totalItems > 0 ? 1 : 0;
           goToPage(1);
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
@@ -256,18 +270,57 @@ public final class ExistResultsView extends JPanel {
   }
 
   private void renderRows(List<String> values, int startIndex) {
+    currentStart = startIndex;
     rows.removeAll();
+    rowPanels.clear();
     for (int i = 0; i < values.size(); i++) {
-      rows.add(buildRow(startIndex + i, values.get(i), i % 2 == 1));
+      JPanel row = buildRow(startIndex + i, values.get(i));
+      rowPanels.add(row);
+      rows.add(row);
     }
     rows.revalidate();
     rows.repaint();
+    applyHighlight();
   }
 
-  private JComponent buildRow(int number, String value, boolean striped) {
+  /** Steps the highlighted result by {@code delta}, crossing page boundaries as needed. */
+  private void stepItem(int delta) {
+    if (totalItems == 0) {
+      return;
+    }
+    int target = Math.max(1, Math.min((selectedIndex <= 0 ? 1 : selectedIndex + delta), totalItems));
+    selectedIndex = target;
+    int neededPage = (target - 1) / pageSize + 1;
+    if (neededPage != page) {
+      goToPage(neededPage); // refreshPage → renderRows → applyHighlight
+    } else {
+      applyHighlight();
+    }
+  }
+
+  /** Paints the selected row's highlight (others striped/plain) and scrolls it into view. */
+  private void applyHighlight() {
+    for (int i = 0; i < rowPanels.size(); i++) {
+      JPanel row = rowPanels.get(i);
+      boolean selected = currentStart + i == selectedIndex;
+      row.setBackground(selected ? SELECTION : (i % 2 == 1 ? STRIPE : Color.WHITE));
+      if (selected) {
+        row.scrollRectToVisible(row.getBounds());
+      }
+    }
+    updateNavState();
+  }
+
+  private JPanel buildRow(int number, String value) {
     JPanel row = new JPanel(new BorderLayout(8, 0));
-    row.setBackground(striped ? STRIPE : Color.WHITE);
     row.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+    row.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mousePressed(MouseEvent e) {
+        selectedIndex = number;
+        applyHighlight();
+      }
+    });
 
     JLabel num = new JLabel(String.valueOf(number), SwingConstants.CENTER);
     num.setPreferredSize(new Dimension(44, 1));
@@ -313,6 +366,8 @@ public final class ExistResultsView extends JPanel {
     prevButton.setEnabled(page > 1);
     nextButton.setEnabled(page < count);
     lastButton.setEnabled(page < count);
+    prevItemButton.setEnabled(selectedIndex > 1);
+    nextItemButton.setEnabled(selectedIndex > 0 && selectedIndex < totalItems);
   }
 
   private int pageCount() {
@@ -343,7 +398,7 @@ public final class ExistResultsView extends JPanel {
   }
 
   private static ImageIcon icon(String resource) {
-    java.net.URL url = ExistResultsView.class.getResource(resource);
+    URL url = ExistResultsView.class.getResource(resource);
     return url != null ? new ImageIcon(url) : null;
   }
 
