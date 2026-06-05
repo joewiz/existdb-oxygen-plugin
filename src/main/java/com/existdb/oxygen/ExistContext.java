@@ -40,6 +40,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class ExistContext {
 
   private static final Map<String, ExistClient> CLIENTS = new ConcurrentHashMap<>();
+  /** Maps each id and prior-slug alias to the profile's current id, so old URLs canonicalize. */
+  private static final Map<String, String> CANONICAL = new ConcurrentHashMap<>();
   private static volatile String defaultId;
 
   private ExistContext() {
@@ -48,13 +50,24 @@ public final class ExistContext {
   /** Rebuilds the registry from the saved profiles and the default-server id. */
   public static void setProfiles(List<ConnectionProfile> profiles, String defaultProfileId) {
     Map<String, ExistClient> next = new ConcurrentHashMap<>();
+    Map<String, String> canonical = new ConcurrentHashMap<>();
     for (ConnectionProfile profile : profiles) {
-      if (profile.getId() != null) {
-        next.put(profile.getId(), new ExistClient(profile));
+      if (profile.getId() == null) {
+        continue;
+      }
+      ExistClient client = new ExistClient(profile);
+      next.put(profile.getId(), client);
+      canonical.put(profile.getId(), profile.getId());
+      for (String alias : profile.getAliases()) {
+        // A current id wins over a stale alias if they ever collide.
+        next.putIfAbsent(alias, client);
+        canonical.putIfAbsent(alias, profile.getId());
       }
     }
     CLIENTS.clear();
     CLIENTS.putAll(next);
+    CANONICAL.clear();
+    CANONICAL.putAll(canonical);
     defaultId = defaultProfileId;
   }
 
@@ -104,8 +117,16 @@ public final class ExistContext {
   public static String serverIdFor(URL location) {
     if (location != null) {
       String id = LangServiceSupport.serverId(location.toExternalForm());
-      if (id != null && CLIENTS.containsKey(id)) {
-        return id;
+      if (id != null) {
+        // Canonicalize a prior-slug alias to the profile's current id, so new URLs use the
+        // up-to-date slug.
+        String canonical = CANONICAL.get(id);
+        if (canonical != null) {
+          return canonical;
+        }
+        if (CLIENTS.containsKey(id)) {
+          return id;
+        }
       }
     }
     return defaultId;

@@ -21,6 +21,9 @@
  */
 package com.existdb.oxygen.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * A single eXist-db connection: a base URL plus credentials.
  *
@@ -31,11 +34,15 @@ package com.existdb.oxygen.model;
 public final class ConnectionProfile {
 
   /**
-   * Stable, hidden identifier for this profile, assigned once by {@code ProfileStore}. Survives
-   * name and base-URL edits, and identifies the server in {@code exist://<id>/…} URLs. May be
-   * {@code null} for a freshly-constructed profile until the store assigns one.
+   * The profile's identifier — a URL-safe slug of its name (e.g. {@code localhost-8080}), assigned
+   * by {@code ProfileStore}. It appears in {@code exist://<id>/…} URLs, so it's chosen to be
+   * human-meaningful in editor titles. On rename it changes and the old slug is kept in
+   * {@link #aliases} so already-open editors keep resolving. May be {@code null} until the store
+   * assigns one.
    */
   private String id;
+  /** Prior ids (slugs) this profile used, kept so {@code exist://<oldSlug>/…} URLs still route. */
+  private final List<String> aliases = new ArrayList<>();
   private String name;
   private String baseUrl;
   private String user;
@@ -65,6 +72,25 @@ public final class ConnectionProfile {
 
   public void setId(String id) {
     this.id = id;
+  }
+
+  /** Prior slugs this profile used (so old {@code exist://} URLs still route after a rename). */
+  public List<String> getAliases() {
+    return aliases;
+  }
+
+  public void setAliases(List<String> values) {
+    aliases.clear();
+    if (values != null) {
+      values.forEach(this::addAlias);
+    }
+  }
+
+  /** Records a previous id as an alias (ignoring blanks, the current id, and duplicates). */
+  public void addAlias(String alias) {
+    if (alias != null && !alias.isBlank() && !alias.equals(id) && !aliases.contains(alias)) {
+      aliases.add(alias);
+    }
   }
 
   public String getName() {
