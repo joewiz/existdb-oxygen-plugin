@@ -102,20 +102,20 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
 
-    // Bind Cmd/Ctrl+Enter to Run Current Editor inside text editors (the menu was removed, so the
+    // Bind Cmd/Ctrl+Enter to Run in Results View inside text editors (the menu was removed, so the
     // accelerator is wired onto each text page as it opens / switches to Text mode).
     final KeyStroke runShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
-    runCurrentEditorAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
+    runInResultsViewAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorOpened(URL editorLocation) {
-        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runCurrentEditorAction);
+        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runInResultsViewAction);
       }
 
       @Override
       public void editorPageChanged(URL editorLocation) {
-        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runCurrentEditorAction);
+        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runInResultsViewAction);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
 

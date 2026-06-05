@@ -22,6 +22,7 @@
 package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.query.QueryRunner;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -33,6 +34,7 @@ import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -106,6 +108,7 @@ public final class ExistResultsView extends JPanel {
   private final transient List<JPanel> rowPanels = new ArrayList<>();
 
   private transient ExistClient client;
+  private transient String serverId;
   private transient String cursor;
   private int totalItems;
   private int page = 1;
@@ -227,9 +230,11 @@ public final class ExistResultsView extends JPanel {
   }
 
   /** Runs {@code query} on {@code client}, opening a fresh cursor and showing the first page. */
-  public void run(ExistClient existClient, String query, String moduleLoadPath, String contextItem) {
+  public void run(ExistClient existClient, String serverIdentifier, String query,
+      String moduleLoadPath, String contextItem) {
     closeCursorQuietly();
     this.client = existClient;
+    this.serverId = serverIdentifier;
     metricsLabel.setText("Running…");
     new SwingWorker<ExistClient.QueryHandle, Void>() {
       @Override
@@ -278,17 +283,19 @@ public final class ExistResultsView extends JPanel {
     final boolean doIndent = indent;
     final ExistClient activeClient = client;
     final String activeCursor = cursor;
-    new SwingWorker<List<String>, Void>() {
+    new SwingWorker<List<QueryRunner.Item>, Void>() {
       @Override
-      protected List<String> doInBackground() throws Exception {
+      protected List<QueryRunner.Item> doInBackground() throws Exception {
         String body = activeClient.fetchResultsRaw(activeCursor, start, count, method, doIndent);
         JSONArray array = new JSONArray(body);
-        List<String> values = new ArrayList<>(array.length());
+        List<QueryRunner.Item> items = new ArrayList<>(array.length());
         for (int i = 0; i < array.length(); i++) {
           JSONObject item = array.getJSONObject(i);
-          values.add(item.optString("value", item.toString()));
+          items.add(new QueryRunner.Item(item.optString("value", item.toString()),
+              item.optString("type", ""), item.optString("documentURI", ""),
+              item.optString("nodeId", "")));
         }
-        return values;
+        return items;
       }
 
       @Override
@@ -306,12 +313,12 @@ public final class ExistResultsView extends JPanel {
     }.execute();
   }
 
-  private void renderRows(List<String> values, int startIndex, String method) {
+  private void renderRows(List<QueryRunner.Item> items, int startIndex, String method) {
     currentStart = startIndex;
     rows.removeAll();
     rowPanels.clear();
-    for (int i = 0; i < values.size(); i++) {
-      JPanel row = buildRow(startIndex + i, values.get(i), method);
+    for (int i = 0; i < items.size(); i++) {
+      JPanel row = buildRow(startIndex + i, items.get(i), method);
       rowPanels.add(row);
       rows.add(row);
     }
@@ -354,7 +361,8 @@ public final class ExistResultsView extends JPanel {
     updateNavState();
   }
 
-  private JPanel buildRow(int number, String value, String method) {
+  private JPanel buildRow(int number, QueryRunner.Item item, String method) {
+    String value = item.value();
     JPanel row = new JPanel(new BorderLayout(8, 0));
     row.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
     row.addMouseListener(new MouseAdapter() {
@@ -365,11 +373,7 @@ public final class ExistResultsView extends JPanel {
       }
     });
 
-    JLabel num = new JLabel(String.valueOf(number), SwingConstants.CENTER);
-    num.setPreferredSize(new Dimension(44, 1));
-    num.setVerticalAlignment(SwingConstants.TOP);
-    num.setForeground(Color.GRAY);
-    row.add(num, BorderLayout.WEST);
+    row.add(buildNumberLabel(number, item), BorderLayout.WEST);
 
     JTextPane area = new JTextPane() {
       @Override
@@ -455,6 +459,31 @@ public final class ExistResultsView extends JPanel {
   public Dimension getPreferredSize() {
     Dimension d = super.getPreferredSize();
     return new Dimension(Math.max(d.width, 400), Math.max(d.height, 240));
+  }
+
+  /**
+   * The row's number cell. For a stored database node it's a link that opens the source document and
+   * selects the originating element; otherwise it's a plain grey number.
+   */
+  private JLabel buildNumberLabel(int number, QueryRunner.Item item) {
+    JLabel num = new JLabel(String.valueOf(number), SwingConstants.CENTER);
+    num.setPreferredSize(new Dimension(44, 1));
+    num.setVerticalAlignment(SwingConstants.TOP);
+    if (item.hasSource()) {
+      num.setText("<html><u>" + number + "</u></html>");
+      num.setForeground(new Color(0x2A, 0x66, 0xC8));
+      num.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+      num.setToolTipText("Open source: " + item.documentURI());
+      num.addMouseListener(new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent e) {
+          SourceNodeOpener.open(workspace, serverId, item.documentURI(), item.nodeId());
+        }
+      });
+    } else {
+      num.setForeground(Color.GRAY);
+    }
+    return num;
   }
 
   /** A uniform, vector chevron icon for the navigation buttons (so widths match, unlike glyphs). */

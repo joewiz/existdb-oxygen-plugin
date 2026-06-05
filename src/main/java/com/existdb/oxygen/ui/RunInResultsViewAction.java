@@ -80,8 +80,9 @@ public final class RunInResultsViewAction extends AbstractAction {
       return;
     }
     String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
+    String serverId = ExistContext.serverIdFor(editor.getEditorLocation());
     workspace.showView(viewId, true);
-    resultsView.run(client, query, moduleLoadPath, null);
+    resultsView.run(client, serverId, query, moduleLoadPath, null);
   }
 
   private static String queryText(JTextComponent component) {
