@@ -33,8 +33,6 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import java.awt.Color;
 import java.awt.Point;
 import java.awt.event.ActionEvent;
-import java.awt.event.FocusAdapter;
-import java.awt.event.FocusEvent;
 import java.awt.geom.Rectangle2D;
 import java.util.List;
 
@@ -73,7 +71,7 @@ public final class SignatureHelpAction extends AbstractAction {
 
   @Override
   public void actionPerformed(ActionEvent event) {
-    trigger();
+    trigger(true);
   }
 
   /** Whether a hint is on screen (so caret moves should refresh it rather than open a new one). */
@@ -97,10 +95,8 @@ public final class SignatureHelpAction extends AbstractAction {
         try {
           String inserted = e.getDocument().getText(e.getOffset(), e.getLength());
           if (inserted.indexOf('(') >= 0 || inserted.indexOf(',') >= 0
-              || inserted.indexOf(')') >= 0) {
-            SwingUtilities.invokeLater(SignatureHelpAction.this::trigger);
-          } else if (showing) {
-            SwingUtilities.invokeLater(SignatureHelpAction.this::trigger);
+              || inserted.indexOf(')') >= 0 || showing) {
+            SwingUtilities.invokeLater(() -> trigger(false));
           }
         } catch (BadLocationException ex) {
           // Ignore; the next relevant keystroke will re-trigger.
@@ -110,19 +106,13 @@ public final class SignatureHelpAction extends AbstractAction {
       @Override
       public void removeUpdate(DocumentEvent e) {
         if (showing) {
-          SwingUtilities.invokeLater(SignatureHelpAction.this::trigger);
+          SwingUtilities.invokeLater(() -> trigger(false));
         }
       }
 
       @Override
       public void changedUpdate(DocumentEvent e) {
         // Attribute-only changes; nothing to do.
-      }
-    });
-    component.addFocusListener(new FocusAdapter() {
-      @Override
-      public void focusLost(FocusEvent e) {
-        hide();
       }
     });
   }
@@ -139,8 +129,11 @@ public final class SignatureHelpAction extends AbstractAction {
   /**
    * Fetches signature help for the caret in the active XQuery editor and shows (or refreshes) the
    * hint; hides it when the caret isn't inside a call. Safe to call repeatedly (typing/caret moves).
+   *
+   * @param userInvoked {@code true} for the menu/shortcut action (gives status feedback so the user
+   *     isn't left wondering); {@code false} for the silent auto-trigger while typing.
    */
-  public void trigger() {
+  public void trigger(boolean userInvoked) {
     WSEditor editor = workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
     WSTextEditorPage page = textPage(editor);
     if (page == null) {
@@ -150,6 +143,9 @@ public final class SignatureHelpAction extends AbstractAction {
     final ExistClient client = ExistContext.clientFor(editor.getEditorLocation());
     if (client == null) {
       hide();
+      if (userInvoked) {
+        workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
+      }
       return;
     }
     final JTextComponent component = (JTextComponent) page.getTextComponent();
@@ -178,11 +174,18 @@ public final class SignatureHelpAction extends AbstractAction {
           ExistClient.SignatureHelp help = get();
           if (help == null || help.signatures().isEmpty()) {
             hide();
+            if (userInvoked) {
+              workspace.showStatusMessage("eXist-db: no function call at the caret.");
+            }
           } else {
             showHint(component, caret, help);
           }
         } catch (Exception e) {
           hide();
+          if (userInvoked) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            workspace.showErrorMessage("eXist-db parameter hints failed: " + cause.getMessage());
+          }
         }
       }
     }.execute();
