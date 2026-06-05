@@ -197,6 +197,8 @@ public final class ExistResultsView extends JPanel {
 
     rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
     rows.setBackground(Color.WHITE);
+    // Paint the area below the last row white too (the rows panel only covers its own height).
+    scrollPane.getViewport().setBackground(Color.WHITE);
 
     layered.add(scrollPane, JLayeredPane.DEFAULT_LAYER);
     layered.addComponentListener(new ComponentAdapter() {
@@ -610,6 +612,10 @@ public final class ExistResultsView extends JPanel {
     // Per-result copy is provided by the floating button at the viewport's right edge, so it stays
     // visible even when a result is wider than the view.
     row.add(area, BorderLayout.CENTER);
+    // Cap the row's height to its content so BoxLayout doesn't stretch a lone result to fill (and
+    // shade) the whole viewport; width is free so wide results can scroll horizontally.
+    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+    row.setAlignmentX(LEFT_ALIGNMENT);
     return row;
   }
 
