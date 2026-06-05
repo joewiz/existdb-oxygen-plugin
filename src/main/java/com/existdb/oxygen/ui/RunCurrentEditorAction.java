@@ -112,7 +112,15 @@ public final class RunCurrentEditorAction extends AbstractAction {
       return;
     }
     boolean xml = QueryRunner.looksLikeXml(result.output());
-    workspace.createNewEditor(xml ? "xml" : "txt", xml ? "text/xml" : "text/plain", result.output());
+    String content = result.output();
+    if (xml && result.totalItems() > 1) {
+      // A sequence of more than one node is not a well-formed XML document on its own (XML allows
+      // only a single root element). Wrap it in a neutral, no-namespace container so Oxygen opens
+      // it as valid XML — and so the first child's document-type association (e.g. DocBook → Author
+      // mode) doesn't fire on a fragment and report a spurious parse error over valid results.
+      content = "<results>\n" + content + "\n</results>";
+    }
+    workspace.createNewEditor(xml ? "xml" : "txt", xml ? "text/xml" : "text/plain", content);
     if (result.truncated()) {
       workspace.showStatusMessage("eXist: showing the first " + QueryRunner.MAX_ITEMS
           + " of " + result.totalItems() + " items.");
