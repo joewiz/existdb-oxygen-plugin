@@ -33,6 +33,8 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import java.awt.Color;
 import java.awt.Point;
 import java.awt.event.ActionEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
 import java.awt.geom.Rectangle2D;
 import java.util.List;
 
@@ -89,13 +91,14 @@ public final class SignatureHelpAction extends AbstractAction {
       return;
     }
     component.putClientProperty(WATCH_KEY, Boolean.TRUE);
+    // Open the hint when a "(", ",", or ")" is typed.
     component.getDocument().addDocumentListener(new DocumentListener() {
       @Override
       public void insertUpdate(DocumentEvent e) {
         try {
           String inserted = e.getDocument().getText(e.getOffset(), e.getLength());
           if (inserted.indexOf('(') >= 0 || inserted.indexOf(',') >= 0
-              || inserted.indexOf(')') >= 0 || showing) {
+              || inserted.indexOf(')') >= 0) {
             SwingUtilities.invokeLater(() -> trigger(false));
           }
         } catch (BadLocationException ex) {
@@ -105,14 +108,31 @@ public final class SignatureHelpAction extends AbstractAction {
 
       @Override
       public void removeUpdate(DocumentEvent e) {
-        if (showing) {
-          SwingUtilities.invokeLater(() -> trigger(false));
-        }
+        // Caret movement (below) refreshes/closes while a hint is up.
       }
 
       @Override
       public void changedUpdate(DocumentEvent e) {
         // Attribute-only changes; nothing to do.
+      }
+    });
+    // While a hint is up, any caret move refreshes the active parameter — and closes the hint when
+    // the caret leaves the call (the server returns nothing), so it doesn't linger.
+    component.addCaretListener(e -> {
+      if (showing) {
+        SwingUtilities.invokeLater(() -> trigger(false));
+      }
+    });
+    // Dismiss when the editor loses focus (switching tabs, windows, or apps) so the popup — which
+    // floats above other windows — never lingers.
+    component.addFocusListener(new FocusAdapter() {
+      @Override
+      public void focusLost(FocusEvent e) {
+        // Ignore transient focus loss (e.g. to a popup/menu) so the hint can't dismiss itself; only
+        // hide on a real change of focus owner — switching tab, window, or application.
+        if (!e.isTemporary()) {
+          hide();
+        }
       }
     });
   }
