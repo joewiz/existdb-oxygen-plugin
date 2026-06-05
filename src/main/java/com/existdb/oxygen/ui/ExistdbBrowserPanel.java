@@ -33,17 +33,18 @@ import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
+import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
-import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
@@ -61,8 +62,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.swing.AbstractButton;
-import javax.swing.BorderFactory;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 import javax.swing.Box;
 import javax.swing.DropMode;
 import javax.swing.ImageIcon;
@@ -74,9 +75,9 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JToggleButton;
 import javax.swing.JToolBar;
 import javax.swing.JTree;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.ToolTipManager;
@@ -118,7 +119,8 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private final DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("servers");
   private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode);
-  private final JTree tree = new JTree(treeModel);
+  // Built via Oxygen's factory so it inherits the workbench tree's row height, font, and selection.
+  private final JTree tree = OxygenUIComponentsFactory.createTree(treeModel);
 
   /** When on, the active editor's resource is revealed and selected in the tree (like the Project view). */
   private boolean linkWithEditor;
@@ -134,7 +136,9 @@ public final class ExistdbBrowserPanel extends JPanel {
     setPreferredSize(new Dimension(260, 400));
 
     add(buildToolbar(), BorderLayout.NORTH);
-    add(new JScrollPane(tree), BorderLayout.CENTER);
+    add(OxygenUIComponentsFactory.createScrollPane(tree,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
 
     configureTree();
     loadServers();
@@ -154,62 +158,49 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private JComponent buildToolbar() {
-    JButton gear = new JButton();
-    ImageIcon icon = loadFirstIcon("/images/Settings16.png");
-    if (icon != null) {
-      gear.setIcon(icon);
-    } else {
-      gear.setText("⚙"); // gear glyph fallback
-    }
-    gear.setToolTipText("Configure eXist-db Connections");
-    // Mirror the Data Source Explorer gear: a single click opens the configure dialog, no dropdown.
-    gear.addActionListener(e -> manageServers());
-    flatten(gear);
+    Action linkAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/LinkWithEditor16.png"));
+        putValue(SHORT_DESCRIPTION, "Link with Editor");
+        putValue(SELECTED_KEY, Boolean.FALSE);
+      }
 
-    JToggleButton link = new JToggleButton();
-    ImageIcon linkIcon = loadFirstIcon("/images/LinkWithEditor16.png");
-    if (linkIcon != null) {
-      link.setIcon(linkIcon);
-    } else {
-      link.setText("Link");
-    }
-    link.setToolTipText("Link with Editor");
-    link.addActionListener(e -> {
-      linkWithEditor = link.isSelected();
-      if (linkWithEditor) {
-        WSEditor editor =
-            workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
-        if (editor != null) {
-          revealIfLinked(editor.getEditorLocation());
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        linkWithEditor = Boolean.TRUE.equals(getValue(SELECTED_KEY));
+        if (linkWithEditor) {
+          WSEditor editor =
+              workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+          if (editor != null) {
+            revealIfLinked(editor.getEditorLocation());
+          }
         }
       }
-    });
-    // Flat when off; filled + bordered when on, so the active state reads clearly (like the Project
-    // view's Link-with-Editor toggle).
-    flatten(link);
-    link.addChangeListener(e -> {
-      boolean on = link.isSelected();
-      link.setContentAreaFilled(on);
-      link.setBorderPainted(on);
-    });
+    };
+    Action gearAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/Settings16.png"));
+        putValue(SHORT_DESCRIPTION, "Configure eXist-db Connections");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        manageServers();
+      }
+    };
+
+    // Oxygen's factory buttons inherit the workbench's flat rollover (and toggle) styling exactly.
+    JButton link = OxygenUIComponentsFactory.createToolbarToggleButton(linkAction, false);
+    JButton gear = OxygenUIComponentsFactory.createToolbarButton(gearAction, false);
 
     JToolBar bar = new JToolBar();
     bar.setFloatable(false);
     bar.setRollover(true);
-    bar.setBorder(BorderFactory.createEmptyBorder());
     bar.add(Box.createHorizontalGlue());
     bar.add(link);
     bar.addSeparator();
     bar.add(gear);
     return bar;
-  }
-
-  /** Compact, flat toolbar button (small margins, no fill/border) matching Oxygen's view toolbars. */
-  private static void flatten(AbstractButton button) {
-    button.setFocusable(false);
-    button.setMargin(new Insets(2, 2, 2, 2));
-    button.setContentAreaFilled(false);
-    button.setBorderPainted(false);
   }
 
   private void configureTree() {
@@ -1323,6 +1314,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     public Component getTreeCellRendererComponent(JTree t, Object value, boolean selected,
         boolean expanded, boolean leaf, int row, boolean focus) {
       super.getTreeCellRendererComponent(t, value, selected, expanded, leaf, row, focus);
+      // Inherit the Oxygen tree's font so labels match the rest of the workbench's tree views.
+      setFont(t.getFont());
       if (value instanceof DefaultMutableTreeNode node
           && node.getUserObject() instanceof ExistNode existNode) {
         setIcon(iconFor(existNode, expanded));

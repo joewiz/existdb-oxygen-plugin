@@ -26,16 +26,20 @@ import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
+import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -64,7 +68,8 @@ public final class ManageServersDialog extends JDialog {
   private final transient StandalonePluginWorkspace workspace;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
-  private final JTable table = new JTable(model);
+  // Oxygen's table paints the alternating row stripes and selection used across the workbench.
+  private final JTable table = OxygenUIComponentsFactory.createTable(model);
 
   private transient ConnectionProfile defaultProfile;
   private boolean committed;
@@ -133,10 +138,18 @@ public final class ManageServersDialog extends JDialog {
     connections.add(new JScrollPane(table), BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
 
-    JButton ok = new JButton("OK");
-    ok.addActionListener(e -> commit());
-    JButton cancel = new JButton("Cancel");
-    cancel.addActionListener(e -> dispose());
+    JButton ok = OxygenUIComponentsFactory.createButton(new AbstractAction("OK") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        commit();
+      }
+    });
+    JButton cancel = OxygenUIComponentsFactory.createButton(new AbstractAction("Cancel") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        dispose();
+      }
+    });
     JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
     south.add(ok);
     south.add(cancel);
@@ -151,24 +164,32 @@ public final class ManageServersDialog extends JDialog {
   }
 
   private static JButton textButton(String label, Runnable action) {
-    JButton b = new JButton(label);
-    b.setFocusable(false);
-    b.addActionListener(e -> action.run());
-    return b;
+    return OxygenUIComponentsFactory.createButton(new AbstractAction(label) {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        action.run();
+      }
+    });
   }
 
   private static JButton iconButton(String resource, String tooltip, Runnable action) {
-    JButton b = new JButton();
     URL url = ManageServersDialog.class.getResource(resource);
-    if (url != null) {
-      b.setIcon(new ImageIcon(url));
-    } else {
-      b.setText(tooltip);
-    }
-    b.setToolTipText(tooltip);
-    b.setFocusable(false);
-    b.addActionListener(e -> action.run());
-    return b;
+    Action a = new AbstractAction() {
+      {
+        if (url != null) {
+          putValue(SMALL_ICON, new ImageIcon(url));
+        } else {
+          putValue(NAME, tooltip);
+        }
+        putValue(SHORT_DESCRIPTION, tooltip);
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        action.run();
+      }
+    };
+    return OxygenUIComponentsFactory.createToolbarButton(a, false);
   }
 
   /** Persists the working copy and the chosen default, then closes. */
