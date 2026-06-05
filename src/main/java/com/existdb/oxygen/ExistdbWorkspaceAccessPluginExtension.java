@@ -125,6 +125,11 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
       }
 
       private void bindShortcuts(StandalonePluginWorkspace workspace, URL editorLocation) {
+        // Scope the eXist run/completion shortcuts to XQuery editors only (exist: or local .xq…),
+        // so we don't shadow Ctrl+Space etc. in XML/other editors.
+        if (!ExistAutoValidator.isXQuery(editorLocation)) {
+          return;
+        }
         bindShortcut(workspace, editorLocation, runShortcut, "existRun", runInResultsViewAction);
         bindShortcut(workspace, editorLocation, completionShortcut, "existComplete",
             completionAction);
@@ -178,7 +183,10 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
     if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
         && page.getTextComponent() instanceof JComponent component) {
+      // Bind on both the focused-component map (wins over Oxygen's own editor bindings) and the
+      // ancestor map (in case focus is delegated to a child of the text component).
       component.getInputMap(JComponent.WHEN_FOCUSED).put(shortcut, key);
+      component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(shortcut, key);
       component.getActionMap().put(key, action);
     }
   }

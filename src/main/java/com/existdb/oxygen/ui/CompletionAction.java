@@ -40,6 +40,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Rectangle2D;
 import java.util.List;
+import java.util.Locale;
 
 import javax.swing.AbstractAction;
 import javax.swing.DefaultListCellRenderer;
@@ -47,10 +48,14 @@ import javax.swing.DefaultListModel;
 import javax.swing.ImageIcon;
 import javax.swing.JEditorPane;
 import javax.swing.JList;
+import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Document;
 import javax.swing.text.JTextComponent;
@@ -104,11 +109,13 @@ public final class CompletionAction extends AbstractAction {
       @Override
       protected void done() {
         try {
-          List<ExistClient.Completion> proposals = LangServiceSupport.filterAndSort(get(), prefix);
+          // Keep the full server-scoped list and let the type-to-filter field narrow it live; seed
+          // the field with the local name already typed before the caret (e.g. "w" of "util:w").
+          List<ExistClient.Completion> proposals = LangServiceSupport.filterAndSort(get(), "");
           if (proposals.isEmpty()) {
             workspace.showStatusMessage("eXist: no completions.");
           } else {
-            showPopup(component, caret, proposals);
+            showPopup(component, caret, proposals, LangServiceSupport.localName(prefix));
           }
         } catch (Exception e) {
           workspace.showErrorMessage("eXist completion failed: " + e.getMessage());
@@ -117,9 +124,9 @@ public final class CompletionAction extends AbstractAction {
     }.execute();
   }
 
-  private void showPopup(JTextComponent component, int caret, List<ExistClient.Completion> items) {
+  private void showPopup(JTextComponent component, int caret,
+      List<ExistClient.Completion> items, String initialPrefix) {
     DefaultListModel<ExistClient.Completion> model = new DefaultListModel<>();
-    items.forEach(model::addElement);
 
     JList<ExistClient.Completion> list = new JList<>(model);
     list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -133,12 +140,46 @@ public final class CompletionAction extends AbstractAction {
         Math.min(items.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT + 4));
     list.addListSelectionListener(e -> showDoc(doc, list.getSelectedValue()));
 
+    // Type-to-filter field: live-narrows the list by the proposals' local names (eXide behavior).
+    JTextField filter = new JTextField(initialPrefix);
+    Runnable refilter = () -> {
+      String prefix = filter.getText().toLowerCase(Locale.ROOT);
+      model.clear();
+      for (ExistClient.Completion c : items) {
+        if (LangServiceSupport.matchesLocal(c, prefix)) {
+          model.addElement(c);
+        }
+      }
+      if (!model.isEmpty()) {
+        list.setSelectedIndex(0);
+      }
+    };
+    filter.getDocument().addDocumentListener(new DocumentListener() {
+      @Override
+      public void insertUpdate(DocumentEvent e) {
+        refilter.run();
+      }
+
+      @Override
+      public void removeUpdate(DocumentEvent e) {
+        refilter.run();
+      }
+
+      @Override
+      public void changedUpdate(DocumentEvent e) {
+        refilter.run();
+      }
+    });
+
     JPopupMenu popup = new JPopupMenu();
     popup.setLayout(new BorderLayout());
     JScrollPane listScroll = new JScrollPane(list);
-    listScroll.setPreferredSize(new Dimension(340,
-        Math.min(items.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT + 4));
-    popup.add(listScroll, BorderLayout.WEST);
+    JPanel listPane = new JPanel(new BorderLayout());
+    listPane.add(filter, BorderLayout.NORTH);
+    listPane.add(listScroll, BorderLayout.CENTER);
+    listPane.setPreferredSize(new Dimension(340,
+        Math.min(items.size(), MAX_VISIBLE_ROWS) * ROW_HEIGHT + 4 + filter.getPreferredSize().height));
+    popup.add(listPane, BorderLayout.WEST);
     popup.add(docScroll, BorderLayout.CENTER);
 
     list.addMouseListener(new MouseAdapter() {
@@ -149,25 +190,41 @@ public final class CompletionAction extends AbstractAction {
         }
       }
     });
-    list.addKeyListener(new KeyAdapter() {
+    // Keystrokes go to the filter field (it keeps focus); steer the list and accept/cancel from it.
+    filter.addKeyListener(new KeyAdapter() {
       @Override
       public void keyPressed(KeyEvent e) {
-        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-          accept(list, popup, component, caret);
-        } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
-          popup.setVisible(false);
+        switch (e.getKeyCode()) {
+          case KeyEvent.VK_ENTER -> accept(list, popup, component, caret);
+          case KeyEvent.VK_ESCAPE -> popup.setVisible(false);
+          case KeyEvent.VK_DOWN -> moveSelection(list, 1);
+          case KeyEvent.VK_UP -> moveSelection(list, -1);
+          default -> {
+            // Other keys edit the filter text.
+          }
         }
       }
     });
 
-    list.setSelectedIndex(0);
+    refilter.run();
     try {
       Rectangle2D r = component.modelToView2D(caret);
       popup.show(component, (int) r.getX(), (int) (r.getY() + r.getHeight()));
-      list.requestFocusInWindow();
+      filter.requestFocusInWindow();
     } catch (BadLocationException e) {
       // Cannot place the popup; skip.
     }
+  }
+
+  /** Moves the list selection by {@code delta} rows, clamped to the model bounds, and scrolls to it. */
+  private static void moveSelection(JList<ExistClient.Completion> list, int delta) {
+    int size = list.getModel().getSize();
+    if (size == 0) {
+      return;
+    }
+    int next = Math.max(0, Math.min(size - 1, list.getSelectedIndex() + delta));
+    list.setSelectedIndex(next);
+    list.ensureIndexIsVisible(next);
   }
 
   /** Shows the selected proposal's signature and documentation in the side panel. */
