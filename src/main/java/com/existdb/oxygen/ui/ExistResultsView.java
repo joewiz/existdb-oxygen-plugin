@@ -59,6 +59,7 @@ import javax.swing.JTextArea;
 import javax.swing.JToolBar;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 
 /**
@@ -75,8 +76,10 @@ public final class ExistResultsView extends JPanel {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
-  private static final Color STRIPE = new Color(0, 0, 0, 12);
-  private static final Color SELECTION = new Color(51, 102, 204, 48);
+  // Solid (non-alpha) colors: translucent backgrounds on opaque rows leave paint artifacts.
+  private static final Color STRIPE = new Color(0xF2, 0xF4, 0xF7);
+  private static final Color PLAIN = Color.WHITE;
+  private static final Color SELECTION = new Color(0xD6, 0xE6, 0xFB);
 
   private final transient StandalonePluginWorkspace workspace;
 
@@ -300,13 +303,19 @@ public final class ExistResultsView extends JPanel {
 
   /** Paints the selected row's highlight (others striped/plain) and scrolls it into view. */
   private void applyHighlight() {
+    JPanel selectedRow = null;
     for (int i = 0; i < rowPanels.size(); i++) {
       JPanel row = rowPanels.get(i);
       boolean selected = currentStart + i == selectedIndex;
-      row.setBackground(selected ? SELECTION : (i % 2 == 1 ? STRIPE : Color.WHITE));
+      row.setBackground(selected ? SELECTION : (i % 2 == 1 ? STRIPE : PLAIN));
       if (selected) {
-        row.scrollRectToVisible(row.getBounds());
+        selectedRow = row;
       }
+    }
+    final JPanel target = selectedRow;
+    if (target != null) {
+      // getBounds() is in the rows panel's coordinate space, so scroll on the parent.
+      SwingUtilities.invokeLater(() -> rows.scrollRectToVisible(target.getBounds()));
     }
     updateNavState();
   }
