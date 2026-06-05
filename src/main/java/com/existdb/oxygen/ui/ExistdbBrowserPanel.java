@@ -25,10 +25,13 @@ import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
 import com.existdb.oxygen.client.MimeTypes;
+import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
+import ro.sync.exml.workspace.api.editor.WSEditor;
+import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.BorderLayout;
@@ -65,6 +68,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
+import javax.swing.JToggleButton;
 import javax.swing.JTree;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -94,8 +98,9 @@ public final class ExistdbBrowserPanel extends JPanel {
       DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ExistNodeRef.class.getName(),
       "eXist tree node");
 
-  /** Oxygen's database-connection icon for the top-level server nodes (matches Data Source Explorer). */
-  private static final ImageIcon SERVER_ICON = loadFirstIcon("/images/DBConnection16.png");
+  /** eXist's "X" logo for the top-level server nodes (falls back to Oxygen's DB-connection icon). */
+  private static final ImageIcon SERVER_ICON =
+      loadFirstIcon("/images/exist-server.png", "/images/DBConnection16.png");
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -103,6 +108,11 @@ public final class ExistdbBrowserPanel extends JPanel {
   private final DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("servers");
   private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode);
   private final JTree tree = new JTree(treeModel);
+
+  /** When on, the active editor's resource is revealed and selected in the tree (like the Project view). */
+  private boolean linkWithEditor;
+  /** One-shot continuation run after the next lazy child-load completes (drives deep reveals). */
+  private transient Runnable pendingAfterLoad;
 
   public ExistdbBrowserPanel(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
@@ -117,6 +127,19 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     configureTree();
     loadServers();
+
+    // Link with Editor: when enabled, follow editor focus by revealing the matching tree node.
+    workspace.addEditorChangeListener(new WSEditorChangeListener() {
+      @Override
+      public void editorSelected(URL editorLocation) {
+        revealIfLinked(editorLocation);
+      }
+
+      @Override
+      public void editorActivated(URL editorLocation) {
+        revealIfLinked(editorLocation);
+      }
+    }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
   }
 
   private JPanel buildToolbar() {
@@ -129,7 +152,28 @@ public final class ExistdbBrowserPanel extends JPanel {
     }
     gear.setToolTipText("eXist-db settings");
     gear.addActionListener(e -> gearMenu().show(gear, 0, gear.getHeight()));
+
+    JToggleButton link = new JToggleButton();
+    ImageIcon linkIcon = loadFirstIcon("/images/LinkWithEditor16.png");
+    if (linkIcon != null) {
+      link.setIcon(linkIcon);
+    } else {
+      link.setText("Link");
+    }
+    link.setToolTipText("Link with Editor — reveal the active editor's resource in the tree");
+    link.addActionListener(e -> {
+      linkWithEditor = link.isSelected();
+      if (linkWithEditor) {
+        WSEditor editor =
+            workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+        if (editor != null) {
+          revealIfLinked(editor.getEditorLocation());
+        }
+      }
+    });
+
     JPanel bar = new JPanel(new BorderLayout());
+    bar.add(link, BorderLayout.WEST);
     bar.add(gear, BorderLayout.EAST);
     return bar;
   }
@@ -483,13 +527,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     if (name == null || name.equals(existNode.name)) {
       return;
     }
-    final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
     runMutation(() -> client.rename(existNode.path, name), () -> {
-      if (parent != null) {
-        treeModel.removeNodeFromParent(node);
-        insertChild(parent, existNode.serverId, parentPath(existNode.path) + "/" + name, name,
-            existNode.collection);
-      }
+      relabelInPlace(node, existNode, name);
       workspace.showStatusMessage("Renamed to " + name);
     }, "Rename failed");
   }
@@ -500,11 +539,11 @@ public final class ExistdbBrowserPanel extends JPanel {
       return;
     }
     final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
-    final String name = uniqueName(parent, "copy-of-" + existNode.name);
+    final String name = uniqueName(parent, copyName(existNode.name));
     runMutation(() -> client.duplicate(existNode.path, name), () -> {
       if (parent != null) {
-        insertChild(parent, existNode.serverId, parentPath(existNode.path) + "/" + name, name,
-            existNode.collection);
+        selectNode(insertChild(parent, existNode.serverId,
+            parentPath(existNode.path) + "/" + name, name, existNode.collection));
       }
       workspace.showStatusMessage("Duplicated as " + name);
     }, "Duplicate failed");
@@ -564,38 +603,95 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private static boolean hasChildNamed(DefaultMutableTreeNode parent, String name) {
+    return childNamed(parent, name) != null;
+  }
+
+  private static DefaultMutableTreeNode childNamed(DefaultMutableTreeNode parent, String name) {
     for (int i = 0; i < parent.getChildCount(); i++) {
       if (parent.getChildAt(i) instanceof DefaultMutableTreeNode child
           && child.getUserObject() instanceof ExistNode existNode
           && existNode.name.equals(name)) {
-        return true;
+        return child;
       }
     }
-    return false;
+    return null;
   }
 
-  /** Inserts a freshly created child into a loaded collection node, sorted; expands if collapsed. */
+  /** Inserts a freshly created child into a loaded collection node, sorted, then selects it. */
   private void showNewChild(DefaultMutableTreeNode node, ExistNode coll, String name,
       boolean collection) {
-    if (coll.loaded) {
-      if (!hasChildNamed(node, name)) {
-        insertChild(node, coll.serverId, coll.path + "/" + name, name, collection);
-      }
-      tree.expandPath(new TreePath(node.getPath()));
-    } else {
-      // Not yet loaded — expanding loads its children, which will include the new one.
-      tree.expandPath(new TreePath(node.getPath()));
+    tree.expandPath(new TreePath(node.getPath()));
+    if (!coll.loaded) {
+      // Not yet loaded — expanding loads its children asynchronously, which will include the new one.
+      return;
     }
+    DefaultMutableTreeNode child = childNamed(node, name);
+    if (child == null) {
+      child = insertChild(node, coll.serverId, coll.path + "/" + name, name, collection);
+    }
+    selectNode(child);
   }
 
-  private void insertChild(DefaultMutableTreeNode parent, String serverId, String path, String name,
-      boolean collection) {
+  private DefaultMutableTreeNode insertChild(DefaultMutableTreeNode parent, String serverId,
+      String path, String name, boolean collection) {
     DefaultMutableTreeNode child =
         new DefaultMutableTreeNode(new ExistNode(serverId, path, name, collection));
     if (collection) {
       addPlaceholder(child);
     }
     treeModel.insertNodeInto(child, parent, insertionIndex(parent, name, collection));
+    return child;
+  }
+
+  /** Selects and scrolls to {@code node} so a freshly created/renamed item is revealed and focused. */
+  private void selectNode(DefaultMutableTreeNode node) {
+    TreePath path = new TreePath(node.getPath());
+    tree.setSelectionPath(path);
+    tree.scrollPathToVisible(path);
+  }
+
+  /**
+   * Renames a node in place: updates its name/path and every descendant's path on the <em>same</em>
+   * node objects (so the subtree survives), repositions it for sort order, and re-selects it. Only
+   * the renamed node's own expansion is affected — sibling and ancestor branches are untouched, so
+   * the rest of the tree never collapses.
+   */
+  private void relabelInPlace(DefaultMutableTreeNode node, ExistNode existNode, String newName) {
+    DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
+    String newPath = parentPath(existNode.path) + "/" + newName;
+    boolean wasExpanded = tree.isExpanded(new TreePath(node.getPath()));
+    retag(node, new ExistNode(existNode.serverId, newPath, newName, existNode.collection), existNode);
+    retargetDescendants(node, existNode.path, newPath);
+    if (parent == null) {
+      treeModel.nodeChanged(node);
+    } else {
+      treeModel.removeNodeFromParent(node);
+      treeModel.insertNodeInto(node, parent, insertionIndex(parent, newName, existNode.collection));
+    }
+    if (wasExpanded) {
+      tree.expandPath(new TreePath(node.getPath()));
+    }
+    selectNode(node);
+  }
+
+  /** Rewrites every descendant's path after an ancestor was renamed from {@code oldTop} to {@code newTop}. */
+  private static void retargetDescendants(
+      DefaultMutableTreeNode node, String oldTop, String newTop) {
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode c) {
+        retag(child, new ExistNode(c.serverId, newTop + c.path.substring(oldTop.length()), c.name,
+            c.collection), c);
+        retargetDescendants(child, oldTop, newTop);
+      }
+    }
+  }
+
+  /** Swaps a node's {@link ExistNode}, carrying over its loaded/loading state. */
+  private static void retag(DefaultMutableTreeNode node, ExistNode replacement, ExistNode old) {
+    replacement.loaded = old.loaded;
+    replacement.loading = old.loading;
+    node.setUserObject(replacement);
   }
 
   private void openPath(String serverId, String path) {
@@ -681,26 +777,112 @@ public final class ExistdbBrowserPanel extends JPanel {
         existNode.loading = false;
         node.removeAllChildren();
         try {
-          for (ExistClient.ChildEntry child : get()) {
-            String childPath = child.path() != null && !child.path().isEmpty()
-                ? child.path()
-                : existNode.path.endsWith("/") ? existNode.path + child.name()
-                    : existNode.path + "/" + child.name();
-            DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
-                new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
-            if (child.collection()) {
-              addPlaceholder(childNode);
-            }
-            node.add(childNode);
-          }
-          existNode.loaded = true;
+          populateChildren(node, existNode, get());
         } catch (Exception ex) {
           workspace.showErrorMessage("Failed to list " + existNode.path + ": " + ex.getMessage());
         }
         treeModel.reload(node);
         tree.expandPath(new TreePath(node.getPath()));
+        resumeReveal(existNode.loaded);
       }
     }.execute();
+  }
+
+  /** Builds child nodes for a freshly listed collection and marks it loaded. */
+  private void populateChildren(DefaultMutableTreeNode node, ExistNode existNode,
+      List<ExistClient.ChildEntry> entries) {
+    for (ExistClient.ChildEntry child : entries) {
+      String childPath = childPathOf(existNode, child);
+      DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
+          new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
+      if (child.collection()) {
+        addPlaceholder(childNode);
+      }
+      node.add(childNode);
+    }
+    existNode.loaded = true;
+  }
+
+  private static String childPathOf(ExistNode parent, ExistClient.ChildEntry child) {
+    if (child.path() != null && !child.path().isEmpty()) {
+      return child.path();
+    }
+    return parent.path.endsWith("/") ? parent.path + child.name() : parent.path + "/" + child.name();
+  }
+
+  /**
+   * Continues an in-progress "Link with Editor" reveal once a level has loaded — only if it actually
+   * loaded, since running the continuation after a failed load would re-trigger the same load.
+   */
+  private void resumeReveal(boolean loaded) {
+    Runnable after = pendingAfterLoad;
+    pendingAfterLoad = null;
+    if (after != null && loaded) {
+      after.run();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Link with Editor
+  // ---------------------------------------------------------------------------
+
+  private void revealIfLinked(URL editorLocation) {
+    if (!linkWithEditor || editorLocation == null) {
+      return;
+    }
+    String systemId = editorLocation.toString();
+    String serverId = LangServiceSupport.serverId(systemId);
+    String dbPath = LangServiceSupport.dbPath(systemId);
+    if (serverId.isEmpty() || dbPath.isEmpty()) {
+      return; // not an exist:// resource — nothing to reveal
+    }
+    DefaultMutableTreeNode serverNode = findServerNode(serverId);
+    if (serverNode != null) {
+      revealStep(serverNode, dbPath);
+    }
+  }
+
+  private DefaultMutableTreeNode findServerNode(String serverId) {
+    for (int i = 0; i < rootNode.getChildCount(); i++) {
+      if (rootNode.getChildAt(i) instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && existNode.serverId.equals(serverId)) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Walks the tree toward {@code targetPath} from a known-ancestor {@code node}, lazily loading and
+   * expanding each level: when the node is the target it is selected; otherwise it descends into the
+   * child on the path, deferring via {@link #pendingAfterLoad} when a level still needs loading.
+   */
+  private void revealStep(DefaultMutableTreeNode node, String targetPath) {
+    if (!(node.getUserObject() instanceof ExistNode existNode)) {
+      return;
+    }
+    if (existNode.path.equals(targetPath)) {
+      selectNode(node);
+      return;
+    }
+    if (!existNode.collection || !targetPath.startsWith(existNode.path + "/")) {
+      return; // not an ancestor of the target
+    }
+    if (!existNode.loaded) {
+      pendingAfterLoad = () -> revealStep(node, targetPath);
+      tree.expandPath(new TreePath(node.getPath())); // triggers the lazy load
+      return;
+    }
+    tree.expandPath(new TreePath(node.getPath()));
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode c
+          && (c.path.equals(targetPath) || targetPath.startsWith(c.path + "/"))) {
+        revealStep(child, targetPath);
+        return;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1152,6 +1334,12 @@ public final class ExistdbBrowserPanel extends JPanel {
   private static String parentPath(String path) {
     int slash = path.lastIndexOf('/');
     return slash > 0 ? path.substring(0, slash) : DB_ROOT;
+  }
+
+  /** A copy's default name: {@code data.xml} → {@code data-copy.xml}, {@code coll} → {@code coll-copy}. */
+  private static String copyName(String name) {
+    int dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) + "-copy" + name.substring(dot) : name + "-copy";
   }
 
   /** Finds the loaded tree node for a given server + DB path, or {@code null}. */
