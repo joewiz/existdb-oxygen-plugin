@@ -72,6 +72,8 @@ public final class ManageServersDialog {
 
   private transient ConnectionProfile defaultProfile;
   private transient OKCancelDialog host;
+  private transient Action moveUpAction;
+  private transient Action moveDownAction;
 
   private ManageServersDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
     this.owner = owner;
@@ -96,7 +98,7 @@ public final class ManageServersDialog {
   }
 
   private boolean show() {
-    host = OxygenUIComponentsFactory.createOkCancelDialog(owner, "Manage Servers", true);
+    host = OxygenUIComponentsFactory.createOkCancelDialog(owner, "Configure eXist-db Servers", true);
     host.getContentPane().add(buildContent(), BorderLayout.CENTER);
     if (!profiles.isEmpty()) {
       table.setRowSelectionInterval(0, 0);
@@ -114,6 +116,8 @@ public final class ManageServersDialog {
 
   private JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+    // Fill the viewport so the alternating row stripes extend below the last row, like Data Sources.
+    table.setFillsViewportHeight(true);
     // Name compact, URL gets the room, Default a fixed narrow check column.
     table.getColumnModel().getColumn(0).setPreferredWidth(150);
     table.getColumnModel().getColumn(1).setPreferredWidth(430);
@@ -130,13 +134,20 @@ public final class ManageServersDialog {
     JToolBar right = new JToolBar();
     right.setFloatable(false);
     right.setRollover(true);
-    right.add(iconButton("/images/Add16.png", "Add server…", this::add));
-    right.add(iconButton("/images/Wrench16.png", "Edit server…", this::edit));
-    right.add(iconButton("/images/Copy16.png", "Duplicate server", this::duplicate));
-    right.add(iconButton("/images/Remove16.png", "Remove server…", this::remove));
+    right.add(iconButton("/images/Add16.png", "Add…", this::add));
+    right.add(iconButton("/images/Wrench16.png", "Edit…", this::edit));
+    right.add(iconButton("/images/Copy16.png", "Duplicate", this::duplicate));
+    right.add(iconButton("/images/Remove16.png", "Remove…", this::remove));
     right.addSeparator();
-    right.add(iconButton("/images/MoveUp16.png", "Move up", () -> move(-1)));
-    right.add(iconButton("/images/MoveDown16.png", "Move down", () -> move(1)));
+    // Yellow move arrows, greyed (disabled) at the first/last position — matching Data Sources.
+    moveUpAction = iconAction("/images/UpArrowYellow16.png", "Move up", () -> move(-1));
+    moveDownAction = iconAction("/images/DownArrowYellow16.png", "Move down", () -> move(1));
+    JButton up = OxygenUIComponentsFactory.createToolbarButton(moveUpAction, false);
+    setDisabledIcon(up, "/images/UpGray16.png");
+    JButton down = OxygenUIComponentsFactory.createToolbarButton(moveDownAction, false);
+    setDisabledIcon(down, "/images/DownGray16.png");
+    right.add(up);
+    right.add(down);
 
     JPanel actions = new JPanel(new BorderLayout());
     actions.add(left, BorderLayout.WEST);
@@ -146,7 +157,17 @@ public final class ManageServersDialog {
     connections.setBorder(BorderFactory.createTitledBorder("Connections"));
     connections.add(new JScrollPane(table), BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
+
+    table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
+    updateMoveEnabled();
     return connections;
+  }
+
+  /** Enables the move arrows only when the selection can actually move in that direction. */
+  private void updateMoveEnabled() {
+    int row = table.getSelectedRow();
+    moveUpAction.setEnabled(row > 0);
+    moveDownAction.setEnabled(row >= 0 && row < profiles.size() - 1);
   }
 
   private static JButton textButton(String label, Runnable action) {
@@ -159,8 +180,12 @@ public final class ManageServersDialog {
   }
 
   private static JButton iconButton(String resource, String tooltip, Runnable action) {
+    return OxygenUIComponentsFactory.createToolbarButton(iconAction(resource, tooltip, action), false);
+  }
+
+  private static Action iconAction(String resource, String tooltip, Runnable action) {
     URL url = ManageServersDialog.class.getResource(resource);
-    Action a = new AbstractAction() {
+    return new AbstractAction() {
       {
         if (url != null) {
           putValue(SMALL_ICON, new ImageIcon(url));
@@ -175,7 +200,13 @@ public final class ManageServersDialog {
         action.run();
       }
     };
-    return OxygenUIComponentsFactory.createToolbarButton(a, false);
+  }
+
+  private static void setDisabledIcon(JButton button, String resource) {
+    URL url = ManageServersDialog.class.getResource(resource);
+    if (url != null) {
+      button.setDisabledIcon(new ImageIcon(url));
+    }
   }
 
   /** Persists the working copy and the chosen default. */
@@ -287,6 +318,7 @@ public final class ManageServersDialog {
       return;
     }
     final ExistClient client = new ExistClient(p);
+    final String name = p.getName();
     new SwingWorker<String, Void>() {
       @Override
       protected String doInBackground() throws Exception {
@@ -297,16 +329,17 @@ public final class ManageServersDialog {
       @Override
       protected void done() {
         try {
-          JOptionPane.showMessageDialog(host, "Connected. Authenticated as: " + get(),
+          JOptionPane.showMessageDialog(host,
+              "Connected to \"" + name + "\". Authenticated as: " + get(),
               "Test connection", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-          JOptionPane.showMessageDialog(host, "Connection failed: " + cause.getMessage(),
-              "Test connection", JOptionPane.ERROR_MESSAGE);
+          JOptionPane.showMessageDialog(host, "Connection to \"" + name + "\" failed: "
+              + cause.getMessage(), "Test connection", JOptionPane.ERROR_MESSAGE);
         }
       }
     }.execute();
-    workspace.showStatusMessage("Testing connection to " + p.getName() + "…");
+    workspace.showStatusMessage("Testing connection to " + name + "…");
   }
 
   /** Table over the working profile list: Name, URL, and a check for the default server. */

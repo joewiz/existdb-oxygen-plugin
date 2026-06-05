@@ -181,7 +181,7 @@ public final class ExistdbBrowserPanel extends JPanel {
       {
         // The Data Source Explorer's gear-with-menu-lines glyph.
         putValue(SMALL_ICON, loadFirstIcon("/images/OptionsShortcut16.png"));
-        putValue(SHORT_DESCRIPTION, "Configure eXist-db Connections");
+        putValue(SHORT_DESCRIPTION, "Configure eXist-db Servers");
       }
 
       @Override
