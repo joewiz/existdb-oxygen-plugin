@@ -26,13 +26,13 @@ import com.existdb.oxygen.ui.CompletionAction;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
-import com.existdb.oxygen.ui.QueryDialog;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 
 import ro.sync.ecss.extensions.api.AuthorAccess;
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
+import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
-import ro.sync.exml.workspace.api.standalone.MenuBarCustomizer;
+import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ToolbarComponentsCustomizer;
 import ro.sync.exml.workspace.api.standalone.ToolbarInfo;
@@ -40,22 +40,22 @@ import ro.sync.exml.workspace.api.standalone.ViewComponentCustomizer;
 import ro.sync.exml.workspace.api.standalone.ViewInfo;
 import ro.sync.exml.workspace.api.standalone.actions.MenusAndToolbarsContributorCustomizer;
 
-import java.awt.Frame;
-import java.awt.event.ActionEvent;
+import java.awt.Toolkit;
+import java.awt.event.KeyEvent;
+import java.net.URL;
 import java.util.Arrays;
 
-import javax.swing.AbstractAction;
 import javax.swing.Action;
+import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JMenu;
-import javax.swing.JMenuBar;
 import javax.swing.JPopupMenu;
+import javax.swing.KeyStroke;
 
 /**
- * Wires the plugin into the Oxygen workspace: contributes the eXist-db collection view, the
- * "eXist-db" main menu, the editor contextual-menu actions, and a toolbar button for
- * "Run Current Editor".
+ * Wires the plugin into the Oxygen workspace: contributes the eXist-db collection view, the editor
+ * contextual-menu actions (Run Current Editor, go-to-definition, completion, hover), and a toolbar
+ * button for "Run Current Editor".
  */
 public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAccessPluginExtension {
 
@@ -75,34 +75,36 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         if (VIEW_ID.equals(viewInfo.getViewID())) {
           viewInfo.setComponent(new ExistdbBrowserPanel(pluginWorkspace, profileStore));
           viewInfo.setTitle("eXist-db");
+          URL viewIcon = ExistdbWorkspaceAccessPluginExtension.class
+              .getResource("/images/exist-server.png");
+          if (viewIcon != null) {
+            viewInfo.setIcon(new ImageIcon(viewIcon));
+          }
         }
       }
     });
 
-    final Action runQueryAction = new AbstractAction("Run XQuery…") {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        new QueryDialog((Frame) pluginWorkspace.getParentFrame()).setVisible(true);
-      }
-    };
     final Action runCurrentEditorAction = new RunCurrentEditorAction(pluginWorkspace);
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
 
-    pluginWorkspace.addMenuBarCustomizer(new MenuBarCustomizer() {
+    // Bind Cmd/Ctrl+Enter to Run Current Editor inside text editors (the menu was removed, so the
+    // accelerator is wired onto each text page as it opens / switches to Text mode).
+    final KeyStroke runShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,
+        Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
+    runCurrentEditorAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
+    pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
-      public void customizeMainMenu(JMenuBar mainMenuBar) {
-        JMenu menu = new JMenu("eXist-db");
-        menu.add(runCurrentEditorAction);
-        menu.add(runQueryAction);
-        menu.add(goToDefinitionAction);
-        menu.add(completionAction);
-        menu.add(hoverAction);
-        // Insert before the trailing Help menu.
-        mainMenuBar.add(menu, Math.max(0, mainMenuBar.getMenuCount() - 1));
+      public void editorOpened(URL editorLocation) {
+        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runCurrentEditorAction);
       }
-    });
+
+      @Override
+      public void editorPageChanged(URL editorLocation) {
+        bindRunShortcut(pluginWorkspace, editorLocation, runShortcut, runCurrentEditorAction);
+      }
+    }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
 
     // Offer the eXist editor actions in the Text-mode contextual menu.
     pluginWorkspace.addMenusAndToolbarsContributorCustomizer(
@@ -139,6 +141,18 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         toolbarInfo.setTitle("eXist-db");
       }
     });
+  }
+
+  /** Binds the Run-Current-Editor shortcut to a text editor's input map (idempotent). */
+  private static void bindRunShortcut(StandalonePluginWorkspace workspace, URL editorLocation,
+      KeyStroke shortcut, Action action) {
+    WSEditor editor =
+        workspace.getEditorAccess(editorLocation, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
+        && page.getTextComponent() instanceof JComponent component) {
+      component.getInputMap(JComponent.WHEN_FOCUSED).put(shortcut, "existRunCurrentEditor");
+      component.getActionMap().put("existRunCurrentEditor", action);
+    }
   }
 
   @Override

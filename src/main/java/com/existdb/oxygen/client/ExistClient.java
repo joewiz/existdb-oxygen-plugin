@@ -223,11 +223,33 @@ public final class ExistClient {
     relocate("/db/copy", source, parentCollection);
   }
 
+  /**
+   * POST /api/db/move with {@code newName} — renames a resource/collection in place (server-side,
+   * atomic). Requires the redesigned move/copy API (existdb-openapi PR #33); returns 409 if the new
+   * name is already taken. Throws on non-2xx.
+   */
+  public void rename(String source, String newName)
+      throws IOException, InterruptedException {
+    renameOrDuplicate("/db/move", source, newName);
+  }
+
+  /** POST /api/db/copy with {@code newName} — duplicates in place under a new name (PR #33). */
+  public void duplicate(String source, String newName)
+      throws IOException, InterruptedException {
+    renameOrDuplicate("/db/copy", source, newName);
+  }
+
   private void relocate(String apiPath, String source, String parentCollection)
       throws IOException, InterruptedException {
-    JSONObject body = new JSONObject();
-    body.put("source", source);
-    body.put("parent", parentCollection);
+    post(apiPath, new JSONObject().put("source", source).put("parent", parentCollection));
+  }
+
+  private void renameOrDuplicate(String apiPath, String source, String newName)
+      throws IOException, InterruptedException {
+    post(apiPath, new JSONObject().put("source", source).put("newName", newName));
+  }
+
+  private void post(String apiPath, JSONObject body) throws IOException, InterruptedException {
     send(request(apiPath)
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))

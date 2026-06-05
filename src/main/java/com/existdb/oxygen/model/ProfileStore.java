@@ -79,7 +79,7 @@ public final class ProfileStore {
 
   /**
    * All saved profiles, in order. Never empty: a brand-new install yields the default
-   * {@code Local eXist} profile, and a legacy single-profile install is migrated to a one-element
+   * {@code localhost 8080} profile, and a legacy single-profile install is migrated to a one-element
    * list (persisted, so the generated id is stable across loads).
    */
   public List<ConnectionProfile> loadAll() {

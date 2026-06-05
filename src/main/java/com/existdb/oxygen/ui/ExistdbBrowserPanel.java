@@ -25,11 +25,15 @@ import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
 import com.existdb.oxygen.client.MimeTypes;
+import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
+import ro.sync.exml.workspace.api.editor.WSEditor;
+import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
+import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -40,19 +44,27 @@ import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
-import javax.swing.ButtonGroup;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.Box;
 import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -62,9 +74,10 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
+import javax.swing.JToolBar;
 import javax.swing.JTree;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.ToolTipManager;
@@ -93,15 +106,26 @@ public final class ExistdbBrowserPanel extends JPanel {
       DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ExistNodeRef.class.getName(),
       "eXist tree node");
 
-  /** Oxygen's database-connection icon for the top-level server nodes (matches Data Source Explorer). */
-  private static final ImageIcon SERVER_ICON = loadFirstIcon("/images/DBConnection16.png");
+  /** eXist's "X" logo for the top-level server nodes (falls back to Oxygen's DB-connection icon). */
+  private static final ImageIcon SERVER_ICON =
+      loadFirstIcon("/images/exist-server.png", "/images/DBConnection16.png");
+
+  /** Maps a file extension (lower-case) to one of Oxygen's bundled file-type icons, and caches them. */
+  private static final Map<String, String> TYPE_ICON_RESOURCES = buildTypeIconResources();
+  private static final Map<String, ImageIcon> TYPE_ICON_CACHE = new ConcurrentHashMap<>();
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
 
   private final DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("servers");
   private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode);
-  private final JTree tree = new JTree(treeModel);
+  // Built via Oxygen's factory so it inherits the workbench tree's row height, font, and selection.
+  private final JTree tree = OxygenUIComponentsFactory.createTree(treeModel);
+
+  /** When on, the active editor's resource is revealed and selected in the tree (like the Project view). */
+  private boolean linkWithEditor;
+  /** One-shot continuation run after the next lazy child-load completes (drives deep reveals). */
+  private transient Runnable pendingAfterLoad;
 
   public ExistdbBrowserPanel(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
@@ -112,24 +136,71 @@ public final class ExistdbBrowserPanel extends JPanel {
     setPreferredSize(new Dimension(260, 400));
 
     add(buildToolbar(), BorderLayout.NORTH);
-    add(new JScrollPane(tree), BorderLayout.CENTER);
+    add(OxygenUIComponentsFactory.createScrollPane(tree,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
 
     configureTree();
     loadServers();
+
+    // Link with Editor: when enabled, follow editor focus by revealing the matching tree node.
+    workspace.addEditorChangeListener(new WSEditorChangeListener() {
+      @Override
+      public void editorSelected(URL editorLocation) {
+        revealIfLinked(editorLocation);
+      }
+
+      @Override
+      public void editorActivated(URL editorLocation) {
+        revealIfLinked(editorLocation);
+      }
+    }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
   }
 
-  private JPanel buildToolbar() {
-    JButton gear = new JButton();
-    ImageIcon icon = loadFirstIcon("/images/Settings16.png");
-    if (icon != null) {
-      gear.setIcon(icon);
-    } else {
-      gear.setText("⚙"); // gear glyph fallback
-    }
-    gear.setToolTipText("eXist-db settings");
-    gear.addActionListener(e -> gearMenu().show(gear, 0, gear.getHeight()));
-    JPanel bar = new JPanel(new BorderLayout());
-    bar.add(gear, BorderLayout.EAST);
+  private JComponent buildToolbar() {
+    Action linkAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/LinkWithEditor16.png"));
+        putValue(SHORT_DESCRIPTION, "Link with Editor");
+        putValue(SELECTED_KEY, Boolean.FALSE);
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        linkWithEditor = Boolean.TRUE.equals(getValue(SELECTED_KEY));
+        if (linkWithEditor) {
+          WSEditor editor =
+              workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+          if (editor != null) {
+            revealIfLinked(editor.getEditorLocation());
+          }
+        }
+      }
+    };
+    Action gearAction = new AbstractAction() {
+      {
+        // The Data Source Explorer's gear-with-menu-lines glyph.
+        putValue(SMALL_ICON, loadFirstIcon("/images/OptionsShortcut16.png"));
+        putValue(SHORT_DESCRIPTION, "Configure eXist-db Connections");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        manageServers();
+      }
+    };
+
+    // Oxygen's factory buttons inherit the workbench's flat rollover (and toggle) styling exactly.
+    JButton link = OxygenUIComponentsFactory.createToolbarToggleButton(linkAction, false);
+    JButton gear = OxygenUIComponentsFactory.createToolbarButton(gearAction, false);
+
+    JToolBar bar = new JToolBar();
+    bar.setFloatable(false);
+    bar.setRollover(true);
+    bar.add(Box.createHorizontalGlue());
+    bar.add(link);
+    bar.addSeparator();
+    bar.add(gear);
     return bar;
   }
 
@@ -202,116 +273,11 @@ public final class ExistdbBrowserPanel extends JPanel {
   // Settings gear
   // ---------------------------------------------------------------------------
 
-  private JPopupMenu gearMenu() {
-    JPopupMenu menu = new JPopupMenu();
-    String selectedId = selectedServerId();
-    menu.add(menuItem("Add server…", this::addServer));
-    menu.add(menuItem("Edit server…", () -> editServer(selectedId)));
-    menu.add(menuItem("Duplicate server", () -> duplicateServer(selectedId)));
-    menu.add(menuItem("Remove server…", () -> removeServer(selectedId)));
-    menu.addSeparator();
-    menu.add(menuItem("Test connection", () -> testConnection(selectedId)));
-    List<ConnectionProfile> profiles = profileStore.loadAll();
-    if (profiles.size() > 1) {
-      menu.add(defaultServerMenu(profiles));
-    }
-    return menu;
-  }
-
-  private JMenu defaultServerMenu(List<ConnectionProfile> profiles) {
-    JMenu submenu = new JMenu("Default server for unsaved queries");
-    ButtonGroup group = new ButtonGroup();
-    String defaultId = profileStore.defaultProfileId();
-    for (ConnectionProfile profile : profiles) {
-      JRadioButtonMenuItem item = new JRadioButtonMenuItem(profile.getName());
-      item.setSelected(profile.getId().equals(defaultId));
-      item.addActionListener(e -> {
-        profileStore.setDefaultProfileId(profile.getId());
-        ExistContext.setProfiles(profileStore.loadAll(), profile.getId());
-      });
-      group.add(item);
-      submenu.add(item);
-    }
-    return submenu;
-  }
-
-  private void addServer() {
-    ConnectionProfile created = ConnectionDialog.edit(ownerFrame(), new ConnectionProfile());
-    if (created != null) {
-      List<ConnectionProfile> profiles = profileStore.loadAll();
-      profiles.add(created);
-      profileStore.saveAll(profiles);
+  /** Opens the unified server-management window, then rebuilds the tree if the user saved changes. */
+  private void manageServers() {
+    if (ManageServersDialog.open(ownerFrame(), profileStore, workspace)) {
       loadServers();
     }
-  }
-
-  private void editServer(String serverId) {
-    ConnectionProfile profile = profileById(serverId);
-    if (profile == null) {
-      return;
-    }
-    ConnectionProfile edited = ConnectionDialog.edit(ownerFrame(), profile);
-    if (edited != null) {
-      edited.setId(serverId);
-      profileStore.saveAll(replace(profileStore.loadAll(), edited));
-      loadServers();
-    }
-  }
-
-  private void duplicateServer(String serverId) {
-    ConnectionProfile profile = profileById(serverId);
-    if (profile == null) {
-      return;
-    }
-    ConnectionProfile copy = new ConnectionProfile(profile.getName() + " copy",
-        profile.getBaseUrl(), profile.getUser(), profile.getPassword(), profile.isAcceptSelfSigned());
-    List<ConnectionProfile> profiles = profileStore.loadAll();
-    profiles.add(copy);
-    profileStore.saveAll(profiles);
-    loadServers();
-  }
-
-  private void removeServer(String serverId) {
-    ConnectionProfile profile = profileById(serverId);
-    if (profile == null) {
-      return;
-    }
-    int choice = JOptionPane.showConfirmDialog(this,
-        "Remove the server \"" + profile.getName() + "\"?",
-        "Remove server", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-    if (choice != JOptionPane.OK_OPTION) {
-      return;
-    }
-    List<ConnectionProfile> profiles = new ArrayList<>(profileStore.loadAll());
-    profiles.removeIf(p -> serverId.equals(p.getId()));
-    profileStore.saveAll(profiles);
-    loadServers();
-  }
-
-  private void testConnection(String serverId) {
-    final ExistClient client = ExistContext.clientById(serverId);
-    if (client == null) {
-      workspace.showInformationMessage("Select a server first.");
-      return;
-    }
-    workspace.showStatusMessage("Testing connection…");
-    new SwingWorker<String, Void>() {
-      @Override
-      protected String doInBackground() throws Exception {
-        client.systemInfo();
-        return client.whoamiUser();
-      }
-
-      @Override
-      protected void done() {
-        try {
-          workspace.showInformationMessage("Connected. Authenticated as: " + get());
-        } catch (Exception ex) {
-          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-          workspace.showErrorMessage("Connection failed: " + cause.getMessage());
-        }
-      }
-    }.execute();
   }
 
   // ---------------------------------------------------------------------------
@@ -337,6 +303,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   private JPopupMenu contextMenu(DefaultMutableTreeNode node, ExistNode existNode) {
     JPopupMenu menu = new JPopupMenu();
     if (existNode.collection) {
+      menu.add(menuItem("New File…", () -> newResource(node, existNode)));
+      menu.add(menuItem("New Collection…", () -> newCollection(node, existNode)));
+      menu.addSeparator();
       menu.add(menuItem("Refresh", () -> reloadNode(node)));
     } else {
       menu.add(menuItem("Open", this::openSelected));
@@ -345,6 +314,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     menu.add(menuItem("Copy Path", () -> copyToClipboard(existNode.path)));
     if (!DB_ROOT.equals(existNode.path)) {
       menu.addSeparator();
+      menu.add(menuItem("Rename…", () -> renameNode(node, existNode)));
+      menu.add(menuItem("Duplicate", () -> duplicateNode(node, existNode)));
       menu.add(menuItem("Delete…", () -> deleteNode(node, existNode)));
     }
     return menu;
@@ -433,6 +404,259 @@ public final class ExistdbBrowserPanel extends JPanel {
     }.execute();
   }
 
+  private void newResource(DefaultMutableTreeNode node, ExistNode coll) {
+    final ExistClient client = clientOrWarn(coll.serverId);
+    if (client == null) {
+      return;
+    }
+    String name = promptName("New File", "File name (e.g. data.xml):", "");
+    if (name == null) {
+      return;
+    }
+    final String path = coll.path + "/" + name;
+    final String mime = MimeTypes.byName(name);
+    final String content = seedContent(name, mime);
+    runMutation(() -> client.putResource(path, content, mime), () -> {
+      showNewChild(node, coll, name, false);
+      openPath(coll.serverId, path);
+      workspace.showStatusMessage("Created " + path);
+    }, "Could not create file");
+  }
+
+  private void newCollection(DefaultMutableTreeNode node, ExistNode coll) {
+    final ExistClient client = clientOrWarn(coll.serverId);
+    if (client == null) {
+      return;
+    }
+    String name = promptName("New Collection", "Collection name:", "");
+    if (name == null) {
+      return;
+    }
+    final String path = coll.path + "/" + name;
+    runMutation(() -> client.createCollection(path), () -> {
+      showNewChild(node, coll, name, true);
+      workspace.showStatusMessage("Created " + path);
+    }, "Could not create collection");
+  }
+
+  private void renameNode(DefaultMutableTreeNode node, ExistNode existNode) {
+    final ExistClient client = clientOrWarn(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    String name = promptName("Rename", "New name:", existNode.name);
+    if (name == null || name.equals(existNode.name)) {
+      return;
+    }
+    runMutation(() -> client.rename(existNode.path, name), () -> {
+      relabelInPlace(node, existNode, name);
+      workspace.showStatusMessage("Renamed to " + name);
+    }, "Rename failed");
+  }
+
+  private void duplicateNode(DefaultMutableTreeNode node, ExistNode existNode) {
+    final ExistClient client = clientOrWarn(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
+    final String name = uniqueName(parent, copyName(existNode.name));
+    runMutation(() -> client.duplicate(existNode.path, name), () -> {
+      if (parent != null) {
+        selectNode(insertChild(parent, existNode.serverId,
+            parentPath(existNode.path) + "/" + name, name, existNode.collection));
+      }
+      workspace.showStatusMessage("Duplicated as " + name);
+    }, "Duplicate failed");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Context-menu helpers
+  // ---------------------------------------------------------------------------
+
+  private ExistClient clientOrWarn(String serverId) {
+    ExistClient client = ExistContext.clientById(serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+    }
+    return client;
+  }
+
+  /** Prompts for a single path segment, rejecting blanks and names containing {@code /}. */
+  private String promptName(String title, String prompt, String initial) {
+    Object input = JOptionPane.showInputDialog(this, prompt, title,
+        JOptionPane.PLAIN_MESSAGE, null, null, initial);
+    if (input == null) {
+      return null;
+    }
+    String name = input.toString().trim();
+    if (name.isEmpty() || name.contains("/")) {
+      workspace.showErrorMessage("Please enter a name without a '/'.");
+      return null;
+    }
+    return name;
+  }
+
+  /** Minimal valid content for a new resource: empty XML is rejected, so seed a root element. */
+  private static String seedContent(String name, String mime) {
+    if (mime == null || !mime.contains("xml")) {
+      return "";
+    }
+    String base = name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name;
+    String root = base.matches("[A-Za-z_][\\w.-]*") ? base : "root";
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<" + root + "/>\n";
+  }
+
+  /** A name not already used by a sibling under {@code parent}, appending {@code -N} as needed. */
+  private static String uniqueName(DefaultMutableTreeNode parent, String desired) {
+    if (parent == null || !hasChildNamed(parent, desired)) {
+      return desired;
+    }
+    int dot = desired.lastIndexOf('.');
+    String stem = dot > 0 ? desired.substring(0, dot) : desired;
+    String ext = dot > 0 ? desired.substring(dot) : "";
+    for (int i = 2; ; i++) {
+      String candidate = stem + "-" + i + ext;
+      if (!hasChildNamed(parent, candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  private static boolean hasChildNamed(DefaultMutableTreeNode parent, String name) {
+    return childNamed(parent, name) != null;
+  }
+
+  private static DefaultMutableTreeNode childNamed(DefaultMutableTreeNode parent, String name) {
+    for (int i = 0; i < parent.getChildCount(); i++) {
+      if (parent.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode existNode
+          && existNode.name.equals(name)) {
+        return child;
+      }
+    }
+    return null;
+  }
+
+  /** Inserts a freshly created child into a loaded collection node, sorted, then selects it. */
+  private void showNewChild(DefaultMutableTreeNode node, ExistNode coll, String name,
+      boolean collection) {
+    tree.expandPath(new TreePath(node.getPath()));
+    if (!coll.loaded) {
+      // Not yet loaded — expanding loads its children asynchronously, which will include the new one.
+      return;
+    }
+    DefaultMutableTreeNode child = childNamed(node, name);
+    if (child == null) {
+      child = insertChild(node, coll.serverId, coll.path + "/" + name, name, collection);
+    }
+    selectNode(child);
+  }
+
+  private DefaultMutableTreeNode insertChild(DefaultMutableTreeNode parent, String serverId,
+      String path, String name, boolean collection) {
+    DefaultMutableTreeNode child =
+        new DefaultMutableTreeNode(new ExistNode(serverId, path, name, collection));
+    if (collection) {
+      addPlaceholder(child);
+    }
+    treeModel.insertNodeInto(child, parent, insertionIndex(parent, name, collection));
+    return child;
+  }
+
+  /** Selects and scrolls to {@code node} so a freshly created/renamed item is revealed and focused. */
+  private void selectNode(DefaultMutableTreeNode node) {
+    TreePath path = new TreePath(node.getPath());
+    tree.setSelectionPath(path);
+    tree.scrollPathToVisible(path);
+  }
+
+  /**
+   * Renames a node in place: updates its name/path and every descendant's path on the <em>same</em>
+   * node objects (so the subtree survives), repositions it for sort order, and re-selects it. Only
+   * the renamed node's own expansion is affected — sibling and ancestor branches are untouched, so
+   * the rest of the tree never collapses.
+   */
+  private void relabelInPlace(DefaultMutableTreeNode node, ExistNode existNode, String newName) {
+    DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
+    String newPath = parentPath(existNode.path) + "/" + newName;
+    boolean wasExpanded = tree.isExpanded(new TreePath(node.getPath()));
+    retag(node, new ExistNode(existNode.serverId, newPath, newName, existNode.collection), existNode);
+    retargetDescendants(node, existNode.path, newPath);
+    if (parent == null) {
+      treeModel.nodeChanged(node);
+    } else {
+      treeModel.removeNodeFromParent(node);
+      treeModel.insertNodeInto(node, parent, insertionIndex(parent, newName, existNode.collection));
+    }
+    if (wasExpanded) {
+      tree.expandPath(new TreePath(node.getPath()));
+    }
+    selectNode(node);
+  }
+
+  /** Rewrites every descendant's path after an ancestor was renamed from {@code oldTop} to {@code newTop}. */
+  private static void retargetDescendants(
+      DefaultMutableTreeNode node, String oldTop, String newTop) {
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode c) {
+        retag(child, new ExistNode(c.serverId, newTop + c.path.substring(oldTop.length()), c.name,
+            c.collection), c);
+        retargetDescendants(child, oldTop, newTop);
+      }
+    }
+  }
+
+  /** Swaps a node's {@link ExistNode}, carrying over its loaded/loading state. */
+  private static void retag(DefaultMutableTreeNode node, ExistNode replacement, ExistNode old) {
+    replacement.loaded = old.loaded;
+    replacement.loading = old.loading;
+    node.setUserObject(replacement);
+  }
+
+  private void openPath(String serverId, String path) {
+    try {
+      openUrl(ExistURLStreamHandler.toUrl(serverId, path), path);
+    } catch (IOException ex) {
+      workspace.showErrorMessage("Created, but could not open " + path + ": " + ex.getMessage());
+    }
+  }
+
+  private void openUrl(URL url, String path) {
+    if (!workspace.open(url)) {
+      workspace.showErrorMessage("Oxygen declined to open " + path);
+    }
+  }
+
+  /** Runs a database mutation off the EDT, then {@code onSuccess} on the EDT, or reports the error. */
+  private void runMutation(Mutation mutation, Runnable onSuccess, String errorPrefix) {
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() throws Exception {
+        mutation.run();
+        return null;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          get();
+          onSuccess.run();
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage(errorPrefix + ": " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /** A database mutation that may fail with a checked exception. */
+  @FunctionalInterface
+  private interface Mutation {
+    void run() throws IOException, InterruptedException;
+  }
+
   // ---------------------------------------------------------------------------
   // Tree loading
   // ---------------------------------------------------------------------------
@@ -474,26 +698,112 @@ public final class ExistdbBrowserPanel extends JPanel {
         existNode.loading = false;
         node.removeAllChildren();
         try {
-          for (ExistClient.ChildEntry child : get()) {
-            String childPath = child.path() != null && !child.path().isEmpty()
-                ? child.path()
-                : existNode.path.endsWith("/") ? existNode.path + child.name()
-                    : existNode.path + "/" + child.name();
-            DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
-                new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
-            if (child.collection()) {
-              addPlaceholder(childNode);
-            }
-            node.add(childNode);
-          }
-          existNode.loaded = true;
+          populateChildren(node, existNode, get());
         } catch (Exception ex) {
           workspace.showErrorMessage("Failed to list " + existNode.path + ": " + ex.getMessage());
         }
         treeModel.reload(node);
         tree.expandPath(new TreePath(node.getPath()));
+        resumeReveal(existNode.loaded);
       }
     }.execute();
+  }
+
+  /** Builds child nodes for a freshly listed collection and marks it loaded. */
+  private void populateChildren(DefaultMutableTreeNode node, ExistNode existNode,
+      List<ExistClient.ChildEntry> entries) {
+    for (ExistClient.ChildEntry child : entries) {
+      String childPath = childPathOf(existNode, child);
+      DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
+          new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
+      if (child.collection()) {
+        addPlaceholder(childNode);
+      }
+      node.add(childNode);
+    }
+    existNode.loaded = true;
+  }
+
+  private static String childPathOf(ExistNode parent, ExistClient.ChildEntry child) {
+    if (child.path() != null && !child.path().isEmpty()) {
+      return child.path();
+    }
+    return parent.path.endsWith("/") ? parent.path + child.name() : parent.path + "/" + child.name();
+  }
+
+  /**
+   * Continues an in-progress "Link with Editor" reveal once a level has loaded — only if it actually
+   * loaded, since running the continuation after a failed load would re-trigger the same load.
+   */
+  private void resumeReveal(boolean loaded) {
+    Runnable after = pendingAfterLoad;
+    pendingAfterLoad = null;
+    if (after != null && loaded) {
+      after.run();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Link with Editor
+  // ---------------------------------------------------------------------------
+
+  private void revealIfLinked(URL editorLocation) {
+    if (!linkWithEditor || editorLocation == null) {
+      return;
+    }
+    String systemId = editorLocation.toString();
+    String serverId = LangServiceSupport.serverId(systemId);
+    String dbPath = LangServiceSupport.dbPath(systemId);
+    if (serverId.isEmpty() || dbPath.isEmpty()) {
+      return; // not an exist:// resource — nothing to reveal
+    }
+    DefaultMutableTreeNode serverNode = findServerNode(serverId);
+    if (serverNode != null) {
+      revealStep(serverNode, dbPath);
+    }
+  }
+
+  private DefaultMutableTreeNode findServerNode(String serverId) {
+    for (int i = 0; i < rootNode.getChildCount(); i++) {
+      if (rootNode.getChildAt(i) instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && existNode.serverId.equals(serverId)) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Walks the tree toward {@code targetPath} from a known-ancestor {@code node}, lazily loading and
+   * expanding each level: when the node is the target it is selected; otherwise it descends into the
+   * child on the path, deferring via {@link #pendingAfterLoad} when a level still needs loading.
+   */
+  private void revealStep(DefaultMutableTreeNode node, String targetPath) {
+    if (!(node.getUserObject() instanceof ExistNode existNode)) {
+      return;
+    }
+    if (existNode.path.equals(targetPath)) {
+      selectNode(node);
+      return;
+    }
+    if (!existNode.collection || !targetPath.startsWith(existNode.path + "/")) {
+      return; // not an ancestor of the target
+    }
+    if (!existNode.loaded) {
+      pendingAfterLoad = () -> revealStep(node, targetPath);
+      tree.expandPath(new TreePath(node.getPath())); // triggers the lazy load
+      return;
+    }
+    tree.expandPath(new TreePath(node.getPath()));
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode c
+          && (c.path.equals(targetPath) || targetPath.startsWith(c.path + "/"))) {
+        revealStep(child, targetPath);
+        return;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -707,7 +1017,7 @@ public final class ExistdbBrowserPanel extends JPanel {
    */
   private static void relocate(ExistClient from, ExistClient to, ExistNodeRef source,
       String dest, String parent, boolean copy, boolean sameServer)
-      throws java.io.IOException, InterruptedException {
+      throws IOException, InterruptedException {
     if (sameServer) {
       try {
         if (copy) {
@@ -728,7 +1038,7 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   /** Recursively copies a resource/collection from one server to another (client-side). */
   private static void crossServerCopy(ExistClient from, ExistClient to, String sourcePath,
-      String destPath, boolean collection) throws java.io.IOException, InterruptedException {
+      String destPath, boolean collection) throws IOException, InterruptedException {
     if (collection) {
       to.createCollection(destPath);
       for (ExistClient.ChildEntry child : from.listChildren(sourcePath)) {
@@ -746,7 +1056,7 @@ public final class ExistdbBrowserPanel extends JPanel {
    * XML — e.g. non-well-formed HTML, which eXist would otherwise try to parse as XML and reject.
    */
   private static void putResourceTolerant(ExistClient client, String path, String content,
-      String mime) throws java.io.IOException, InterruptedException {
+      String mime) throws IOException, InterruptedException {
     try {
       client.putResource(path, content, mime);
     } catch (ExistHttpException e) {
@@ -764,7 +1074,7 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private static void deleteFrom(ExistClient client, String path, boolean collection)
-      throws java.io.IOException, InterruptedException {
+      throws IOException, InterruptedException {
     if (collection) {
       client.deleteCollection(path);
     } else {
@@ -886,7 +1196,7 @@ public final class ExistdbBrowserPanel extends JPanel {
    * collected in {@code skipped}.
    */
   private static int uploadRecursive(ExistClient client, String parentPath, File file,
-      List<String> skipped) throws java.io.IOException, InterruptedException {
+      List<String> skipped) throws IOException, InterruptedException {
     if (file.isDirectory()) {
       String collection = parentPath + "/" + file.getName();
       client.createCollection(collection);
@@ -947,6 +1257,12 @@ public final class ExistdbBrowserPanel extends JPanel {
     return slash > 0 ? path.substring(0, slash) : DB_ROOT;
   }
 
+  /** A copy's default name: {@code data.xml} → {@code data-copy.xml}, {@code coll} → {@code coll-copy}. */
+  private static String copyName(String name) {
+    int dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) + "-copy" + name.substring(dot) : name + "-copy";
+  }
+
   /** Finds the loaded tree node for a given server + DB path, or {@code null}. */
   private DefaultMutableTreeNode findNode(String serverId, String path) {
     java.util.Enumeration<?> nodes = rootNode.breadthFirstEnumeration();
@@ -965,37 +1281,6 @@ public final class ExistdbBrowserPanel extends JPanel {
   // ---------------------------------------------------------------------------
 
   /** The server id of the selected node (walking up to its top-level server), or the first server. */
-  private String selectedServerId() {
-    if (tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
-        && node.getUserObject() instanceof ExistNode existNode) {
-      return existNode.serverId;
-    }
-    return rootNode.getChildCount() > 0
-        && ((DefaultMutableTreeNode) rootNode.getChildAt(0)).getUserObject() instanceof ExistNode first
-        ? first.serverId : null;
-  }
-
-  private ConnectionProfile profileById(String serverId) {
-    if (serverId == null) {
-      return null;
-    }
-    return profileStore.loadAll().stream()
-        .filter(p -> serverId.equals(p.getId()))
-        .findFirst()
-        .orElse(null);
-  }
-
-  private static List<ConnectionProfile> replace(List<ConnectionProfile> profiles,
-      ConnectionProfile edited) {
-    List<ConnectionProfile> out = new ArrayList<>(profiles);
-    for (int i = 0; i < out.size(); i++) {
-      if (out.get(i).getId() != null && out.get(i).getId().equals(edited.getId())) {
-        out.set(i, edited);
-      }
-    }
-    return out;
-  }
-
   private static void addPlaceholder(DefaultMutableTreeNode node) {
     node.add(new DefaultMutableTreeNode("Loading…"));
   }
@@ -1030,6 +1315,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     public Component getTreeCellRendererComponent(JTree t, Object value, boolean selected,
         boolean expanded, boolean leaf, int row, boolean focus) {
       super.getTreeCellRendererComponent(t, value, selected, expanded, leaf, row, focus);
+      // Inherit the Oxygen tree's font so labels match the rest of the workbench's tree views.
+      setFont(t.getFont());
       if (value instanceof DefaultMutableTreeNode node
           && node.getUserObject() instanceof ExistNode existNode) {
         setIcon(iconFor(existNode, expanded));
@@ -1040,7 +1327,7 @@ public final class ExistdbBrowserPanel extends JPanel {
       return this;
     }
 
-    /** Server nodes get the DB-connection icon; collections folders; resources files. */
+    /** Server nodes get the eXist icon; collections folders; resources a per-extension type icon. */
     private javax.swing.Icon iconFor(ExistNode existNode, boolean expanded) {
       if (DB_ROOT.equals(existNode.path) && SERVER_ICON != null) {
         return SERVER_ICON;
@@ -1048,8 +1335,55 @@ public final class ExistdbBrowserPanel extends JPanel {
       if (existNode.collection) {
         return expanded ? getDefaultOpenIcon() : getDefaultClosedIcon();
       }
-      return getDefaultLeafIcon();
+      return fileIcon(existNode.name, getDefaultLeafIcon());
     }
+  }
+
+  private static Map<String, String> buildTypeIconResources() {
+    Map<String, String> m = new HashMap<>();
+    m.put("xml", "/images/XmlIcon16.png");
+    m.put("xq", "/images/XqueryIcon16.png");
+    m.put("xql", "/images/XqueryIcon16.png");
+    m.put("xqm", "/images/XqueryIcon16.png");
+    m.put("xquery", "/images/XqueryIcon16.png");
+    m.put("xsd", "/images/XsdIcon16.png");
+    m.put("xsl", "/images/XslIcon16.png");
+    m.put("xslt", "/images/XslIcon16.png");
+    m.put("html", "/images/HtmlIcon16.png");
+    m.put("htm", "/images/HtmlIcon16.png");
+    m.put("xhtml", "/images/XhtmlIcon16.png");
+    m.put("css", "/images/CssIcon16.png");
+    m.put("js", "/images/JsIcon16.png");
+    m.put("mjs", "/images/JsIcon16.png");
+    m.put("json", "/images/JsonIcon16.png");
+    m.put("dtd", "/images/DtdIcon16.png");
+    m.put("rng", "/images/RngIcon16.png");
+    m.put("rnc", "/images/RncIcon16.png");
+    m.put("sch", "/images/SchIcon16.png");
+    m.put("md", "/images/MDIcon16.png");
+    m.put("markdown", "/images/MDIcon16.png");
+    m.put("txt", "/images/TxtIcon16.png");
+    m.put("sql", "/images/SqlIcon16.png");
+    m.put("wsdl", "/images/WsdlIcon16.png");
+    m.put("yaml", "/images/YAMLIcon16.png");
+    m.put("yml", "/images/YAMLIcon16.png");
+    m.put("php", "/images/PhpIcon16.png");
+    return m;
+  }
+
+  /** The type icon for a resource name by extension, or {@code fallback} when none is mapped. */
+  private static javax.swing.Icon fileIcon(String name, javax.swing.Icon fallback) {
+    int dot = name.lastIndexOf('.');
+    if (dot < 0 || dot == name.length() - 1) {
+      return fallback;
+    }
+    String ext = name.substring(dot + 1).toLowerCase(Locale.ROOT);
+    String resource = TYPE_ICON_RESOURCES.get(ext);
+    if (resource == null) {
+      return fallback;
+    }
+    ImageIcon icon = TYPE_ICON_CACHE.computeIfAbsent(ext, k -> loadFirstIcon(resource));
+    return icon != null ? icon : fallback;
   }
 
   /** Tree node payload: which server it belongs to, its DB path/name, and lazy-load state. */

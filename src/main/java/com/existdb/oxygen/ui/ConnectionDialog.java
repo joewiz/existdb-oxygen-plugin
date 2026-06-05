@@ -24,16 +24,20 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.model.ConnectionProfile;
 
+import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
+import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
+
 import java.awt.BorderLayout;
 import java.awt.Frame;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.ActionEvent;
 
+import javax.swing.AbstractAction;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
-import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -41,23 +45,27 @@ import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 
 /**
- * Modal dialog to edit the connection profile (name, base URL, user, password) with a
- * "Test connection" button that hits {@code /api/system/info} and {@code /api/users/whoami}.
+ * Modal dialog to edit a connection profile (name, URL, user, password). Hosted in Oxygen's
+ * {@link OKCancelDialog} (native OK/Cancel + Escape) with factory-built fields; the "Test connection"
+ * button hits {@code /api/system/info} and {@code /api/users/whoami}.
  */
-public final class ConnectionDialog extends JDialog {
+public final class ConnectionDialog {
 
-  private final JTextField nameField = new JTextField(24);
-  private final JTextField urlField = new JTextField(24);
-  private final JTextField userField = new JTextField(24);
-  private final JPasswordField passField = new JPasswordField(24);
+  private final JTextField nameField = OxygenUIComponentsFactory.createTextField();
+  private final JTextField urlField = OxygenUIComponentsFactory.createTextField();
+  private final JTextField userField = OxygenUIComponentsFactory.createTextField();
+  private final JPasswordField passField = new JPasswordField(36);
   private final JCheckBox acceptSelfSignedBox =
       new JCheckBox("Trust self-signed/untrusted certificates (HTTPS)");
-  private boolean confirmed;
 
-  public ConnectionDialog(Frame owner, ConnectionProfile profile) {
-    super(owner, "eXist-db Connection", true);
+  private transient OKCancelDialog host;
+
+  private ConnectionDialog(ConnectionProfile profile) {
+    nameField.setColumns(36);
     nameField.setText(profile.getName());
+    urlField.setColumns(36);
     urlField.setText(profile.getBaseUrl());
+    userField.setColumns(36);
     userField.setText(profile.getUser());
     passField.setText(profile.getPassword());
     passField.setToolTipText(
@@ -68,18 +76,40 @@ public final class ConnectionDialog extends JDialog {
         "Enable for an https base URL whose certificate is self-signed or otherwise not trusted "
             + "(eXist's default HTTPS listener and xst both default to a self-signed cert). "
             + "Leave off for production servers with a CA-signed certificate.");
+  }
 
-    setLayout(new BorderLayout(8, 8));
-    add(buildForm(), BorderLayout.CENTER);
-    add(buildButtons(), BorderLayout.SOUTH);
-    pack();
-    setLocationRelativeTo(owner);
+  /** Shows the dialog and returns the edited profile, or null if cancelled/dismissed. */
+  public static ConnectionProfile edit(Frame owner, ConnectionProfile current) {
+    ConnectionDialog controller = new ConnectionDialog(current);
+    controller.host =
+        OxygenUIComponentsFactory.createOkCancelDialog(owner, "eXist-db Connection", true);
+    controller.host.getContentPane().add(controller.buildContent(), BorderLayout.CENTER);
+    controller.host.pack();
+    controller.host.setLocationRelativeTo(owner);
+    controller.host.setVisible(true);
+    return controller.host.getResult() == OKCancelDialog.RESULT_OK ? controller.toProfile() : null;
+  }
+
+  private JComponent buildContent() {
+    JPanel content = new JPanel(new BorderLayout(8, 8));
+    content.add(buildForm(), BorderLayout.CENTER);
+
+    JButton test = OxygenUIComponentsFactory.createButton(new AbstractAction("Test connection") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        testConnection();
+      }
+    });
+    JPanel testRow = new JPanel(new BorderLayout());
+    testRow.add(test, BorderLayout.WEST);
+    content.add(testRow, BorderLayout.SOUTH);
+    return content;
   }
 
   private JPanel buildForm() {
     JPanel form = new JPanel(new GridBagLayout());
     addRow(form, 0, "Name:", nameField);
-    addRow(form, 1, "Base URL:", urlField);
+    addRow(form, 1, "URL:", urlField);
     addRow(form, 2, "User:", userField);
     addRow(form, 3, "Password:", passField);
     addFieldRow(form, 4, acceptSelfSignedBox);
@@ -112,57 +142,28 @@ public final class ConnectionDialog extends JDialog {
     form.add(field, c);
   }
 
-  private JPanel buildButtons() {
-    JButton test = new JButton("Test connection");
-    test.addActionListener(e -> testConnection());
-    JButton ok = new JButton("OK");
-    ok.addActionListener(e -> {
-      confirmed = true;
-      dispose();
-    });
-    JButton cancel = new JButton("Cancel");
-    cancel.addActionListener(e -> dispose());
-
-    JPanel buttons = new JPanel();
-    buttons.add(test);
-    buttons.add(ok);
-    buttons.add(cancel);
-    return buttons;
-  }
-
   private void testConnection() {
     ConnectionProfile candidate = toProfile();
     ExistClient client = new ExistClient(candidate);
     try {
       client.systemInfo();
       String who = client.whoamiUser();
-      JOptionPane.showMessageDialog(this,
-          "Connected. Authenticated as: " + who,
-          "Connection OK", JOptionPane.INFORMATION_MESSAGE);
+      JOptionPane.showMessageDialog(host,
+          "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".",
+          "Test connection", JOptionPane.INFORMATION_MESSAGE);
     } catch (Exception ex) {
-      JOptionPane.showMessageDialog(this,
-          "Connection failed:\n" + ex.getMessage(),
-          "Connection failed", JOptionPane.ERROR_MESSAGE);
+      JOptionPane.showMessageDialog(host,
+          "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage(),
+          "Test connection", JOptionPane.ERROR_MESSAGE);
     }
   }
 
-  public ConnectionProfile toProfile() {
+  private ConnectionProfile toProfile() {
     return new ConnectionProfile(
         nameField.getText().trim(),
         urlField.getText().trim(),
         userField.getText().trim(),
         new String(passField.getPassword()),
         acceptSelfSignedBox.isSelected());
-  }
-
-  public boolean isConfirmed() {
-    return confirmed;
-  }
-
-  /** Convenience: show the dialog and return the edited profile, or null if cancelled. */
-  public static ConnectionProfile edit(Frame owner, ConnectionProfile current) {
-    ConnectionDialog dialog = new ConnectionDialog(owner, current);
-    dialog.setVisible(true);
-    return dialog.isConfirmed() ? dialog.toProfile() : null;
   }
 }

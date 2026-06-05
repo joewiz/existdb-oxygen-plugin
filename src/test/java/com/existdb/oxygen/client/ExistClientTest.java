@@ -115,6 +115,17 @@ class ExistClientTest {
   }
 
   @Test
+  void renameAndDuplicateSendNewName() throws Exception {
+    client.rename("/db/a/x.xq", "y.xq");
+    assertTrue(server.lastPutBody().contains("\"source\""));
+    assertTrue(server.lastPutBody().contains("\"newName\""));
+    assertTrue(server.lastPutBody().contains("y.xq"));
+    client.duplicate("/db/a/x.xq", "x-copy.xq");
+    assertTrue(server.lastPutBody().contains("\"newName\""));
+    assertTrue(server.lastPutBody().contains("x-copy.xq"));
+  }
+
+  @Test
   void runAndFetchAndCloseQuery() throws Exception {
     ExistClient.QueryHandle handle = client.runQuery("(1 to 3)", null);
     assertEquals("C1", handle.cursor());
