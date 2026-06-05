@@ -128,7 +128,13 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     // Cmd/Ctrl+Shift+Space re-summons parameter hints (they also pop automatically while typing).
     final KeyStroke signatureShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_SPACE,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK);
+    // Surface each action's shortcut in the contextual menu (the real key handling is the editor
+    // input-map bindings / F1 dispatcher below; these accelerators are for display). Completion
+    // advertises the reliable Cmd/Ctrl+Alt+Slash — Ctrl+Space is intercepted by macOS.
     evaluateQueryAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
+    completionAction.putValue(Action.ACCELERATOR_KEY, completionShortcutAlt);
+    signatureHelpAction.putValue(Action.ACCELERATOR_KEY, signatureShortcut);
+    hoverAction.putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0));
     installFunctionDocF1(pluginWorkspace, hoverAction);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
@@ -180,11 +186,13 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
           public void customizeTextPopUpMenu(JPopupMenu popUp, WSTextEditorPage textPage) {
             evaluateQueryAction.refreshEnabled();
             popUp.addSeparator();
-            popUp.add(evaluateQueryAction);
-            popUp.add(goToDefinitionAction);
+            // Ordered by the typical flow while writing a query: complete a name, fill in its
+            // arguments, look up what a symbol is, jump to its definition, then run the query.
             popUp.add(completionAction);
             popUp.add(signatureHelpAction);
             popUp.add(hoverAction);
+            popUp.add(goToDefinitionAction);
+            popUp.add(evaluateQueryAction);
           }
 
           @Override
