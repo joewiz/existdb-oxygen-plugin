@@ -65,11 +65,21 @@ final class ExistURLConnection extends URLConnection {
     }
     ExistClient client = requireClient();
     try {
-      // Fetch raw bytes (streaming endpoint) so binary resources — images referenced from an
-      // Author-mode document, PDFs, fonts — aren't corrupted by the JSON envelope's text content.
-      ExistClient.RawResource rr = client.getResourceBytes(dbPath());
-      this.mimeType = rr.mimeType();
-      this.content = rr.bytes();
+      // Text resources (XQuery, XML, …) come back correctly as the JSON envelope's UTF-8 content —
+      // and crucially the raw streaming endpoint would *execute* an XQuery module, not return its
+      // source. Only binary resources (images, PDFs, fonts), whose JSON text content is lossy, are
+      // fetched as raw bytes via the streaming endpoint.
+      ExistClient.ResourceContent rc = client.getResource(dbPath());
+      this.mimeType = rc.mimeType();
+      if (rc.binary()) {
+        ExistClient.RawResource raw = client.getResourceBytes(dbPath());
+        this.content = raw.bytes();
+        if (raw.mimeType() != null) {
+          this.mimeType = raw.mimeType();
+        }
+      } else {
+        this.content = rc.content().getBytes(StandardCharsets.UTF_8);
+      }
     } catch (ExistHttpException e) {
       // Honor the URLConnection contract: a missing resource is FileNotFoundException, not a
       // generic error. This lets Oxygen show its "Missing File — keep open?" prompt and still
