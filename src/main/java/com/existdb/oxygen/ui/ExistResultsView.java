@@ -51,6 +51,7 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
@@ -59,11 +60,13 @@ import java.util.List;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
+import javax.swing.ActionMap;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
+import javax.swing.InputMap;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -73,6 +76,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
 import javax.swing.JViewport;
+import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -92,6 +96,9 @@ public final class ExistResultsView extends JPanel {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
+  private static final int DEFAULT_FONT_SIZE = 12;
+  private static final int MIN_FONT_SIZE = 7;
+  private static final int MAX_FONT_SIZE = 36;
   // Solid (non-alpha) colors: translucent backgrounds on opaque rows leave paint artifacts.
   private static final Color STRIPE = new Color(0xF2, 0xF4, 0xF7);
   private static final Color PLAIN = Color.WHITE;
@@ -115,12 +122,16 @@ public final class ExistResultsView extends JPanel {
   private final JLabel metricsLabel = new JLabel(" ");
   private final JPanel rows = new JPanel();
   private final transient List<JPanel> rowPanels = new ArrayList<>();
+  /** The result-text panes, parallel to {@link #rowPanels}, restyled on zoom. */
+  private final transient List<JTextPane> rowTextPanes = new ArrayList<>();
   private final transient List<QueryRunner.Item> pageItems = new ArrayList<>();
   private final JScrollPane scrollPane = OxygenUIComponentsFactory.createScrollPane(rows,
       ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
       ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
   private final JLayeredPane layered = new JLayeredPane();
-  private final JButton floatingCopy;
+  /** One copy button per visible result row, floated at the viewport's right edge (parallel to
+   *  {@link #rowPanels}). */
+  private final transient List<JButton> rowCopyButtons = new ArrayList<>();
 
   private transient ExistClient client;
   private transient String serverId;
@@ -133,6 +144,8 @@ public final class ExistResultsView extends JPanel {
   private int currentStart;
   /** Suppresses combo action-listener refreshes while {@link #applyPreferences()} sets values. */
   private transient boolean applyingPrefs;
+  /** Monospaced point size of the result text, adjusted by the Cmd +/-/0 zoom shortcuts. */
+  private int fontSize = DEFAULT_FONT_SIZE;
 
   public ExistResultsView(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
@@ -185,18 +198,16 @@ public final class ExistResultsView extends JPanel {
     rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
     rows.setBackground(Color.WHITE);
 
-    floatingCopy = buildFloatingCopy();
     layered.add(scrollPane, JLayeredPane.DEFAULT_LAYER);
-    layered.add(floatingCopy, JLayeredPane.PALETTE_LAYER);
     layered.addComponentListener(new ComponentAdapter() {
       @Override
       public void componentResized(ComponentEvent e) {
         scrollPane.setBounds(0, 0, layered.getWidth(), layered.getHeight());
-        positionFloatingCopy();
+        positionFloatingCopies();
       }
     });
-    // Keep the floating button glued to the viewport's right edge as the user scrolls.
-    scrollPane.getViewport().addChangeListener(e -> positionFloatingCopy());
+    // Keep the per-row copy buttons glued to the viewport's right edge as the user scrolls.
+    scrollPane.getViewport().addChangeListener(e -> positionFloatingCopies());
 
     add(buildToolbar(), BorderLayout.NORTH);
     add(layered, BorderLayout.CENTER);
@@ -205,6 +216,68 @@ public final class ExistResultsView extends JPanel {
 
     // Re-apply the defaults live when they're edited in "Configure eXist-db Connections".
     profileStore.addResultsPrefsListener(this::applyPreferences);
+
+    installZoomShortcuts();
+  }
+
+  /**
+   * Binds Cmd/Ctrl +/-/0 to zoom the result text in/out/reset, matching Oxygen's editor zoom. Bound
+   * on the ancestor-of-focused-component map so it fires whenever focus is anywhere inside this view
+   * (a result pane, a toolbar combo, …) without shadowing the editor's own zoom.
+   */
+  private void installZoomShortcuts() {
+    int menuMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+    InputMap in = getInputMap(WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
+    ActionMap am = getActionMap();
+    bindZoom(in, am, "existZoomIn", () -> zoomBy(2),
+        KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, menuMask),
+        KeyStroke.getKeyStroke(KeyEvent.VK_PLUS, menuMask),
+        KeyStroke.getKeyStroke(KeyEvent.VK_ADD, menuMask));
+    bindZoom(in, am, "existZoomOut", () -> zoomBy(-2),
+        KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, menuMask),
+        KeyStroke.getKeyStroke(KeyEvent.VK_SUBTRACT, menuMask));
+    bindZoom(in, am, "existZoomReset", this::resetZoom,
+        KeyStroke.getKeyStroke(KeyEvent.VK_0, menuMask),
+        KeyStroke.getKeyStroke(KeyEvent.VK_NUMPAD0, menuMask));
+  }
+
+  private static void bindZoom(InputMap in, ActionMap am, String key, Runnable action,
+      KeyStroke... strokes) {
+    for (KeyStroke stroke : strokes) {
+      in.put(stroke, key);
+    }
+    am.put(key, new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        action.run();
+      }
+    });
+  }
+
+  private void zoomBy(int delta) {
+    int next = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize + delta));
+    if (next != fontSize) {
+      fontSize = next;
+      applyFontSize();
+    }
+  }
+
+  private void resetZoom() {
+    if (fontSize != DEFAULT_FONT_SIZE) {
+      fontSize = DEFAULT_FONT_SIZE;
+      applyFontSize();
+    }
+  }
+
+  /** Restyles the visible result panes at the current {@link #fontSize} and relays the rows. */
+  private void applyFontSize() {
+    Font font = new Font(Font.MONOSPACED, Font.PLAIN, fontSize);
+    for (JTextPane pane : rowTextPanes) {
+      pane.setFont(font);
+    }
+    rows.revalidate();
+    rows.repaint();
+    SwingUtilities.invokeLater(this::positionFloatingCopies);
   }
 
   /**
@@ -226,8 +299,8 @@ public final class ExistResultsView extends JPanel {
     goToPage(1);
   }
 
-  /** A small copy button that floats over the right edge of the viewport for the selected result. */
-  private JButton buildFloatingCopy() {
+  /** A small copy button that floats over the right edge of the viewport for one result row. */
+  private JButton buildCopyButton(int rowIndex) {
     JButton button = OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
       {
         ImageIcon ic = icon("/images/Copy16.png");
@@ -241,7 +314,7 @@ public final class ExistResultsView extends JPanel {
 
       @Override
       public void actionPerformed(ActionEvent e) {
-        copySelectedResult();
+        copyResult(rowIndex);
       }
     }, false);
     button.setOpaque(true);
@@ -251,36 +324,33 @@ public final class ExistResultsView extends JPanel {
     return button;
   }
 
-  private void copySelectedResult() {
-    int i = selectedIndex - currentStart;
-    if (i >= 0 && i < pageItems.size()) {
+  private void copyResult(int rowIndex) {
+    if (rowIndex >= 0 && rowIndex < pageItems.size()) {
       Toolkit.getDefaultToolkit().getSystemClipboard()
-          .setContents(new StringSelection(pageItems.get(i).value()), null);
-      workspace.showStatusMessage("Copied result " + selectedIndex);
+          .setContents(new StringSelection(pageItems.get(rowIndex).value()), null);
+      workspace.showStatusMessage("Copied result " + (currentStart + rowIndex));
     }
   }
 
-  /** Places the floating copy button at the viewport's right edge, level with the selected row. */
-  private void positionFloatingCopy() {
-    int i = selectedIndex - currentStart;
-    if (i < 0 || i >= rowPanels.size()) {
-      floatingCopy.setVisible(false);
-      return;
-    }
+  /** Places each row's copy button at the viewport's right edge, level with its row (or hides it). */
+  private void positionFloatingCopies() {
     JViewport viewport = scrollPane.getViewport();
     Rectangle visible = viewport.getViewRect();
-    Rectangle rowBounds = rowPanels.get(i).getBounds();
-    if (!visible.intersects(rowBounds)) {
-      floatingCopy.setVisible(false);
-      return;
-    }
     Point viewportTopLeft = SwingUtilities.convertPoint(viewport, 0, 0, layered);
-    int width = floatingCopy.getPreferredSize().width;
-    int height = floatingCopy.getPreferredSize().height;
-    int x = viewportTopLeft.x + viewport.getWidth() - width - 6;
-    int y = viewportTopLeft.y + Math.max(0, rowBounds.y - visible.y) + 4;
-    floatingCopy.setBounds(x, y, width, height);
-    floatingCopy.setVisible(true);
+    for (int i = 0; i < rowCopyButtons.size() && i < rowPanels.size(); i++) {
+      JButton button = rowCopyButtons.get(i);
+      Rectangle rowBounds = rowPanels.get(i).getBounds();
+      if (!visible.intersects(rowBounds)) {
+        button.setVisible(false);
+        continue;
+      }
+      int width = button.getPreferredSize().width;
+      int height = button.getPreferredSize().height;
+      int x = viewportTopLeft.x + viewport.getWidth() - width - 6;
+      int y = viewportTopLeft.y + Math.max(0, rowBounds.y - visible.y) + 4;
+      button.setBounds(x, y, width, height);
+      button.setVisible(true);
+    }
   }
 
   private JComponent buildToolbar() {
@@ -400,6 +470,13 @@ public final class ExistResultsView extends JPanel {
   private void refreshPage() {
     if (cursor == null || totalItems == 0) {
       rows.removeAll();
+      rowPanels.clear();
+      rowTextPanes.clear();
+      for (JButton button : rowCopyButtons) {
+        layered.remove(button);
+      }
+      rowCopyButtons.clear();
+      layered.repaint();
       rangeLabel.setText("No results");
       rows.revalidate();
       rows.repaint();
@@ -446,12 +523,21 @@ public final class ExistResultsView extends JPanel {
     currentStart = startIndex;
     rows.removeAll();
     rowPanels.clear();
+    rowTextPanes.clear();
     pageItems.clear();
     pageItems.addAll(items);
+    // Drop the previous page's floating copy buttons before laying out the new ones.
+    for (JButton button : rowCopyButtons) {
+      layered.remove(button);
+    }
+    rowCopyButtons.clear();
     for (int i = 0; i < items.size(); i++) {
       JPanel row = buildRow(startIndex + i, items.get(i), method);
       rowPanels.add(row);
       rows.add(row);
+      JButton copyButton = buildCopyButton(i);
+      rowCopyButtons.add(copyButton);
+      layered.add(copyButton, JLayeredPane.PALETTE_LAYER);
     }
     rows.revalidate();
     rows.repaint();
@@ -485,15 +571,13 @@ public final class ExistResultsView extends JPanel {
       }
     }
     final JPanel target = selectedRow;
-    if (target != null) {
-      // getBounds() is in the rows panel's coordinate space, so scroll on the parent.
-      SwingUtilities.invokeLater(() -> {
+    SwingUtilities.invokeLater(() -> {
+      if (target != null) {
+        // getBounds() is in the rows panel's coordinate space, so scroll on the parent.
         rows.scrollRectToVisible(target.getBounds());
-        positionFloatingCopy();
-      });
-    } else {
-      floatingCopy.setVisible(false);
-    }
+      }
+      positionFloatingCopies();
+    });
     updateNavState();
   }
 
@@ -519,11 +603,12 @@ public final class ExistResultsView extends JPanel {
     };
     area.setEditable(false);
     area.setOpaque(false);
-    area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+    area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, fontSize));
     ResultHighlighter.apply(area.getStyledDocument(), value,
         ResultHighlighter.languageFor(method, value));
-    // Per-result copy is provided by the floating button that tracks the selected row, so it stays
-    // visible at the viewport's right edge even when a result is wider than the view.
+    rowTextPanes.add(area);
+    // Per-result copy is provided by the floating button at the viewport's right edge, so it stays
+    // visible even when a result is wider than the view.
     row.add(area, BorderLayout.CENTER);
     return row;
   }
