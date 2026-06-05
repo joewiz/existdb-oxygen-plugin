@@ -50,7 +50,7 @@ public final class GoToDefinitionAction extends AbstractAction {
   private final transient StandalonePluginWorkspace workspace;
 
   public GoToDefinitionAction(StandalonePluginWorkspace workspace) {
-    super("Go to Definition (eXist)");
+    super("Go to Definition (eXist-db)");
     this.workspace = workspace;
   }
 

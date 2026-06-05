@@ -54,7 +54,7 @@ public final class EvaluateQueryAction extends AbstractAction {
 
   public EvaluateQueryAction(StandalonePluginWorkspace workspace, ProfileStore profileStore,
       RunInResultsViewAction browseAction, RunCurrentEditorAction editorAction) {
-    super("Evaluate Query with eXist-db");
+    super("Evaluate Query (eXist-db)");
     this.workspace = workspace;
     this.profileStore = profileStore;
     this.browseAction = browseAction;
