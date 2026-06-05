@@ -31,15 +31,16 @@ import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.geom.Rectangle2D;
 
 import javax.swing.AbstractAction;
+import javax.swing.BorderFactory;
+import javax.swing.JEditorPane;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 import javax.swing.SwingWorker;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.JTextComponent;
@@ -107,18 +108,20 @@ public final class HoverAction extends AbstractAction {
   }
 
   private static void showHoverPopup(JTextComponent component, int caret, String contents) {
-    JTextArea area = new JTextArea(contents);
-    area.setEditable(false);
-    area.setLineWrap(true);
-    area.setWrapStyleWord(true);
-    area.setMargin(new Insets(6, 8, 6, 8));
+    JEditorPane pane = new JEditorPane("text/html", toHtml(contents));
+    pane.setEditable(false);
+    pane.putClientProperty(JEditorPane.HONOR_DISPLAY_PROPERTIES, Boolean.TRUE);
+    pane.setBackground(Color.WHITE);
+    pane.setCaretPosition(0);
 
-    JScrollPane scroll = new JScrollPane(area);
-    int rows = Math.min(12, contents.split("\n").length + 2);
-    scroll.setPreferredSize(new Dimension(480, Math.max(48, rows * 16)));
+    JScrollPane scroll = new JScrollPane(pane);
+    scroll.setBorder(BorderFactory.createLineBorder(new Color(0xC8, 0xCE, 0xD6)));
+    int lines = contents.split("\n").length + 2;
+    scroll.setPreferredSize(new Dimension(460, Math.min(220, Math.max(56, lines * 18))));
 
     JPopupMenu popup = new JPopupMenu();
     popup.setLayout(new BorderLayout());
+    popup.setBorder(BorderFactory.createEmptyBorder());
     popup.add(scroll, BorderLayout.CENTER);
     try {
       Rectangle2D r = component.modelToView2D(caret);
@@ -126,6 +129,39 @@ public final class HoverAction extends AbstractAction {
     } catch (BadLocationException e) {
       // Cannot place the popup; skip.
     }
+  }
+
+  /**
+   * Renders hover {@code contents} (a signature line, a blank line, then a description) as a small
+   * HTML card: a bold monospace signature above a sans-serif description, like eXide's F1 doc.
+   */
+  private static String toHtml(String contents) {
+    String signature = contents;
+    String body = "";
+    int blank = contents.indexOf("\n\n");
+    if (blank >= 0) {
+      signature = contents.substring(0, blank).strip();
+      body = contents.substring(blank + 2).strip();
+    } else {
+      int nl = contents.indexOf('\n');
+      if (nl >= 0) {
+        signature = contents.substring(0, nl).strip();
+        body = contents.substring(nl + 1).strip();
+      }
+    }
+    StringBuilder html = new StringBuilder(
+        "<html><body style='font-family:sans-serif;font-size:11px;margin:7px'>");
+    html.append("<div style='font-family:monospace;font-weight:bold;color:#202020'>")
+        .append(escape(signature)).append("</div>");
+    if (!body.isEmpty()) {
+      html.append("<div style='margin-top:7px;color:#333333'>")
+          .append(escape(body).replace("\n", "<br>")).append("</div>");
+    }
+    return html.append("</body></html>").toString();
+  }
+
+  private static String escape(String s) {
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
   }
 
   private static WSTextEditorPage textPage(WSEditor editor) {

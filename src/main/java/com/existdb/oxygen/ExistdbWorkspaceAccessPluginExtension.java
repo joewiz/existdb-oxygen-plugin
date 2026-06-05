@@ -121,6 +121,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK);
     final KeyStroke completionShortcutAlt = KeyStroke.getKeyStroke(KeyEvent.VK_SLASH,
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.ALT_DOWN_MASK);
+    // F1 shows eXist function documentation for the symbol under the caret, overriding Oxygen's
+    // default F1 (which opens the XQuery help page in a browser).
+    final KeyStroke hoverShortcut = KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0);
     evaluateQueryAction.putValue(Action.ACCELERATOR_KEY, runShortcut);
     pluginWorkspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
@@ -158,6 +161,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             completionAction);
         bindShortcut(workspace, editorLocation, completionShortcutAlt, "existComplete",
             completionAction);
+        bindShortcut(workspace, editorLocation, hoverShortcut, "existHover", hoverAction);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
 
