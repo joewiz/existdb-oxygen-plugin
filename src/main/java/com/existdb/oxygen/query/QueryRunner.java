@@ -44,8 +44,17 @@ public final class QueryRunner {
   private QueryRunner() {
   }
 
-  /** One result item: its serialized {@code value} and XDM {@code type} (e.g. {@code xs:integer}). */
-  public record Item(String value, String type) {
+  /**
+   * One result item: its serialized {@code value}, XDM {@code type} (e.g. {@code xs:integer}), and —
+   * for persistent database nodes — the source {@code documentURI} and eXist {@code nodeId} (both
+   * empty for atomic or in-memory results), which together locate the originating element.
+   */
+  public record Item(String value, String type, String documentURI, String nodeId) {
+
+    /** True when this item is a stored database node that can be traced back to a source document. */
+    public boolean hasSource() {
+      return documentURI != null && !documentURI.isEmpty() && nodeId != null && !nodeId.isEmpty();
+    }
   }
 
   /**
@@ -96,7 +105,8 @@ public final class QueryRunner {
     List<Item> items = new ArrayList<>(array.length());
     for (int i = 0; i < array.length(); i++) {
       JSONObject item = array.getJSONObject(i);
-      items.add(new Item(item.optString("value", item.toString()), item.optString("type", "")));
+      items.add(new Item(item.optString("value", item.toString()), item.optString("type", ""),
+          item.optString("documentURI", ""), item.optString("nodeId", "")));
     }
     return items;
   }

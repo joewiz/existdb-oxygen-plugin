@@ -95,4 +95,19 @@ public final class ExistContext {
   public static boolean isConnected() {
     return defaultClient() != null;
   }
+
+  /**
+   * The server id for an editor location: the id in an {@code exist://<id>/…} URL when it names a
+   * registered server, otherwise the default server's id. Mirrors {@link #clientFor(URL)} so callers
+   * that need the id (e.g. to build {@code exist://} URLs for related resources) stay in sync.
+   */
+  public static String serverIdFor(URL location) {
+    if (location != null) {
+      String id = LangServiceSupport.serverId(location.toExternalForm());
+      if (id != null && CLIENTS.containsKey(id)) {
+        return id;
+      }
+    }
+    return defaultId;
+  }
 }

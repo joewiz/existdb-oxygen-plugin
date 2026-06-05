@@ -304,6 +304,42 @@ public final class ExistClient {
     send(request("/query/" + enc(cursor)).DELETE().build());
   }
 
+  /**
+   * Resolves a stored node's canonical path (the {@code fn:path()} XPath, e.g.
+   * {@code /Q{ns}article[1]/Q{ns}para[3]}) from its document URI and eXist node id — both returned
+   * by the cursor results. Used to locate the originating element in the opened source document.
+   * Returns null when the node can no longer be resolved (e.g. the document changed).
+   */
+  public String nodePath(String documentUri, String nodeId)
+      throws IOException, InterruptedException {
+    String query = "fn:path(util:node-by-id(doc(\"" + xqEscape(documentUri) + "\"), \""
+        + xqEscape(nodeId) + "\"))";
+    QueryHandle handle = runQuery(query, null);
+    if (handle.cursor() == null || handle.items() == 0) {
+      return null;
+    }
+    try {
+      String body = fetchResultsRaw(handle.cursor(), 1, 1, "adaptive");
+      JSONArray array = new JSONArray(body);
+      if (array.isEmpty()) {
+        return null;
+      }
+      String value = array.getJSONObject(0).optString("value", "");
+      // Adaptive serialization quotes strings; unwrap to the bare path.
+      if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+        value = value.substring(1, value.length() - 1);
+      }
+      return value.isEmpty() ? null : value;
+    } finally {
+      closeCursor(handle.cursor());
+    }
+  }
+
+  /** Escapes a string for embedding in an XQuery double-quoted literal. */
+  private static String xqEscape(String s) {
+    return s.replace("\"", "\"\"");
+  }
+
   // ---------------------------------------------------------------------------
   // Language services (existdb-openapi /api/langservice/*, LSP-isomorphic shapes)
   // ---------------------------------------------------------------------------

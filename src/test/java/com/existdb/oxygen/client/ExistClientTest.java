@@ -142,6 +142,17 @@ class ExistClientTest {
   }
 
   @Test
+  void nodePathBuildsFnPathQueryAndReturnsValue() throws Exception {
+    String path = client.nodePath("/db/a/x.xml", "3.9");
+    assertTrue(server.lastQueryBody().contains("fn:path"));
+    assertTrue(server.lastQueryBody().contains("util:node-by-id"));
+    assertTrue(server.lastQueryBody().contains("/db/a/x.xml"));
+    assertTrue(server.lastQueryBody().contains("3.9"));
+    // The canned cursor yields "1" as the first item's value; nodePath returns it unwrapped.
+    assertEquals("1", path);
+  }
+
+  @Test
   void nonSuccessStatusRaisesExistHttpException() {
     ExistHttpException ex = org.junit.jupiter.api.Assertions.assertThrows(
         ExistHttpException.class, () -> client.getResource("/db/missing.xq"));

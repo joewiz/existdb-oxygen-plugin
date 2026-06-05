@@ -37,7 +37,9 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import java.awt.event.ActionEvent;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.swing.AbstractAction;
 import javax.swing.ImageIcon;
@@ -56,10 +58,15 @@ public final class RunCurrentEditorAction extends AbstractAction {
   private static final int MAX_ROW_LENGTH = 200;
 
   private final transient StandalonePluginWorkspace workspace;
+  private final transient ResultSourceNavigator navigator;
 
   public RunCurrentEditorAction(StandalonePluginWorkspace workspace) {
     super("Run Current Editor (eXist)");
     this.workspace = workspace;
+    this.navigator = new ResultSourceNavigator(workspace);
+    // Activating a stored-node result row jumps to the originating element in its source document;
+    // other rows fall through to Oxygen's default navigation (the serialized-output editor).
+    workspace.getResultsManager().addEventHandler(RESULTS_TAB, navigator);
     putValue(SHORT_DESCRIPTION, "Run the current editor's XQuery against eXist");
     URL icon = RunCurrentEditorAction.class.getResource("/images/run-query.png");
     if (icon != null) {
@@ -81,6 +88,7 @@ public final class RunCurrentEditorAction extends AbstractAction {
       workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
       return;
     }
+    final String serverId = ExistContext.serverIdFor(editor.getEditorLocation());
     final JTextComponent component = (JTextComponent) page.getTextComponent();
     final String query = queryText(component);
     if (query.isBlank()) {
@@ -99,7 +107,7 @@ public final class RunCurrentEditorAction extends AbstractAction {
       @Override
       protected void done() {
         try {
-          openResults(get());
+          openResults(get(), serverId);
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
           workspace.showErrorMessage("XQuery failed: " + cause.getMessage());
@@ -114,7 +122,7 @@ public final class RunCurrentEditorAction extends AbstractAction {
     return selection != null && !selection.isBlank() ? selection : component.getText();
   }
 
-  private void openResults(QueryRunner.QueryResult result) {
+  private void openResults(QueryRunner.QueryResult result, String serverId) {
     if (result.totalItems() == 0) {
       workspace.showStatusMessage("eXist: the query returned no results.");
       return;
@@ -132,7 +140,7 @@ public final class RunCurrentEditorAction extends AbstractAction {
     URL resultsUrl =
         workspace.createNewEditor(xml ? "xml" : "txt", xml ? "text/xml" : "text/plain", content);
     if (resultsUrl != null) {
-      depositResults(resultsUrl, result.items(), wrapped);
+      depositResults(resultsUrl, result.items(), wrapped, serverId);
     }
     if (result.truncated()) {
       workspace.showStatusMessage("eXist: showing the first " + QueryRunner.MAX_ITEMS
@@ -149,19 +157,28 @@ public final class RunCurrentEditorAction extends AbstractAction {
    * source document. (Once existdb-openapi populates each result's source URI/position, node rows can
    * point back to the originating element instead.)
    */
-  private void depositResults(URL resultsUrl, List<QueryRunner.Item> items, boolean wrapped) {
+  private void depositResults(
+      URL resultsUrl, List<QueryRunner.Item> items, boolean wrapped, String serverId) {
     String systemId = resultsUrl.toString();
     List<DocumentPositionedInfo> rows = new ArrayList<>(items.size());
+    // Stored-node rows that should jump to their source document instead of the results editor.
+    Map<DocumentPositionedInfo, ResultSourceNavigator.NodeRef> sourceRows = new HashMap<>();
     // 1-based line where the first item begins; the <results> wrapper, if added, occupies line 1.
     int line = wrapped ? 2 : 1;
     for (QueryRunner.Item item : items) {
       // line/column = where the item begins (column 1, since items start a line); length = the
       // item's full serialized character count, so double-clicking selects the whole element/value
       // rather than just its first line.
-      rows.add(new DocumentPositionedInfo(DocumentPositionedInfo.SEVERITY_INFO, rowMessage(item),
-          systemId, line, 1, item.value().length()));
+      DocumentPositionedInfo row = new DocumentPositionedInfo(DocumentPositionedInfo.SEVERITY_INFO,
+          rowMessage(item), systemId, line, 1, item.value().length());
+      rows.add(row);
+      if (item.hasSource()) {
+        sourceRows.put(row,
+            new ResultSourceNavigator.NodeRef(serverId, item.documentURI(), item.nodeId()));
+      }
       line += lineAdvance(item.value());
     }
+    navigator.setRows(sourceRows);
     ResultsManager resultsManager = workspace.getResultsManager();
     resultsManager.setResults(RESULTS_TAB, rows, ResultType.GENERIC);
   }
