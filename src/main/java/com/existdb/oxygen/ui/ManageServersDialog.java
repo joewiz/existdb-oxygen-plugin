@@ -28,10 +28,11 @@ import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
-import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -43,8 +44,6 @@ import java.util.List;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -198,36 +197,47 @@ public final class ManageServersDialog {
     return content;
   }
 
-  /** The persisted query/result defaults (destination, serialization method, indent, page size). */
+  /**
+   * The persisted query/result defaults (destination, serialization method, indent, page size).
+   * Laid out with {@link GridBagLayout} anchored {@code BASELINE_LEADING} so each row's labels,
+   * combos, and the (taller) Indent checkbox align on their text baseline — FlowLayout/BoxLayout
+   * only center vertically, which drops the checkbox's baseline below the labels'.
+   */
   private JComponent buildResultPrefs() {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
     indentPref.setSelected(store.resultsIndent());
     pageSizePref.setSelectedItem(store.resultsPageSize());
     destinationPref.setSelectedIndex(destinationIndex(store.resultsDestination()));
-    // Compact, uniform combo widths (matching the results view) so the rows line up cleanly.
+    // Compact, uniform combo widths (matching the results view); 90px fits the widest value, "100".
     constrainWidth(methodPref, 120);
-    constrainWidth(pageSizePref, 70);
+    constrainWidth(pageSizePref, 90);
     constrainWidth(destinationPref, 230);
 
-    JPanel destinationRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-    destinationRow.add(new JLabel("Run queries:"));
-    destinationRow.add(destinationPref);
-
-    JPanel displayRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-    displayRow.add(new JLabel("Serialization:"));
-    displayRow.add(methodPref);
-    displayRow.add(indentPref);
-    displayRow.add(Box.createHorizontalStrut(12));
-    displayRow.add(new JLabel("Results per page:"));
-    displayRow.add(pageSizePref);
-
-    JPanel prefs = new JPanel();
-    prefs.setLayout(new BoxLayout(prefs, BoxLayout.Y_AXIS));
+    JPanel prefs = new JPanel(new GridBagLayout());
     prefs.setBorder(BorderFactory.createTitledBorder("Query & result defaults"));
-    destinationRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-    displayRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-    prefs.add(destinationRow);
-    prefs.add(displayRow);
+    GridBagConstraints c = new GridBagConstraints();
+    c.insets = new Insets(2, 4, 2, 4);
+    c.anchor = GridBagConstraints.BASELINE_LEADING;
+
+    c.gridy = 0;
+    c.gridx = 0;
+    prefs.add(new JLabel("Run queries:"), c);
+    c.gridx = 1;
+    c.gridwidth = 4;
+    prefs.add(destinationPref, c);
+    c.gridwidth = 1;
+
+    c.gridy = 1;
+    c.gridx = 0;
+    prefs.add(new JLabel("Serialization:"), c);
+    c.gridx = 1;
+    prefs.add(methodPref, c);
+    c.gridx = 2;
+    prefs.add(indentPref, c);
+    c.gridx = 3;
+    prefs.add(new JLabel("Results per page:"), c);
+    c.gridx = 4;
+    prefs.add(pageSizePref, c);
     return prefs;
   }
 
