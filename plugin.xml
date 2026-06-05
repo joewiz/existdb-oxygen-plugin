@@ -30,4 +30,7 @@
 
   <!-- The eXist-db side view (collection tree + connection controls). -->
   <view id="ExistdbBrowserViewID" initialSide="WEST" initialRow="0"/>
+
+  <!-- The eXist-db results view (eXide-style paginated query results). -->
+  <view id="ExistdbResultsViewID" initialSide="SOUTH" initialRow="0"/>
 </plugin>

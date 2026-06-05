@@ -23,10 +23,12 @@ package com.existdb.oxygen;
 
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.ui.CompletionAction;
+import com.existdb.oxygen.ui.ExistResultsView;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
+import com.existdb.oxygen.ui.RunInResultsViewAction;
 
 import ro.sync.ecss.extensions.api.AuthorAccess;
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
@@ -59,8 +61,9 @@ import javax.swing.KeyStroke;
  */
 public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAccessPluginExtension {
 
-  /** Must match the view id declared in plugin.xml. */
+  /** Must match the view ids declared in plugin.xml. */
   private static final String VIEW_ID = "ExistdbBrowserViewID";
+  private static final String RESULTS_VIEW_ID = "ExistdbResultsViewID";
 
   @Override
   public void applicationStarted(final StandalonePluginWorkspace pluginWorkspace) {
@@ -69,14 +72,22 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
     new ExistAutoValidator(pluginWorkspace).install();
 
+    final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace);
+    final URL viewIcon =
+        ExistdbWorkspaceAccessPluginExtension.class.getResource("/images/exist-server.png");
+
     pluginWorkspace.addViewComponentCustomizer(new ViewComponentCustomizer() {
       @Override
       public void customizeView(ViewInfo viewInfo) {
         if (VIEW_ID.equals(viewInfo.getViewID())) {
           viewInfo.setComponent(new ExistdbBrowserPanel(pluginWorkspace, profileStore));
           viewInfo.setTitle("eXist-db");
-          URL viewIcon = ExistdbWorkspaceAccessPluginExtension.class
-              .getResource("/images/exist-server.png");
+          if (viewIcon != null) {
+            viewInfo.setIcon(new ImageIcon(viewIcon));
+          }
+        } else if (RESULTS_VIEW_ID.equals(viewInfo.getViewID())) {
+          viewInfo.setComponent(resultsView);
+          viewInfo.setTitle("eXist-db Results");
           if (viewIcon != null) {
             viewInfo.setIcon(new ImageIcon(viewIcon));
           }
@@ -85,6 +96,8 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     });
 
     final Action runCurrentEditorAction = new RunCurrentEditorAction(pluginWorkspace);
+    final Action runInResultsViewAction =
+        new RunInResultsViewAction(pluginWorkspace, resultsView, RESULTS_VIEW_ID);
     final Action goToDefinitionAction = new GoToDefinitionAction(pluginWorkspace);
     final Action completionAction = new CompletionAction(pluginWorkspace);
     final Action hoverAction = new HoverAction(pluginWorkspace);
@@ -113,6 +126,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
           public void customizeTextPopUpMenu(JPopupMenu popUp, WSTextEditorPage textPage) {
             popUp.addSeparator();
             popUp.add(runCurrentEditorAction);
+            popUp.add(runInResultsViewAction);
             popUp.add(goToDefinitionAction);
             popUp.add(completionAction);
             popUp.add(hoverAction);
