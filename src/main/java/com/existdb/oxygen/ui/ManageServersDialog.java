@@ -84,7 +84,7 @@ public final class ManageServersDialog extends JDialog {
     if (!profiles.isEmpty()) {
       table.setRowSelectionInterval(0, 0);
     }
-    setSize(660, 360);
+    setSize(720, 360);
     setLocationRelativeTo(owner);
   }
 
@@ -100,7 +100,11 @@ public final class ManageServersDialog extends JDialog {
 
   private void buildUi() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-    table.getColumnModel().getColumn(2).setMaxWidth(70);
+    // Name compact, URL gets the room, Default a fixed narrow check column.
+    table.getColumnModel().getColumn(0).setPreferredWidth(150);
+    table.getColumnModel().getColumn(1).setPreferredWidth(430);
+    table.getColumnModel().getColumn(2).setMaxWidth(60);
+    table.getColumnModel().getColumn(2).setPreferredWidth(60);
 
     // App-specific actions on the left as text buttons.
     JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));

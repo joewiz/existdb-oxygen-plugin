@@ -38,6 +38,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
@@ -61,6 +62,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.swing.AbstractButton;
+import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.DropMode;
 import javax.swing.ImageIcon;
@@ -159,8 +161,10 @@ public final class ExistdbBrowserPanel extends JPanel {
     } else {
       gear.setText("⚙"); // gear glyph fallback
     }
-    gear.setToolTipText("eXist-db settings");
-    gear.addActionListener(e -> gearMenu().show(gear, 0, gear.getHeight()));
+    gear.setToolTipText("Configure eXist-db Connections");
+    // Mirror the Data Source Explorer gear: a single click opens the configure dialog, no dropdown.
+    gear.addActionListener(e -> manageServers());
+    flatten(gear);
 
     JToggleButton link = new JToggleButton();
     ImageIcon linkIcon = loadFirstIcon("/images/LinkWithEditor16.png");
@@ -169,7 +173,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     } else {
       link.setText("Link");
     }
-    link.setToolTipText("Link with Editor — reveal the active editor's resource in the tree");
+    link.setToolTipText("Link with Editor");
     link.addActionListener(e -> {
       linkWithEditor = link.isSelected();
       if (linkWithEditor) {
@@ -180,13 +184,19 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     });
-
-    // Flat, compact buttons grouped on the right, matching Oxygen's Project view toolbar.
+    // Flat when off; filled + bordered when on, so the active state reads clearly (like the Project
+    // view's Link-with-Editor toggle).
     flatten(link);
-    flatten(gear);
+    link.addChangeListener(e -> {
+      boolean on = link.isSelected();
+      link.setContentAreaFilled(on);
+      link.setBorderPainted(on);
+    });
+
     JToolBar bar = new JToolBar();
     bar.setFloatable(false);
     bar.setRollover(true);
+    bar.setBorder(BorderFactory.createEmptyBorder());
     bar.add(Box.createHorizontalGlue());
     bar.add(link);
     bar.addSeparator();
@@ -194,9 +204,12 @@ public final class ExistdbBrowserPanel extends JPanel {
     return bar;
   }
 
-  /** Drops the focus ring; the enclosing JToolBar gives the flat/rollover look like Oxygen's views. */
+  /** Compact, flat toolbar button (small margins, no fill/border) matching Oxygen's view toolbars. */
   private static void flatten(AbstractButton button) {
     button.setFocusable(false);
+    button.setMargin(new Insets(2, 2, 2, 2));
+    button.setContentAreaFilled(false);
+    button.setBorderPainted(false);
   }
 
   private void configureTree() {
@@ -267,12 +280,6 @@ public final class ExistdbBrowserPanel extends JPanel {
   // ---------------------------------------------------------------------------
   // Settings gear
   // ---------------------------------------------------------------------------
-
-  private JPopupMenu gearMenu() {
-    JPopupMenu menu = new JPopupMenu();
-    menu.add(menuItem("Manage servers…", this::manageServers));
-    return menu;
-  }
 
   /** Opens the unified server-management window, then rebuilds the tree if the user saved changes. */
   private void manageServers() {

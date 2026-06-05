@@ -46,10 +46,10 @@ import javax.swing.JTextField;
  */
 public final class ConnectionDialog extends JDialog {
 
-  private final JTextField nameField = new JTextField(24);
-  private final JTextField urlField = new JTextField(24);
-  private final JTextField userField = new JTextField(24);
-  private final JPasswordField passField = new JPasswordField(24);
+  private final JTextField nameField = new JTextField(36);
+  private final JTextField urlField = new JTextField(36);
+  private final JTextField userField = new JTextField(36);
+  private final JPasswordField passField = new JPasswordField(36);
   private final JCheckBox acceptSelfSignedBox =
       new JCheckBox("Trust self-signed/untrusted certificates (HTTPS)");
   private boolean confirmed;
@@ -79,7 +79,7 @@ public final class ConnectionDialog extends JDialog {
   private JPanel buildForm() {
     JPanel form = new JPanel(new GridBagLayout());
     addRow(form, 0, "Name:", nameField);
-    addRow(form, 1, "Base URL:", urlField);
+    addRow(form, 1, "URL:", urlField);
     addRow(form, 2, "User:", userField);
     addRow(form, 3, "Password:", passField);
     addFieldRow(form, 4, acceptSelfSignedBox);
