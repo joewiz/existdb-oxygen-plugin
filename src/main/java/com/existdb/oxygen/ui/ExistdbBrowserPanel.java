@@ -179,7 +179,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     };
     Action gearAction = new AbstractAction() {
       {
-        putValue(SMALL_ICON, loadFirstIcon("/images/Settings16.png"));
+        // The Data Source Explorer's gear-with-menu-lines glyph.
+        putValue(SMALL_ICON, loadFirstIcon("/images/OptionsShortcut16.png"));
         putValue(SHORT_DESCRIPTION, "Configure eXist-db Connections");
       }
 

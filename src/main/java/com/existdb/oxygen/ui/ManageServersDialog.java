@@ -26,13 +26,13 @@ import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
+import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
-import java.awt.event.KeyEvent;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,13 +44,11 @@ import javax.swing.BorderFactory;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
-import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.table.AbstractTableModel;
@@ -59,11 +57,12 @@ import javax.swing.table.AbstractTableModel;
  * A single window for managing saved eXist servers — a Data Source Explorer-style "Connections"
  * table (Name, URL, Default) with a flat icon toolbar for Add / Edit / Duplicate / Remove and
  * reordering (Move Up/Down, Sort A–Z), plus choosing the default server and testing a connection.
- * Edits are made on a working copy and persisted only on <b>OK</b>; <b>Cancel</b> (or Escape)
- * discards them.
+ * Hosted in Oxygen's {@link OKCancelDialog}; edits are made on a working copy and persisted only on
+ * <b>OK</b>; <b>Cancel</b> (or Escape) discards them.
  */
-public final class ManageServersDialog extends JDialog {
+public final class ManageServersDialog {
 
+  private final transient Frame owner;
   private final transient ProfileStore store;
   private final transient StandalonePluginWorkspace workspace;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
@@ -72,10 +71,10 @@ public final class ManageServersDialog extends JDialog {
   private final JTable table = OxygenUIComponentsFactory.createTable(model);
 
   private transient ConnectionProfile defaultProfile;
-  private boolean committed;
+  private transient OKCancelDialog host;
 
   private ManageServersDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
-    super(owner, "Manage Servers", true);
+    this.owner = owner;
     this.store = store;
     this.workspace = workspace;
     profiles.addAll(store.loadAll());
@@ -85,25 +84,35 @@ public final class ManageServersDialog extends JDialog {
         defaultProfile = p;
       }
     }
-    buildUi();
-    if (!profiles.isEmpty()) {
-      table.setRowSelectionInterval(0, 0);
-    }
-    setSize(720, 360);
-    setLocationRelativeTo(owner);
   }
 
   /**
-   * Opens the modal dialog. Returns {@code true} if the user committed changes (OK), so the caller
-   * can refresh; {@code false} on Cancel/Escape.
+   * Opens the modal dialog. Returns {@code true} if the user clicked OK (changes persisted), so the
+   * caller can refresh; {@code false} on Cancel/Escape.
    */
   public static boolean open(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
-    ManageServersDialog dialog = new ManageServersDialog(owner, store, workspace);
-    dialog.setVisible(true);
-    return dialog.committed;
+    ManageServersDialog controller = new ManageServersDialog(owner, store, workspace);
+    return controller.show();
   }
 
-  private void buildUi() {
+  private boolean show() {
+    host = OxygenUIComponentsFactory.createOkCancelDialog(owner, "Manage Servers", true);
+    host.getContentPane().add(buildContent(), BorderLayout.CENTER);
+    if (!profiles.isEmpty()) {
+      table.setRowSelectionInterval(0, 0);
+    }
+    host.setResizable(true);
+    host.setSize(720, 380);
+    host.setLocationRelativeTo(owner);
+    host.setVisible(true);
+    if (host.getResult() == OKCancelDialog.RESULT_OK) {
+      commit();
+      return true;
+    }
+    return false;
+  }
+
+  private JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     // Name compact, URL gets the room, Default a fixed narrow check column.
     table.getColumnModel().getColumn(0).setPreferredWidth(150);
@@ -137,30 +146,7 @@ public final class ManageServersDialog extends JDialog {
     connections.setBorder(BorderFactory.createTitledBorder("Connections"));
     connections.add(new JScrollPane(table), BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
-
-    JButton ok = OxygenUIComponentsFactory.createButton(new AbstractAction("OK") {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        commit();
-      }
-    });
-    JButton cancel = OxygenUIComponentsFactory.createButton(new AbstractAction("Cancel") {
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        dispose();
-      }
-    });
-    JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-    south.add(ok);
-    south.add(cancel);
-
-    setLayout(new BorderLayout());
-    add(connections, BorderLayout.CENTER);
-    add(south, BorderLayout.SOUTH);
-    getRootPane().setDefaultButton(ok);
-    // Escape closes (cancel).
-    getRootPane().registerKeyboardAction(e -> dispose(),
-        KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
+    return connections;
   }
 
   private static JButton textButton(String label, Runnable action) {
@@ -192,12 +178,10 @@ public final class ManageServersDialog extends JDialog {
     return OxygenUIComponentsFactory.createToolbarButton(a, false);
   }
 
-  /** Persists the working copy and the chosen default, then closes. */
+  /** Persists the working copy and the chosen default. */
   private void commit() {
     store.saveAll(profiles);
     store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
-    committed = true;
-    dispose();
   }
 
   private ConnectionProfile selected() {
@@ -215,7 +199,7 @@ public final class ManageServersDialog extends JDialog {
   }
 
   private void add() {
-    ConnectionProfile created = ConnectionDialog.edit(ownerFrame(), new ConnectionProfile());
+    ConnectionProfile created = ConnectionDialog.edit(owner, new ConnectionProfile());
     if (created != null) {
       profiles.add(created);
       model.fireTableDataChanged();
@@ -229,7 +213,7 @@ public final class ManageServersDialog extends JDialog {
       return;
     }
     int row = table.getSelectedRow();
-    ConnectionProfile edited = ConnectionDialog.edit(ownerFrame(), current);
+    ConnectionProfile edited = ConnectionDialog.edit(owner, current);
     if (edited != null) {
       edited.setId(current.getId());
       profiles.set(row, edited);
@@ -258,7 +242,7 @@ public final class ManageServersDialog extends JDialog {
     if (p == null) {
       return;
     }
-    int choice = JOptionPane.showConfirmDialog(this, "Remove the server \"" + p.getName() + "\"?",
+    int choice = JOptionPane.showConfirmDialog(host, "Remove the server \"" + p.getName() + "\"?",
         "Remove server", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
     if (choice == JOptionPane.OK_OPTION) {
       profiles.remove(p);
@@ -313,22 +297,16 @@ public final class ManageServersDialog extends JDialog {
       @Override
       protected void done() {
         try {
-          JOptionPane.showMessageDialog(ManageServersDialog.this,
-              "Connected. Authenticated as: " + get(), "Test connection",
-              JOptionPane.INFORMATION_MESSAGE);
+          JOptionPane.showMessageDialog(host, "Connected. Authenticated as: " + get(),
+              "Test connection", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-          JOptionPane.showMessageDialog(ManageServersDialog.this,
-              "Connection failed: " + cause.getMessage(), "Test connection",
-              JOptionPane.ERROR_MESSAGE);
+          JOptionPane.showMessageDialog(host, "Connection failed: " + cause.getMessage(),
+              "Test connection", JOptionPane.ERROR_MESSAGE);
         }
       }
     }.execute();
     workspace.showStatusMessage("Testing connection to " + p.getName() + "…");
-  }
-
-  private Frame ownerFrame() {
-    return getOwner() instanceof Frame frame ? frame : null;
   }
 
   /** Table over the working profile list: Name, URL, and a check for the default server. */
