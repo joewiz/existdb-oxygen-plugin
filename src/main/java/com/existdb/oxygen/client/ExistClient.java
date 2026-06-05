@@ -207,6 +207,33 @@ public final class ExistClient {
         .build());
   }
 
+  /**
+   * POST /api/db/move — relocates a resource/collection to {@code parentCollection}, keeping its
+   * name (server-side, atomic). Requires the redesigned move/copy API (existdb-openapi PR #33);
+   * returns 409 if the destination already exists. Throws on non-2xx.
+   */
+  public void move(String source, String parentCollection)
+      throws IOException, InterruptedException {
+    relocate("/db/move", source, parentCollection);
+  }
+
+  /** POST /api/db/copy — as {@link #move}, but copies. Requires the redesigned API (PR #33). */
+  public void copy(String source, String parentCollection)
+      throws IOException, InterruptedException {
+    relocate("/db/copy", source, parentCollection);
+  }
+
+  private void relocate(String apiPath, String source, String parentCollection)
+      throws IOException, InterruptedException {
+    JSONObject body = new JSONObject();
+    body.put("source", source);
+    body.put("parent", parentCollection);
+    send(request(apiPath)
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+        .build());
+  }
+
   /** PUT /api/db/resource — stores (creates or updates) a resource. Throws on non-2xx. */
   public void putResource(String dbPath, String content, String mimeType)
       throws IOException, InterruptedException {
