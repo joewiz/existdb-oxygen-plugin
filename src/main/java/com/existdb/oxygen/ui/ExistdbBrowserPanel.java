@@ -650,15 +650,12 @@ public final class ExistdbBrowserPanel extends JPanel {
     // Same-server: move by default, copy with ⌥. Cross-server is always a copy — never auto-delete
     // a remote server's source on a drag (the Finder "different volume = copy" default; ⌘-to-move
     // isn't reliably available in Swing DnD).
-    // Same-server: move by default, copy with ⌥. Cross-server is always a copy — never auto-delete
-    // a remote server's source on a drag (the Finder "different volume = copy" default; ⌘-to-move
-    // isn't reliably available in Swing DnD).
     final boolean copy = !sameServer || dropAction == TransferHandler.COPY;
-    // A collection relocate is a recursive copy (client-side), so confirm before a big transfer.
+    // A collection relocate may be a recursive client-side copy, so confirm before a big transfer.
     if (source.collection() && !confirmCollectionRelocate(source.path(), copy)) {
       return;
     }
-    performRelocate(sourceClient, targetClient, source, target, targetNode, copy);
+    performRelocate(sourceClient, targetClient, source, target, targetNode, copy, sameServer);
   }
 
   private boolean confirmCollectionRelocate(String path, boolean copy) {
@@ -670,7 +667,8 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private void performRelocate(ExistClient sourceClient, ExistClient targetClient,
-      ExistNodeRef source, ExistNode target, DefaultMutableTreeNode targetNode, boolean copy) {
+      ExistNodeRef source, ExistNode target, DefaultMutableTreeNode targetNode,
+      boolean copy, boolean sameServer) {
     final String dest = target.path + "/" + source.name();
     new SwingWorker<Boolean, Void>() {
       @Override
@@ -680,14 +678,10 @@ public final class ExistdbBrowserPanel extends JPanel {
         if (collides && !confirmOverwrite(target.path)) {
           return false;
         }
-        // Always a client-side copy (GET → PUT, recursive), then delete on move. We never call
-        // existdb-openapi's move/copy: their target rules are inconsistent and, worse, a failure
-        // can delete the source (existdb-openapi #36/#37). A move deletes the source only after the
-        // copy fully succeeds, so a failure can't lose data.
-        crossServerCopy(sourceClient, targetClient, source.path(), dest, source.collection());
-        if (!copy) {
-          deleteFrom(sourceClient, source.path(), source.collection());
+        if (collides) {
+          deleteFrom(targetClient, dest, source.collection()); // user confirmed; clear the target
         }
+        relocate(sourceClient, targetClient, source, dest, target.path, copy, sameServer);
         return true;
       }
 
@@ -703,6 +697,33 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
+  }
+
+  /**
+   * Performs the relocation. Same-server uses the server-side {@code move}/{@code copy} (fast,
+   * atomic), falling back to a client-side recursive copy if the server lacks the redesigned
+   * endpoints (pre-existdb-openapi PR #33). Cross-server is always a client-side copy. A move only
+   * deletes the source after the copy fully succeeds, so a failure can't lose data.
+   */
+  private static void relocate(ExistClient from, ExistClient to, ExistNodeRef source,
+      String dest, String parent, boolean copy, boolean sameServer)
+      throws java.io.IOException, InterruptedException {
+    if (sameServer) {
+      try {
+        if (copy) {
+          to.copy(source.path(), parent);
+        } else {
+          to.move(source.path(), parent);
+        }
+        return;
+      } catch (ExistHttpException e) {
+        // Server lacks the redesigned move/copy — fall back to the client-side copy below.
+      }
+    }
+    crossServerCopy(from, to, source.path(), dest, source.collection());
+    if (!copy) {
+      deleteFrom(from, source.path(), source.collection());
+    }
   }
 
   /** Recursively copies a resource/collection from one server to another (client-side). */
