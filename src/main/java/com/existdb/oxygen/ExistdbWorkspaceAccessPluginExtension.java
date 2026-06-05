@@ -213,7 +213,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
   }
 
   /**
-   * Overrides F1 with eXist Function Documentation while an XQuery editor is focused. Oxygen binds
+   * Overrides F1 with eXist Hover Documentation while an XQuery editor is focused. Oxygen binds
    * F1 to Help as a global menu accelerator, which a component input-map binding can't reliably
    * beat — a {@link KeyEventDispatcher} sees the key before menu accelerators and consumes it.
    */

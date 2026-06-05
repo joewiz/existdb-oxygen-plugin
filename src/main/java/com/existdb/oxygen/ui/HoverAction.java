@@ -47,16 +47,17 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.JTextComponent;
 
 /**
- * "Function Documentation (eXist-db)": shows eXist's signature and documentation for the symbol under the
- * caret, via {@code /api/langservice/hover}. A dedicated action (Oxygen owns native hover for
- * XQuery); the result appears in a small popup at the caret.
+ * "Hover Documentation (eXist-db)": shows eXist's documentation for the symbol under the caret
+ * (LSP {@code textDocument/hover}) — a function's signature + docs, or a variable's type — via
+ * {@code /api/langservice/hover}. A dedicated action (Oxygen owns native hover for XQuery); the
+ * result appears in a small popup at the caret.
  */
 public final class HoverAction extends AbstractAction {
 
   private final transient StandalonePluginWorkspace workspace;
 
   public HoverAction(StandalonePluginWorkspace workspace) {
-    super("Function Documentation (eXist-db)");
+    super("Hover Documentation (eXist-db)");
     this.workspace = workspace;
   }
 
@@ -102,7 +103,7 @@ public final class HoverAction extends AbstractAction {
             showHoverPopup(component, caret, hover.contents());
           }
         } catch (Exception e) {
-          workspace.showErrorMessage("eXist-db function documentation failed: " + e.getMessage());
+          workspace.showErrorMessage("eXist-db hover documentation failed: " + e.getMessage());
         }
       }
     }.execute();
