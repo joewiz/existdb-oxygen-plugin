@@ -22,6 +22,7 @@
 package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.query.QueryRunner;
 
 import org.json.JSONArray;
@@ -129,16 +130,20 @@ public final class ExistResultsView extends JPanel {
   private int selectedIndex;
   private int currentStart;
 
-  public ExistResultsView(StandalonePluginWorkspace workspace) {
+  public ExistResultsView(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
     this.workspace = workspace;
+    // Start from the saved result-display preferences (persist across restarts).
+    this.indent = profileStore.resultsIndent();
+    this.pageSize = profileStore.resultsPageSize();
+    final boolean initialIndent = this.indent;
 
     indentButton = OxygenUIComponentsFactory.createToolbarToggleButton(new AbstractAction() {
       {
         putValue(SMALL_ICON, icon("/images/PrettyPrint16.png"));
         putValue(NAME, "Indent");
         putValue(SHORT_DESCRIPTION, "Indent (pretty-print) results");
-        putValue(SELECTED_KEY, Boolean.TRUE);
+        putValue(SELECTED_KEY, initialIndent);
       }
 
       @Override
@@ -157,6 +162,7 @@ public final class ExistResultsView extends JPanel {
 
     constrainWidth(methodCombo, 120);
     constrainWidth(pageSizeCombo, 80);
+    methodCombo.setSelectedIndex(methodIndex(profileStore.resultsMethod()));
     methodCombo.addActionListener(e -> refreshPage());
     pageSizeCombo.setSelectedItem(pageSize);
     pageSizeCombo.addActionListener(e -> {
@@ -281,6 +287,15 @@ public final class ExistResultsView extends JPanel {
     c.weightx = 1.0;
     bar.add(right, c);
     return bar;
+  }
+
+  private static int methodIndex(String method) {
+    for (int i = 0; i < METHOD_VALUES.length; i++) {
+      if (METHOD_VALUES[i].equals(method)) {
+        return i;
+      }
+    }
+    return 0;
   }
 
   private static void constrainWidth(JComponent component, int width) {

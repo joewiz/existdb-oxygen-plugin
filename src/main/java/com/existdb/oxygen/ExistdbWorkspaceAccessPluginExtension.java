@@ -72,7 +72,7 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
     new ExistAutoValidator(pluginWorkspace).install();
 
-    final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace);
+    final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =
         ExistdbWorkspaceAccessPluginExtension.class.getResource("/images/exist-server.png");
 

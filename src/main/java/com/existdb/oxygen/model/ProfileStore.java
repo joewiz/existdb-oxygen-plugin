@@ -177,6 +177,38 @@ public final class ProfileStore {
   }
 
   // ---------------------------------------------------------------------------
+  // Result-display preferences (global; the eXist-db Results view's starting state)
+  // ---------------------------------------------------------------------------
+
+  public String resultsMethod() {
+    return options.get("existdb.results.method", "adaptive");
+  }
+
+  public void setResultsMethod(String method) {
+    options.set("existdb.results.method", method);
+  }
+
+  public boolean resultsIndent() {
+    return Boolean.parseBoolean(options.get("existdb.results.indent", "true"));
+  }
+
+  public void setResultsIndent(boolean indent) {
+    options.set("existdb.results.indent", Boolean.toString(indent));
+  }
+
+  public int resultsPageSize() {
+    try {
+      return Integer.parseInt(options.get("existdb.results.pageSize", "10"));
+    } catch (NumberFormatException e) {
+      return 10;
+    }
+  }
+
+  public void setResultsPageSize(int pageSize) {
+    options.set("existdb.results.pageSize", Integer.toString(pageSize));
+  }
+
+  // ---------------------------------------------------------------------------
   // Back-compat single-profile API (used until the pane is reworked for multi-server)
   // ---------------------------------------------------------------------------
 

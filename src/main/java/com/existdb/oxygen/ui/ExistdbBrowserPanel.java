@@ -333,7 +333,7 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   /** Opens the unified server-management window, then rebuilds the tree if the user saved changes. */
   private void manageServers() {
-    if (ManageServersDialog.open(ownerFrame(), profileStore, workspace)) {
+    if (ManageServersDialog.open(ownerFrame(), profileStore)) {
       loadServers();
     }
   }
