@@ -210,6 +210,15 @@ public final class ProfileStore {
     options.set("existdb.results.pageSize", Integer.toString(pageSize));
   }
 
+  /** Where a query's results go by default: {@code "browse"} (Results view) or {@code "editor"}. */
+  public String resultsDestination() {
+    return options.get("existdb.results.destination", "browse");
+  }
+
+  public void setResultsDestination(String destination) {
+    options.set("existdb.results.destination", destination);
+  }
+
   /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
   public void addResultsPrefsListener(Runnable listener) {
     resultsPrefsListeners.add(listener);

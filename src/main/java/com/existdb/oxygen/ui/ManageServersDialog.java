@@ -28,6 +28,7 @@ import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
@@ -43,6 +44,7 @@ import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -73,6 +75,9 @@ public final class ManageServersDialog {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
+  private static final String[] DESTINATION_LABELS =
+      {"Browse Query Results", "Save Query Results to New Editor"};
+  private static final String[] DESTINATION_VALUES = {"browse", "editor"};
 
   private final transient Frame owner;
   private final transient ProfileStore store;
@@ -84,6 +89,8 @@ public final class ManageServersDialog {
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(METHOD_LABELS));
   private final JComboBox<Integer> pageSizePref =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
+  private final JComboBox<String> destinationPref =
+      OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(DESTINATION_LABELS));
   private final JCheckBox indentPref = new JCheckBox("Indent");
 
   private transient ConnectionProfile defaultProfile;
@@ -191,23 +198,46 @@ public final class ManageServersDialog {
     return content;
   }
 
-  /** The persisted result-display defaults (serialization method, indent, page size). */
+  /** The persisted query/result defaults (destination, serialization method, indent, page size). */
   private JComponent buildResultPrefs() {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
     indentPref.setSelected(store.resultsIndent());
     pageSizePref.setSelectedItem(store.resultsPageSize());
-    // Compact, uniform combo widths (matching the results view) so the row lines up cleanly.
+    destinationPref.setSelectedIndex(destinationIndex(store.resultsDestination()));
+    // Compact, uniform combo widths (matching the results view) so the rows line up cleanly.
     constrainWidth(methodPref, 120);
     constrainWidth(pageSizePref, 70);
-    JPanel prefs = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
-    prefs.setBorder(BorderFactory.createTitledBorder("Result display defaults"));
-    prefs.add(new JLabel("Serialization:"));
-    prefs.add(methodPref);
-    prefs.add(indentPref);
-    prefs.add(Box.createHorizontalStrut(12));
-    prefs.add(new JLabel("Results per page:"));
-    prefs.add(pageSizePref);
+    constrainWidth(destinationPref, 230);
+
+    JPanel destinationRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+    destinationRow.add(new JLabel("Run queries:"));
+    destinationRow.add(destinationPref);
+
+    JPanel displayRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+    displayRow.add(new JLabel("Serialization:"));
+    displayRow.add(methodPref);
+    displayRow.add(indentPref);
+    displayRow.add(Box.createHorizontalStrut(12));
+    displayRow.add(new JLabel("Results per page:"));
+    displayRow.add(pageSizePref);
+
+    JPanel prefs = new JPanel();
+    prefs.setLayout(new BoxLayout(prefs, BoxLayout.Y_AXIS));
+    prefs.setBorder(BorderFactory.createTitledBorder("Query & result defaults"));
+    destinationRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+    displayRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+    prefs.add(destinationRow);
+    prefs.add(displayRow);
     return prefs;
+  }
+
+  private static int destinationIndex(String destination) {
+    for (int i = 0; i < DESTINATION_VALUES.length; i++) {
+      if (DESTINATION_VALUES[i].equals(destination)) {
+        return i;
+      }
+    }
+    return 0;
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
@@ -289,6 +319,7 @@ public final class ManageServersDialog {
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
     store.setResultsIndent(indentPref.isSelected());
     store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
+    store.setResultsDestination(DESTINATION_VALUES[destinationPref.getSelectedIndex()]);
     // Apply the new defaults to an already-open results view immediately, not just next restart.
     store.notifyResultsPrefsChanged();
   }
