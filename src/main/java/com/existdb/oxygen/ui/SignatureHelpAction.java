@@ -204,8 +204,12 @@ public final class SignatureHelpAction extends AbstractAction {
       Rectangle2D r = component.modelToView2D(caret);
       Point origin = component.getLocationOnScreen();
       int x = origin.x + (int) r.getX();
-      // Float just above the caret's line so it doesn't cover what's being typed.
-      int y = origin.y + (int) r.getY() - label.getPreferredSize().height - 2;
+      int height = label.getPreferredSize().height;
+      // Prefer just above the caret's line (so it doesn't cover what's being typed), but drop below
+      // when there's no room above — e.g. a call on the first line, where above is off-screen.
+      int above = origin.y + (int) r.getY() - height - 2;
+      int below = origin.y + (int) (r.getY() + r.getHeight()) + 2;
+      int y = above >= origin.y ? above : below;
       hide();
       popup = PopupFactory.getSharedInstance().getPopup(component, label, x, y);
       popup.show();
