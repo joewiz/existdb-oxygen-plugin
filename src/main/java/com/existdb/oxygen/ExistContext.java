@@ -29,6 +29,8 @@ import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
 
 /**
  * Process-wide registry of connections, one {@link ExistClient} per saved profile (keyed by the
@@ -42,6 +44,9 @@ public final class ExistContext {
   private static final Map<String, ExistClient> CLIENTS = new ConcurrentHashMap<>();
   /** Maps each id and prior-slug alias to the profile's current id, so old URLs canonicalize. */
   private static final Map<String, String> CANONICAL = new ConcurrentHashMap<>();
+  /** Listeners notified (serverId, collectionPath) when a collection's contents change externally. */
+  private static final List<BiConsumer<String, String>> COLLECTION_LISTENERS =
+      new CopyOnWriteArrayList<>();
   private static volatile String defaultId;
 
   private ExistContext() {
@@ -107,6 +112,22 @@ public final class ExistContext {
 
   public static boolean isConnected() {
     return defaultClient() != null;
+  }
+
+  /**
+   * Registers a listener notified with {@code (serverId, collectionPath)} when that collection's
+   * contents changed outside the eXist-db pane (e.g. an upload from the Project pane), so the pane
+   * can refresh that node if it's showing it.
+   */
+  public static void addCollectionChangeListener(BiConsumer<String, String> listener) {
+    COLLECTION_LISTENERS.add(listener);
+  }
+
+  /** Notifies listeners that {@code collectionPath} on {@code serverId} gained/changed children. */
+  public static void fireCollectionChanged(String serverId, String collectionPath) {
+    for (BiConsumer<String, String> listener : COLLECTION_LISTENERS) {
+      listener.accept(serverId, collectionPath);
+    }
   }
 
   /**

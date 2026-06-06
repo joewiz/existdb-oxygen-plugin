@@ -15,6 +15,9 @@
     <librariesFolder name="lib" />
   </runtime>
 
+  <!-- Path (relative to the plugin directory) of the license shown in Preferences → Plugins. -->
+  <license>LICENSE</license>
+
   <!-- Side view + menu/toolbar contributions: collection tree, connection, query. -->
   <extension type="WorkspaceAccess"
     class="com.existdb.oxygen.ExistdbWorkspaceAccessPluginExtension"/>

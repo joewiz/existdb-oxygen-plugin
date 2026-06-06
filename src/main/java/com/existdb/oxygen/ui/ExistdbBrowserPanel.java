@@ -25,6 +25,7 @@ import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
 import com.existdb.oxygen.client.MimeTypes;
+import com.existdb.oxygen.client.Uploads;
 import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
@@ -46,6 +47,7 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
@@ -78,6 +80,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JToolBar;
 import javax.swing.JTree;
+import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -163,6 +166,67 @@ public final class ExistdbBrowserPanel extends JPanel {
         watchForSaves(editorLocation);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+
+    // Refresh a collection node when its contents change outside the pane (e.g. a Project-pane
+    // upload), so the new resources appear without a manual Refresh.
+    ExistContext.addCollectionChangeListener((serverId, path) ->
+        SwingUtilities.invokeLater(() -> refreshIfShowing(serverId, path)));
+  }
+
+  /**
+   * Surgically adds any newly-appeared children to the node for {@code (serverId, path)} if the tree
+   * is currently showing it (loaded), without rebuilding it — so already-expanded sibling nodes stay
+   * expanded (a full reload of {@code /db} would collapse an open sub-collection).
+   */
+  private void refreshIfShowing(String serverId, String path) {
+    DefaultMutableTreeNode node = findNode(serverId, path);
+    if (node == null || !(node.getUserObject() instanceof ExistNode existNode)
+        || !existNode.loaded) {
+      return;
+    }
+    final ExistClient client = ExistContext.clientById(serverId);
+    if (client == null) {
+      return;
+    }
+    new SwingWorker<List<ExistClient.ChildEntry>, Void>() {
+      @Override
+      protected List<ExistClient.ChildEntry> doInBackground() throws Exception {
+        return client.listChildren(existNode.path);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          mergeNewChildren(node, existNode, get());
+        } catch (Exception ex) {
+          // Best-effort refresh; a stale view is harmless and the user can Refresh manually.
+        }
+      }
+    }.execute();
+  }
+
+  /** Inserts children present on the server but not yet shown, leaving existing nodes untouched. */
+  private void mergeNewChildren(DefaultMutableTreeNode node, ExistNode existNode,
+      List<ExistClient.ChildEntry> entries) {
+    Set<String> present = new HashSet<>();
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode childInfo) {
+        present.add(childInfo.name);
+      }
+    }
+    boolean showHidden = profileStore.showHidden();
+    for (ExistClient.ChildEntry child : entries) {
+      if ((!showHidden && child.name().startsWith(".")) || present.contains(child.name())) {
+        continue;
+      }
+      DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(new ExistNode(
+          existNode.serverId, childPathOf(existNode, child), child.name(), child.collection()));
+      if (child.collection()) {
+        addPlaceholder(childNode);
+      }
+      treeModel.insertNodeInto(childNode, node, node.getChildCount());
+    }
   }
 
   /** Attaches a save listener to an {@code exist:} editor so saves refresh its collection in the tree. */
@@ -305,6 +369,16 @@ public final class ExistdbBrowserPanel extends JPanel {
         if (e.getClickCount() == 2) {
           openSelected();
         }
+      }
+    });
+
+    // Return/Enter opens the selected resource (or expands a collection), like the Project pane.
+    tree.getInputMap(WHEN_FOCUSED)
+        .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "existOpen");
+    tree.getActionMap().put("existOpen", new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        openSelected();
       }
     });
   }
@@ -910,7 +984,11 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** Builds child nodes for a freshly listed collection and marks it loaded. */
   private void populateChildren(DefaultMutableTreeNode node, ExistNode existNode,
       List<ExistClient.ChildEntry> entries) {
+    boolean showHidden = profileStore.showHidden();
     for (ExistClient.ChildEntry child : entries) {
+      if (!showHidden && child.name().startsWith(".")) {
+        continue; // hidden (dot-prefixed) resource/collection
+      }
       String childPath = childPathOf(existNode, child);
       DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
           new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
@@ -1289,7 +1367,8 @@ public final class ExistdbBrowserPanel extends JPanel {
       if (resource.binary()) {
         to.putResourceBytes(destPath, resource.bytes(), mime);
       } else {
-        putResourceTolerant(to, destPath, new String(resource.bytes(), StandardCharsets.UTF_8), mime);
+        Uploads.putResourceTolerant(to, destPath,
+            new String(resource.bytes(), StandardCharsets.UTF_8), mime);
       }
     }
   }
@@ -1298,24 +1377,6 @@ public final class ExistdbBrowserPanel extends JPanel {
    * Stores a resource, falling back to {@code text/plain} if eXist rejects the content as malformed
    * XML — e.g. non-well-formed HTML, which eXist would otherwise try to parse as XML and reject.
    */
-  private static void putResourceTolerant(ExistClient client, String path, String content,
-      String mime) throws IOException, InterruptedException {
-    try {
-      client.putResource(path, content, mime);
-    } catch (ExistHttpException e) {
-      if ("text/plain".equals(mime) || !isXmlParseError(e)) {
-        throw e;
-      }
-      client.putResource(path, content, "text/plain");
-    }
-  }
-
-  private static boolean isXmlParseError(ExistHttpException e) {
-    String body = e.getResponseBody();
-    return body != null
-        && (body.contains("XML parser") || body.contains("Content is not allowed in prolog"));
-  }
-
   private static void deleteFrom(ExistClient client, String path, boolean collection)
       throws IOException, InterruptedException {
     if (collection) {
@@ -1404,7 +1465,7 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
         int count = 0;
         for (File file : files) {
-          count += uploadRecursive(client, target.path, file);
+          count += Uploads.uploadRecursive(client, target.path, file, profileStore.uploadHidden());
         }
         return count;
       }
@@ -1424,49 +1485,6 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
-  }
-
-  /**
-   * Uploads a file (or, recursively, a directory) under {@code parentPath}; returns the count
-   * uploaded. Binary files are stored via the raw streaming PUT; text files via the tolerant text
-   * PUT. {@code skipped} collects the names of any files that couldn't be stored.
-   */
-  private static int uploadRecursive(ExistClient client, String parentPath, File file)
-      throws IOException, InterruptedException {
-    if (file.isDirectory()) {
-      String collection = parentPath + "/" + file.getName();
-      client.createCollection(collection);
-      int count = 0;
-      File[] children = file.listFiles();
-      if (children != null) {
-        for (File child : children) {
-          count += uploadRecursive(client, collection, child);
-        }
-      }
-      return count;
-    }
-    byte[] bytes = Files.readAllBytes(file.toPath());
-    String path = parentPath + "/" + file.getName();
-    String mime = MimeTypes.byName(file.getName());
-    if (isBinary(bytes)) {
-      client.putResourceBytes(path, bytes, mime); // null mime → application/octet-stream
-    } else {
-      // A known extension picks the right mime; otherwise store as plain text (never XML-parsed).
-      putResourceTolerant(client, path, new String(bytes, StandardCharsets.UTF_8),
-          mime != null ? mime : "text/plain");
-    }
-    return 1;
-  }
-
-  /** Heuristic: a NUL byte in the head means binary (existdb-openapi can't store binary as text). */
-  private static boolean isBinary(byte[] bytes) {
-    int limit = Math.min(bytes.length, 8192);
-    for (int i = 0; i < limit; i++) {
-      if (bytes[i] == 0) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /** Asks (on the EDT) whether to overwrite colliding resources; returns the user's choice. */
