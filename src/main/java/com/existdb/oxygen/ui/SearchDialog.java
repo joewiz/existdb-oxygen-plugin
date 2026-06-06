@@ -31,6 +31,7 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -150,9 +151,18 @@ public final class SearchDialog extends JDialog {
     south.add(status, BorderLayout.WEST);
     south.add(buttons, BorderLayout.EAST);
 
+    // Intro line (like Oxygen's "Install new add-ons" dialog) explaining what /api/search covers.
+    JLabel intro = new JLabel("<html><body style='width: 600px'>Searches across data that apps on "
+        + "the selected eXist-db server contribute to a Lucene full-text field called "
+        + "&quot;site-content&quot;; eXist 7's stock apps contribute their data to this.</body></html>");
+    intro.setBorder(BorderFactory.createEmptyBorder(0, 2, 8, 2));
+    JPanel north = new JPanel(new BorderLayout(0, 4));
+    north.add(intro, BorderLayout.NORTH);
+    north.add(top, BorderLayout.CENTER);
+
     setLayout(new BorderLayout(8, 8));
     ((JPanel) getContentPane()).setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-    add(top, BorderLayout.NORTH);
+    add(north, BorderLayout.NORTH);
     add(OxygenUIComponentsFactory.createScrollPane(list,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
@@ -229,9 +239,14 @@ public final class SearchDialog extends JDialog {
         ExistClient.SearchHit hit = (ExistClient.SearchHit) value;
         String title = hit.title() == null || hit.title().isBlank() || "(untitled)".equals(hit.title())
             ? leaf(hit.path()) : hit.title();
-        String html = "<html><b>" + escape(title) + "</b> &nbsp; <font color='gray'>"
-            + escape(hit.path()) + "</font><br><font color='gray'>" + escape(snippet(hit.snippet()))
-            + "</font></html>";
+        // The path/snippet are de-emphasized in gray, but gray-on-blue is unreadable when the row is
+        // selected — use the list's selection foreground there so the secondary text stays legible.
+        Color secondary = selected ? list.getSelectionForeground() : Color.GRAY;
+        String hex = String.format("#%02x%02x%02x",
+            secondary.getRed(), secondary.getGreen(), secondary.getBlue());
+        String html = "<html><b>" + escape(title) + "</b> &nbsp; <font color='" + hex + "'>"
+            + escape(hit.path()) + "</font><br><font color='" + hex + "'>"
+            + escape(snippet(hit.snippet())) + "</font></html>";
         Component c = super.getListCellRendererComponent(list, html, index, selected, focus);
         setBorder(BorderFactory.createEmptyBorder(3, 4, 3, 4));
         return c;
