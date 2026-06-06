@@ -1078,8 +1078,12 @@ public final class ExistdbBrowserPanel extends JPanel {
     }
   }
 
-  /** A {@link Transferable} carrying a single {@link ExistNodeRef} under {@link #NODE_FLAVOR}. */
-  private static final class NodeTransferable implements Transferable {
+  /**
+   * A {@link Transferable} for a dragged node: {@link #NODE_FLAVOR} for an internal pane→pane move/
+   * copy, and {@code javaFileListFlavor} for export to Finder/desktop — the latter materializes the
+   * resource (or, recursively, the collection) to temp files on demand so the OS receives real files.
+   */
+  private final class NodeTransferable implements Transferable {
     private final ExistNodeRef ref;
 
     NodeTransferable(ExistNodeRef ref) {
@@ -1088,21 +1092,56 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     @Override
     public DataFlavor[] getTransferDataFlavors() {
-      return new DataFlavor[] {NODE_FLAVOR};
+      return new DataFlavor[] {NODE_FLAVOR, DataFlavor.javaFileListFlavor};
     }
 
     @Override
     public boolean isDataFlavorSupported(DataFlavor flavor) {
-      return NODE_FLAVOR.equals(flavor);
+      return NODE_FLAVOR.equals(flavor) || DataFlavor.javaFileListFlavor.equals(flavor);
     }
 
     @Override
-    public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException {
-      if (!NODE_FLAVOR.equals(flavor)) {
-        throw new UnsupportedFlavorException(flavor);
+    public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException {
+      if (NODE_FLAVOR.equals(flavor)) {
+        return ref;
       }
-      return ref;
+      if (DataFlavor.javaFileListFlavor.equals(flavor)) {
+        try {
+          return exportToFiles(ref);
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new IOException("Interrupted while exporting " + ref.path(), e);
+        }
+      }
+      throw new UnsupportedFlavorException(flavor);
     }
+  }
+
+  /** Materializes a dragged node to temp files (for an export to Finder), returning the top entry. */
+  private List<File> exportToFiles(ExistNodeRef ref) throws IOException, InterruptedException {
+    ExistClient client = ExistContext.clientById(ref.serverId());
+    if (client == null) {
+      throw new IOException("Not connected to " + ref.serverId());
+    }
+    Path tempDir = Files.createTempDirectory("existdb-export-");
+    tempDir.toFile().deleteOnExit();
+    return List.of(materialize(client, ref.path(), ref.name(), ref.collection(), tempDir));
+  }
+
+  /** Writes a resource (binary-safe), or recreates a collection's tree, under {@code parentDir}. */
+  private File materialize(ExistClient client, String path, String name, boolean collection,
+      Path parentDir) throws IOException, InterruptedException {
+    File out = parentDir.resolve(name).toFile();
+    out.deleteOnExit();
+    if (collection) {
+      Files.createDirectories(out.toPath());
+      for (ExistClient.ChildEntry child : client.listChildren(path)) {
+        materialize(client, child.path(), child.name(), child.collection(), out.toPath());
+      }
+    } else {
+      Files.write(out.toPath(), client.readResource(path).bytes());
+    }
+    return out;
   }
 
   /**
