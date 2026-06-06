@@ -41,10 +41,15 @@ public final class Uploads {
    * Uploads {@code file} — or, recursively, a directory and its contents — under {@code parentPath},
    * returning the number of resources stored. A directory becomes a child collection named after it;
    * missing ancestor collections of {@code parentPath} itself are <em>not</em> created here (callers
-   * that need that should {@link ExistClient#createCollection} first).
+   * that need that should {@link ExistClient#createCollection} first). When {@code includeHidden} is
+   * false, dot-prefixed files and directories are skipped (so {@code .git}, {@code .DS_Store}, etc.
+   * aren't uploaded).
    */
-  public static int uploadRecursive(ExistClient client, String parentPath, File file)
-      throws IOException, InterruptedException {
+  public static int uploadRecursive(ExistClient client, String parentPath, File file,
+      boolean includeHidden) throws IOException, InterruptedException {
+    if (!includeHidden && isHidden(file)) {
+      return 0;
+    }
     if (file.isDirectory()) {
       String collection = parentPath + "/" + file.getName();
       client.createCollection(collection);
@@ -52,7 +57,7 @@ public final class Uploads {
       File[] children = file.listFiles();
       if (children != null) {
         for (File child : children) {
-          count += uploadRecursive(client, collection, child);
+          count += uploadRecursive(client, collection, child, includeHidden);
         }
       }
       return count;
@@ -68,6 +73,11 @@ public final class Uploads {
           mime != null ? mime : "text/plain");
     }
     return 1;
+  }
+
+  /** A file is "hidden" if its name starts with a dot (the cross-platform convention we honor). */
+  public static boolean isHidden(File file) {
+    return file.getName().startsWith(".");
   }
 
   /** Heuristic: a NUL byte in the head means binary (existdb-openapi can't store binary as text). */

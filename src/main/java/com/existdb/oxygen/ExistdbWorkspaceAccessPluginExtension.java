@@ -58,6 +58,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPopupMenu;
+import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.text.JTextComponent;
 
@@ -81,9 +82,12 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
     new ExistAutoValidator(pluginWorkspace).install();
 
-    // "Upload to eXist…" in the Project pane's contextual menu (filesystem → server).
-    pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(
-        new ProjectUploadCustomizer(pluginWorkspace, profileStore));
+    // "Upload to eXist-db…" in the Project pane's contextual menu (filesystem → server),
+    // also reachable via Cmd/Ctrl+U while a tree (Project pane) is focused.
+    final ProjectUploadCustomizer uploadCustomizer =
+        new ProjectUploadCustomizer(pluginWorkspace, profileStore);
+    pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(uploadCustomizer);
+    installUploadShortcut(uploadCustomizer);
 
     final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =
@@ -249,6 +253,28 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             new ActionEvent(e.getSource(), ActionEvent.ACTION_PERFORMED, "F1"));
       }
       return true; // consume PRESSED and RELEASED so Oxygen's Help doesn't also fire
+    });
+  }
+
+  /**
+   * Binds Cmd/Ctrl+U to "Upload to eXist-db…" via a global dispatcher, scoped to when a tree (the
+   * Project pane) has focus, so it doesn't shadow the shortcut in editors. Uploads the selected
+   * Project-pane files (a no-op when nothing is selected).
+   */
+  private static void installUploadShortcut(ProjectUploadCustomizer customizer) {
+    final int menuMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+    KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+      if (e.getKeyCode() != KeyEvent.VK_U || e.getModifiersEx() != menuMask) {
+        return false;
+      }
+      if (!(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()
+          instanceof JTree)) {
+        return false;
+      }
+      if (e.getID() == KeyEvent.KEY_PRESSED) {
+        customizer.uploadSelected();
+      }
+      return true; // consume PRESSED and RELEASED so the keystroke isn't handled twice
     });
   }
 

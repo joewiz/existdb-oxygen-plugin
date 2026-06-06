@@ -21,6 +21,7 @@
  */
 package com.existdb.oxygen.ui;
 
+import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.Uploads;
 import com.existdb.oxygen.model.ConnectionProfile;
@@ -69,10 +70,18 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
     if (selected == null || selected.length == 0) {
       return;
     }
-    JMenuItem item = new JMenuItem("Upload to eXist…");
+    JMenuItem item = new JMenuItem("Upload to eXist-db…");
     item.addActionListener(e -> upload(selected));
     menu.addSeparator();
     menu.add(item);
+  }
+
+  /** Uploads the currently selected Project-pane file(s); the Cmd/Ctrl+U accelerator entry point. */
+  public void uploadSelected() {
+    File[] selected = workspace.getProjectManager().getSelectedFiles();
+    if (selected != null && selected.length > 0) {
+      upload(selected);
+    }
   }
 
   private void upload(File[] files) {
@@ -83,13 +92,14 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
     }
     ExistdbProjectConfig config =
         ExistdbProjectConfig.findNearest(files[0], projectRoot()).orElse(null);
-    UploadToExistDialog.Result choice =
-        UploadToExistDialog.choose(activeFrame(), profiles, files.length, config);
+    UploadToExistDialog.Result choice = UploadToExistDialog.choose(
+        activeFrame(), profiles, files.length, config, profileStore.defaultProfileId());
     if (choice == null) {
       return;
     }
     final ExistClient client = new ExistClient(choice.server());
     final String target = choice.targetCollection();
+    final boolean includeHidden = profileStore.showHidden();
     new SwingWorker<Integer, Void>() {
       @Override
       protected Integer doInBackground() throws Exception {
@@ -97,7 +107,7 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
         for (File file : files) {
           String parentPath = parentPathFor(file, config, target);
           ensureCollection(client, parentPath);
-          count += Uploads.uploadRecursive(client, parentPath, file);
+          count += Uploads.uploadRecursive(client, parentPath, file, includeHidden);
         }
         return count;
       }
@@ -107,6 +117,8 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
         try {
           workspace.showStatusMessage("Uploaded " + get() + " file(s) to " + target
               + " on " + choice.server().getName());
+          // Refresh the target collection in the eXist-db pane if it's showing it.
+          ExistContext.fireCollectionChanged(choice.server().getId(), target);
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Upload failed: " + cause.getMessage());

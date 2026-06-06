@@ -64,7 +64,7 @@ class UploadsTest {
   void uploadRecursiveStoresASingleFile(@TempDir Path dir) throws Exception {
     Path file = dir.resolve("data.xml");
     Files.writeString(file, "<doc/>");
-    int count = Uploads.uploadRecursive(client, "/db/target", file.toFile());
+    int count = Uploads.uploadRecursive(client, "/db/target", file.toFile(), true);
     assertEquals(1, count);
     assertTrue(server.lastPutBody().contains("/db/target/data.xml"));
   }
@@ -75,7 +75,25 @@ class UploadsTest {
     Path sub = Files.createDirectories(dir.resolve("modules"));
     Files.writeString(sub.resolve("b.xml"), "<b/>");
     // Two resources stored (the directories themselves don't count toward the file total).
-    int count = Uploads.uploadRecursive(client, "/db/target", dir.toFile());
+    int count = Uploads.uploadRecursive(client, "/db/target", dir.toFile(), true);
     assertEquals(2, count);
+  }
+
+  @Test
+  void uploadRecursiveSkipsHiddenWhenExcluded(@TempDir Path dir) throws Exception {
+    Files.writeString(dir.resolve("keep.xml"), "<k/>");
+    Files.writeString(dir.resolve(".DS_Store"), "junk");
+    Path git = Files.createDirectories(dir.resolve(".git"));
+    Files.writeString(git.resolve("config"), "stuff");
+    // Only keep.xml is uploaded; .DS_Store and the .git directory are skipped.
+    assertEquals(1, Uploads.uploadRecursive(client, "/db/target", dir.toFile(), false));
+    // With includeHidden=true, the hidden file and the .git/config are stored too.
+    assertEquals(3, Uploads.uploadRecursive(client, "/db/target", dir.toFile(), true));
+  }
+
+  @Test
+  void isHiddenMatchesDotPrefix() {
+    assertTrue(Uploads.isHidden(new java.io.File(".git")));
+    assertFalse(Uploads.isHidden(new java.io.File("data.xml")));
   }
 }

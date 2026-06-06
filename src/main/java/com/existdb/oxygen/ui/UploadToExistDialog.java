@@ -53,6 +53,7 @@ public final class UploadToExistDialog {
 
   private final transient List<ConnectionProfile> profiles;
   private final transient ExistdbProjectConfig config;
+  private final transient String defaultProfileId;
   private final int itemCount;
   private final JComboBox<String> serverCombo;
   private final JTextField targetField;
@@ -62,10 +63,11 @@ public final class UploadToExistDialog {
   }
 
   private UploadToExistDialog(List<ConnectionProfile> profiles, int itemCount,
-      ExistdbProjectConfig config) {
+      ExistdbProjectConfig config, String defaultProfileId) {
     this.profiles = profiles;
     this.itemCount = itemCount;
     this.config = config;
+    this.defaultProfileId = defaultProfileId;
 
     String[] names = profiles.stream().map(ConnectionProfile::getName).toArray(String[]::new);
     serverCombo = OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(names));
@@ -82,8 +84,9 @@ public final class UploadToExistDialog {
    * Cancel. {@code profiles} must be non-empty.
    */
   public static Result choose(Frame owner, List<ConnectionProfile> profiles, int itemCount,
-      ExistdbProjectConfig config) {
-    UploadToExistDialog dialog = new UploadToExistDialog(profiles, itemCount, config);
+      ExistdbProjectConfig config, String defaultProfileId) {
+    UploadToExistDialog dialog =
+        new UploadToExistDialog(profiles, itemCount, config, defaultProfileId);
     OKCancelDialog host =
         OxygenUIComponentsFactory.createOkCancelDialog(owner, "Upload to eXist-db", true);
     host.getContentPane().add(dialog.buildContent(), BorderLayout.CENTER);
@@ -101,15 +104,23 @@ public final class UploadToExistDialog {
     return new Result(dialog.profiles.get(dialog.serverCombo.getSelectedIndex()), target);
   }
 
-  /** The profile index whose base URL matches the descriptor's server, or 0 if none/absent. */
+  /**
+   * The profile to preselect: the one whose base URL matches the descriptor's server (when a
+   * descriptor was found), otherwise the configured default server (from Configure eXist-db
+   * Connections), falling back to the first.
+   */
   private int preselectServer() {
-    if (config == null || config.serverUrl() == null) {
-      return 0;
+    if (config != null && config.serverUrl() != null) {
+      String wanted = stripTrailingSlash(config.serverUrl());
+      for (int i = 0; i < profiles.size(); i++) {
+        String base = stripTrailingSlash(profiles.get(i).getBaseUrl());
+        if (base != null && (base.startsWith(wanted) || wanted.startsWith(base))) {
+          return i;
+        }
+      }
     }
-    String wanted = stripTrailingSlash(config.serverUrl());
     for (int i = 0; i < profiles.size(); i++) {
-      String base = stripTrailingSlash(profiles.get(i).getBaseUrl());
-      if (base != null && (base.startsWith(wanted) || wanted.startsWith(base))) {
+      if (profiles.get(i).getId() != null && profiles.get(i).getId().equals(defaultProfileId)) {
         return i;
       }
     }

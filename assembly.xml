@@ -27,5 +27,10 @@
       <outputDirectory>/</outputDirectory>
       <filtered>true</filtered>
     </file>
+    <!-- The license shown in Preferences → Plugins (referenced by plugin.xml's <license>). -->
+    <file>
+      <source>LICENSE</source>
+      <outputDirectory>/</outputDirectory>
+    </file>
   </files>
 </assembly>

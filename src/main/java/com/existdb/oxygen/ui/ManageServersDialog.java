@@ -89,6 +89,7 @@ public final class ManageServersDialog {
   private final JRadioButton destBrowse = new JRadioButton("eXist-db Results pane");
   private final JRadioButton destEditor = new JRadioButton("New editor window");
   private final JCheckBox indentPref = new JCheckBox("Indent");
+  private final JCheckBox showHiddenPref = new JCheckBox("Show hidden files and directories");
 
   private transient ConnectionProfile defaultProfile;
   private transient OKCancelDialog host;
@@ -189,10 +190,28 @@ public final class ManageServersDialog {
     table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
     updateMoveEnabled();
 
+    JPanel bottom = new JPanel(new BorderLayout());
+    bottom.add(buildResultPrefs(), BorderLayout.CENTER);
+    bottom.add(buildBrowsingPrefs(), BorderLayout.SOUTH);
+
     JPanel content = new JPanel(new BorderLayout());
     content.add(connections, BorderLayout.CENTER);
-    content.add(buildResultPrefs(), BorderLayout.SOUTH);
+    content.add(bottom, BorderLayout.SOUTH);
     return content;
+  }
+
+  /** The eXist-db pane browsing preferences (currently: show hidden files/collections). */
+  private JComponent buildBrowsingPrefs() {
+    showHiddenPref.setSelected(store.showHidden());
+    JPanel prefs = new JPanel(new GridBagLayout());
+    prefs.setBorder(BorderFactory.createTitledBorder("Browsing"));
+    GridBagConstraints c = new GridBagConstraints();
+    c.insets = new Insets(2, 4, 2, 4);
+    c.anchor = GridBagConstraints.LINE_START;
+    c.gridx = 0;
+    c.gridy = 0;
+    prefs.add(showHiddenPref, c);
+    return prefs;
   }
 
   /**
@@ -325,6 +344,7 @@ public final class ManageServersDialog {
     store.setResultsIndent(indentPref.isSelected());
     store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
     store.setResultsDestination(destEditor.isSelected() ? "editor" : "browse");
+    store.setShowHidden(showHiddenPref.isSelected());
     // Apply the new defaults to an already-open results view immediately, not just next restart.
     store.notifyResultsPrefsChanged();
   }

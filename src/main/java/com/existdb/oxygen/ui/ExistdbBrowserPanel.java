@@ -47,6 +47,7 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
@@ -79,6 +80,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JToolBar;
 import javax.swing.JTree;
+import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -164,6 +166,19 @@ public final class ExistdbBrowserPanel extends JPanel {
         watchForSaves(editorLocation);
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+
+    // Refresh a collection node when its contents change outside the pane (e.g. a Project-pane
+    // upload), so the new resources appear without a manual Refresh.
+    ExistContext.addCollectionChangeListener((serverId, path) ->
+        SwingUtilities.invokeLater(() -> refreshIfShowing(serverId, path)));
+  }
+
+  /** Reloads the node for {@code (serverId, path)} if the tree is currently showing it (loaded). */
+  private void refreshIfShowing(String serverId, String path) {
+    DefaultMutableTreeNode node = findNode(serverId, path);
+    if (node != null && node.getUserObject() instanceof ExistNode existNode && existNode.loaded) {
+      reloadNode(node);
+    }
   }
 
   /** Attaches a save listener to an {@code exist:} editor so saves refresh its collection in the tree. */
@@ -306,6 +321,16 @@ public final class ExistdbBrowserPanel extends JPanel {
         if (e.getClickCount() == 2) {
           openSelected();
         }
+      }
+    });
+
+    // Return/Enter opens the selected resource (or expands a collection), like the Project pane.
+    tree.getInputMap(WHEN_FOCUSED)
+        .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "existOpen");
+    tree.getActionMap().put("existOpen", new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        openSelected();
       }
     });
   }
@@ -883,7 +908,11 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** Builds child nodes for a freshly listed collection and marks it loaded. */
   private void populateChildren(DefaultMutableTreeNode node, ExistNode existNode,
       List<ExistClient.ChildEntry> entries) {
+    boolean showHidden = profileStore.showHidden();
     for (ExistClient.ChildEntry child : entries) {
+      if (!showHidden && child.name().startsWith(".")) {
+        continue; // hidden (dot-prefixed) resource/collection
+      }
       String childPath = childPathOf(existNode, child);
       DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
           new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
@@ -1360,7 +1389,7 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
         int count = 0;
         for (File file : files) {
-          count += Uploads.uploadRecursive(client, target.path, file);
+          count += Uploads.uploadRecursive(client, target.path, file, profileStore.showHidden());
         }
         return count;
       }

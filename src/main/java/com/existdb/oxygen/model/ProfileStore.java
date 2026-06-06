@@ -219,6 +219,18 @@ public final class ProfileStore {
     options.set("existdb.results.destination", destination);
   }
 
+  /**
+   * Whether hidden files/collections (dot-prefixed names) are shown in the eXist-db pane and
+   * included when uploading a folder. Off by default, mirroring the Project pane's filters.
+   */
+  public boolean showHidden() {
+    return Boolean.parseBoolean(options.get("existdb.showHidden", "false"));
+  }
+
+  public void setShowHidden(boolean showHidden) {
+    options.set("existdb.showHidden", Boolean.toString(showHidden));
+  }
+
   /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
   public void addResultsPrefsListener(Runnable listener) {
     resultsPrefsListeners.add(listener);
