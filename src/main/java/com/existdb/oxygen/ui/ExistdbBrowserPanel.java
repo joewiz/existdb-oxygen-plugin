@@ -58,6 +58,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.EventObject;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -68,6 +69,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.Box;
+import javax.swing.DefaultCellEditor;
 import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
@@ -78,6 +80,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
 import javax.swing.JToolBar;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
@@ -89,6 +92,7 @@ import javax.swing.TransferHandler;
 import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeCellEditor;
 import javax.swing.tree.DefaultTreeCellRenderer;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.ExpandVetoException;
@@ -122,7 +126,14 @@ public final class ExistdbBrowserPanel extends JPanel {
   private final transient ProfileStore profileStore;
 
   private final DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("servers");
-  private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode);
+  // Inline rename commits land in valueForPathChanged: keep the ExistNode userObject and perform the
+  // server-side rename (rather than the default behavior of replacing it with the edited String).
+  private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode) {
+    @Override
+    public void valueForPathChanged(TreePath path, Object newValue) {
+      commitRename(path, String.valueOf(newValue));
+    }
+  };
   // Built via Oxygen's factory so it inherits the workbench tree's row height, font, and selection.
   private final JTree tree = OxygenUIComponentsFactory.createTree(treeModel);
 
@@ -330,7 +341,11 @@ public final class ExistdbBrowserPanel extends JPanel {
     tree.setRootVisible(false);
     tree.setShowsRootHandles(true);
     tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
-    tree.setCellRenderer(new ExistTreeCellRenderer());
+    ExistTreeCellRenderer renderer = new ExistTreeCellRenderer();
+    tree.setCellRenderer(renderer);
+    // Inline rename (Finder/Project style): click an already-selected resource to edit its name.
+    tree.setCellEditor(new ExistTreeCellEditor(tree, renderer));
+    tree.setEditable(true);
     ToolTipManager.sharedInstance().registerComponent(tree);
 
     // Drag resources/collections within the tree; accept files dropped from Finder / Project.
@@ -672,6 +687,27 @@ public final class ExistdbBrowserPanel extends JPanel {
     runMutation(() -> client.rename(existNode.path, name), () -> {
       relabelInPlace(node, existNode, name);
       workspace.showStatusMessage("Renamed to " + name);
+    }, "Rename failed");
+  }
+
+  /** Applies an inline-edit commit: renames {@code path}'s node to {@code newName} on the server. */
+  private void commitRename(TreePath path, String newName) {
+    if (path == null
+        || !(path.getLastPathComponent() instanceof DefaultMutableTreeNode node)
+        || !(node.getUserObject() instanceof ExistNode existNode)) {
+      return;
+    }
+    String trimmed = newName == null ? "" : newName.trim();
+    if (trimmed.isEmpty() || trimmed.equals(existNode.name) || trimmed.contains("/")) {
+      return; // no-op or invalid (a slash would change the collection path)
+    }
+    final ExistClient client = clientOrWarn(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    runMutation(() -> client.rename(existNode.path, trimmed), () -> {
+      relabelInPlace(node, existNode, trimmed);
+      workspace.showStatusMessage("Renamed to " + trimmed);
     }, "Rename failed");
   }
 
@@ -1642,6 +1678,50 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   /** Tree node payload: which server it belongs to, its DB path/name, and lazy-load state. */
+  /**
+   * Inline rename editor (Finder/Project style): edits the node's name in place with the base name
+   * pre-selected (the extension excluded for resources). Only renameable nodes are editable — not a
+   * server node or the {@code /db} root. The commit is routed through the tree model's
+   * {@link DefaultTreeModel#valueForPathChanged} to {@link #commitRename}.
+   */
+  private final class ExistTreeCellEditor extends DefaultTreeCellEditor {
+
+    ExistTreeCellEditor(JTree owningTree, DefaultTreeCellRenderer renderer) {
+      super(owningTree, renderer);
+    }
+
+    @Override
+    public boolean isCellEditable(EventObject event) {
+      return super.isCellEditable(event)
+          && tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && !DB_ROOT.equals(existNode.path);
+    }
+
+    @Override
+    public Component getTreeCellEditorComponent(JTree owningTree, Object value, boolean isSelected,
+        boolean expanded, boolean leaf, int row) {
+      Component component =
+          super.getTreeCellEditorComponent(owningTree, value, isSelected, expanded, leaf, row);
+      if (value instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && realEditor instanceof DefaultCellEditor cellEditor
+          && cellEditor.getComponent() instanceof JTextField field) {
+        field.setText(existNode.name);
+        // Defer until after the field's focus-gained "select all", so the base-name selection sticks.
+        SwingUtilities.invokeLater(
+            () -> selectBaseName(field, existNode.name, existNode.collection));
+      }
+      return component;
+    }
+  }
+
+  /** Selects the base name (the part before a resource's extension), or the whole name otherwise. */
+  private static void selectBaseName(JTextField field, String name, boolean collection) {
+    int dot = collection ? -1 : name.lastIndexOf('.');
+    field.select(0, dot > 0 ? dot : name.length());
+  }
+
   private static final class ExistNode {
     final String serverId;
     final String path;
