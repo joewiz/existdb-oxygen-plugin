@@ -218,6 +218,61 @@ public final class ExistClient {
     send(request("/db/collection?path=" + enc(dbPath) + "&force=true").DELETE().build());
   }
 
+  /** Owner, group, and symbolic mode (e.g. {@code rwxr-xr-x}) of a stored resource/collection. */
+  public record Permissions(String owner, String group, String mode) {
+  }
+
+  /** GET /api/db/properties?path=… — reads a resource/collection's owner, group, and mode. */
+  public Permissions getPermissions(String dbPath) throws IOException, InterruptedException {
+    HttpResponse<String> r = send(request("/db/properties?path=" + enc(dbPath)).GET().build());
+    JSONObject o = new JSONObject(r.body());
+    return new Permissions(
+        o.optString("owner", ""), o.optString("group", ""), o.optString("mode", ""));
+  }
+
+  /**
+   * POST /api/db/permissions — sets owner, group, and/or symbolic {@code mode} (e.g.
+   * {@code rwxr-xr-x}) on a resource/collection. Blank fields are omitted (left unchanged). Throws
+   * on non-2xx (e.g. 403 when the current user can't change them).
+   */
+  public void setPermissions(String dbPath, String owner, String group, String mode)
+      throws IOException, InterruptedException {
+    JSONObject body = new JSONObject().put("path", dbPath);
+    if (owner != null && !owner.isEmpty()) {
+      body.put("owner", owner);
+    }
+    if (group != null && !group.isEmpty()) {
+      body.put("group", group);
+    }
+    if (mode != null && !mode.isEmpty()) {
+      body.put("mode", mode);
+    }
+    post("/db/permissions", body);
+  }
+
+  /** GET /api/users — the user account names (for the permissions owner picker). */
+  public List<String> listUsers() throws IOException, InterruptedException {
+    return names(send(request("/users").GET().build()).body());
+  }
+
+  /** GET /api/groups — the group names (for the permissions group picker). */
+  public List<String> listGroups() throws IOException, InterruptedException {
+    return names(send(request("/groups").GET().build()).body());
+  }
+
+  /** Extracts the {@code name} of each object in a JSON array body, dropping any blanks. */
+  private static List<String> names(String body) {
+    JSONArray arr = new JSONArray(body);
+    List<String> out = new ArrayList<>(arr.length());
+    for (int i = 0; i < arr.length(); i++) {
+      String name = arr.getJSONObject(i).optString("name", "");
+      if (!name.isEmpty()) {
+        out.add(name);
+      }
+    }
+    return out;
+  }
+
   /** POST /api/db/collection — creates a collection (and any missing ancestors). */
   public void createCollection(String dbPath) throws IOException, InterruptedException {
     JSONObject body = new JSONObject();

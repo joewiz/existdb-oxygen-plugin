@@ -378,6 +378,8 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("Rename…", () -> renameNode(node, existNode)));
       menu.add(menuItem("Duplicate", () -> duplicateNode(node, existNode)));
       menu.add(menuItem("Delete…", () -> deleteNode(node, existNode)));
+      menu.addSeparator();
+      menu.add(menuItem("Permissions…", () -> editPermissions(existNode)));
     }
     return menu;
   }
@@ -432,6 +434,47 @@ public final class ExistdbBrowserPanel extends JPanel {
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Download failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /** The data the permissions editor needs: the node's current permissions and the account lists. */
+  private record PermissionInfo(ExistClient.Permissions current, List<String> users,
+      List<String> groups) {
+  }
+
+  /** Reads the node's permissions + accounts, shows the editor, and applies any change. */
+  private void editPermissions(ExistNode existNode) {
+    final ExistClient client = clientOrWarn(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    new SwingWorker<PermissionInfo, Void>() {
+      @Override
+      protected PermissionInfo doInBackground() throws Exception {
+        return new PermissionInfo(client.getPermissions(existNode.path),
+            client.listUsers(), client.listGroups());
+      }
+
+      @Override
+      protected void done() {
+        PermissionInfo info;
+        try {
+          info = get();
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Could not read permissions: " + cause.getMessage());
+          return;
+        }
+        ExistClient.Permissions edited = PermissionsDialog.edit(
+            ownerFrame(), existNode.path, info.current(), info.users(), info.groups());
+        if (edited != null) {
+          runMutation(
+              () -> client.setPermissions(existNode.path, edited.owner(), edited.group(),
+                  edited.mode()),
+              () -> workspace.showStatusMessage("Updated permissions for " + existNode.path),
+              "Could not set permissions");
         }
       }
     }.execute();
