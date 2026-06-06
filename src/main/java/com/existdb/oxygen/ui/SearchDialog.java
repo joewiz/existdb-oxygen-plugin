@@ -195,13 +195,18 @@ public final class SearchDialog extends JDialog {
         KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JPanel.WHEN_IN_FOCUSED_WINDOW);
   }
 
-  /** Re-renders the intro text at a wrap width matching the current dialog width. */
+  /**
+   * Re-renders the intro at a wrap width matching the current dialog width. Uses a table cell with a
+   * {@code width} attribute — Swing's {@code JLabel} HTML honors that for wrapping, but ignores
+   * {@code width} on {@code <body>}/{@code <div>} (which lays out as one long, clipped line).
+   */
   private void updateIntro() {
     int width = getContentPane().getWidth() - 32;
     if (width < 120) {
       width = 560;
     }
-    intro.setText("<html><body style='width:" + width + "px'>" + escape(INTRO_TEXT) + "</body></html>");
+    intro.setText("<html><table><tr><td width='" + width + "'>" + escape(INTRO_TEXT)
+        + "</td></tr></table></html>");
   }
 
   private String selectedServerId() {
@@ -277,11 +282,14 @@ public final class SearchDialog extends JDialog {
         String hex = String.format("#%02x%02x%02x",
             secondary.getRed(), secondary.getGreen(), secondary.getBlue());
         // Wrap to the list's width (minus insets/scrollbar) instead of overflowing horizontally.
+        // A table cell's width attribute is the constraint JLabel HTML actually honors (width on
+        // body/div is ignored — the line stays full length and clips).
         int width = list.getWidth();
         int wrapWidth = width > 60 ? width - 28 : 560;
-        String html = "<html><body style='width:" + wrapWidth + "px'><b>" + escape(title)
+        String html = "<html><table><tr><td width='" + wrapWidth + "'><b>" + escape(title)
             + "</b> &nbsp; <font color='" + hex + "'>" + escape(hit.path()) + "</font><br>"
-            + "<font color='" + hex + "'>" + highlightSnippet(hit.snippet()) + "</font></body></html>";
+            + "<font color='" + hex + "'>" + highlightSnippet(hit.snippet())
+            + "</font></td></tr></table></html>";
         Component c = super.getListCellRendererComponent(list, html, index, selected, focus);
         setBorder(BorderFactory.createEmptyBorder(3, 4, 3, 4));
         return c;
