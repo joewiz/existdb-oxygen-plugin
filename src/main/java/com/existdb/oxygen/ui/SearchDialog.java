@@ -247,7 +247,11 @@ public final class SearchDialog extends JDialog {
               ? "Showing " + shown + " of " + results.total() + " matches"
               : shown + " match" + (shown == 1 ? "" : "es"));
           if (!model.isEmpty()) {
+            // Move focus to the results and select the first hit, so Up/Down navigate immediately
+            // and Enter (the default Open button) opens the selection.
             list.setSelectedIndex(0);
+            list.ensureIndexIsVisible(0);
+            list.requestFocusInWindow();
           }
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
