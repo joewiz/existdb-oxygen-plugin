@@ -23,6 +23,7 @@ package com.existdb.oxygen.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.existdb.oxygen.ExistContext;
@@ -250,5 +251,66 @@ class ExistClientTest {
       os.write("xquery version \"3.1\"; 123".getBytes(StandardCharsets.UTF_8));
     }
     assertTrue(server.lastPutBody().contains("123"));
+  }
+
+  @Test
+  void listPackagesParsesFields() throws Exception {
+    List<ExistClient.PackageInfo> packages = client.listPackages();
+    assertEquals(2, packages.size());
+    ExistClient.PackageInfo roaster = packages.get(0);
+    assertEquals("roaster", roaster.abbrev());
+    assertEquals("1.12.1", roaster.version());
+    assertEquals("library", roaster.type());
+    assertEquals("Roaster", roaster.title());
+    assertEquals(List.of("e-editiones"), roaster.authors());
+  }
+
+  @Test
+  void removePackageReportsDependentsWithoutForce() throws Exception {
+    ExistClient.RemoveResult result = client.removePackage("roaster", false);
+    assertFalse(result.removed());
+    assertEquals(List.of("http://exist-db.org/apps/eXide"), result.dependents());
+  }
+
+  @Test
+  void removePackageWithForceSucceeds() throws Exception {
+    ExistClient.RemoveResult result = client.removePackage("roaster", true);
+    assertTrue(result.removed());
+    assertTrue(result.dependents().isEmpty());
+  }
+
+  @Test
+  void removePackageReportsNotFound() throws Exception {
+    ExistClient.RemoveResult result = client.removePackage("ghost", false);
+    assertFalse(result.removed());
+    assertTrue(result.dependents().isEmpty());
+    assertTrue(result.message().contains("not found"));
+  }
+
+  @Test
+  void installPackageSendsNameAndRegistryUrl() throws Exception {
+    client.installPackage("http://www.functx.com",
+        "https://exist-db.org/exist/apps/public-repo/find", "2.0.0");
+    String body = server.lastPackageBody();
+    assertTrue(body.contains("\"url\":\"https://exist-db.org/exist/apps/public-repo/find\""));
+    assertTrue(body.contains("\"version\":\"2.0.0\""));
+  }
+
+  @Test
+  void installPackageThrowsWhenServerReportsFailure() {
+    // The server replies HTTP 200 with {"success":false,...}; the client must surface that.
+    assertThrows(java.io.IOException.class, () ->
+        client.installPackage("fail", "https://exist-db.org/exist/apps/public-repo/find", ""));
+  }
+
+  @Test
+  void checkPackageUpdatesParsesRegistryAndUpdates() throws Exception {
+    ExistClient.UpdateCheck check = client.checkPackageUpdates();
+    assertEquals("https://exist-db.org/exist/apps/public-repo", check.registry());
+    assertEquals(1, check.updates().size());
+    ExistClient.PackageUpdate update = check.updates().get(0);
+    assertEquals("functx", update.abbrev());
+    assertEquals("1.0.0", update.installed());
+    assertEquals("2.0.0", update.available());
   }
 }
