@@ -57,7 +57,6 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
@@ -71,6 +70,9 @@ import javax.swing.SwingWorker;
 public final class SearchDialog extends JDialog {
 
   private static final int LIMIT = 50;
+  private static final String INTRO_TEXT = "Searches across data that apps on the selected eXist-db "
+      + "server contribute to a Lucene full-text field called \"site-content\"; eXist 7's stock apps "
+      + "contribute their data to this.";
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient List<ConnectionProfile> profiles;
@@ -79,6 +81,8 @@ public final class SearchDialog extends JDialog {
   private final DefaultListModel<ExistClient.SearchHit> model = new DefaultListModel<>();
   private final JList<ExistClient.SearchHit> list = new JList<>(model);
   private final JLabel status = new JLabel(" ");
+  /** Intro line; its HTML wrap-width is re-bound to the dialog width on resize (see updateIntro). */
+  private final JLabel intro = new JLabel();
 
   private SearchDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
     super(owner, "Search eXist-db", false);
@@ -164,17 +168,17 @@ public final class SearchDialog extends JDialog {
     south.add(buttons, BorderLayout.EAST);
 
     // Intro line (like Oxygen's "Install new add-ons" dialog) explaining what /api/search covers.
-    // A wrapping, non-editable text area follows the viewport width (a fixed-width HTML label clipped).
-    JTextArea intro = OxygenUIComponentsFactory.createTextArea(
-        "Searches across data that apps on the selected eXist-db server contribute to a Lucene "
-            + "full-text field called \"site-content\"; eXist 7's stock apps contribute their data "
-            + "to this.");
-    intro.setEditable(false);
-    intro.setLineWrap(true);
-    intro.setWrapStyleWord(true);
-    intro.setOpaque(false);
-    intro.setFocusable(false);
+    // An HTML label whose wrap-width tracks the dialog width: a wrapping JTextArea collapses to one
+    // line in BorderLayout.NORTH (it computes its height before it knows its width), and a fixed-px
+    // HTML width clips when the window is narrower. Re-bind the width on resize instead.
     intro.setBorder(BorderFactory.createEmptyBorder(0, 2, 8, 2));
+    updateIntro();
+    addComponentListener(new ComponentAdapter() {
+      @Override
+      public void componentResized(ComponentEvent e) {
+        updateIntro();
+      }
+    });
     JPanel north = new JPanel(new BorderLayout(0, 4));
     north.add(intro, BorderLayout.NORTH);
     north.add(top, BorderLayout.CENTER);
@@ -189,6 +193,15 @@ public final class SearchDialog extends JDialog {
     getRootPane().setDefaultButton(searchButton);
     getRootPane().registerKeyboardAction(e -> dispose(),
         KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JPanel.WHEN_IN_FOCUSED_WINDOW);
+  }
+
+  /** Re-renders the intro text at a wrap width matching the current dialog width. */
+  private void updateIntro() {
+    int width = getContentPane().getWidth() - 32;
+    if (width < 120) {
+      width = 560;
+    }
+    intro.setText("<html><body style='width:" + width + "px'>" + escape(INTRO_TEXT) + "</body></html>");
   }
 
   private String selectedServerId() {
