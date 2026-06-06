@@ -25,6 +25,7 @@ import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
 import com.existdb.oxygen.client.MimeTypes;
+import com.existdb.oxygen.client.Uploads;
 import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
@@ -1261,7 +1262,8 @@ public final class ExistdbBrowserPanel extends JPanel {
       if (resource.binary()) {
         to.putResourceBytes(destPath, resource.bytes(), mime);
       } else {
-        putResourceTolerant(to, destPath, new String(resource.bytes(), StandardCharsets.UTF_8), mime);
+        Uploads.putResourceTolerant(to, destPath,
+            new String(resource.bytes(), StandardCharsets.UTF_8), mime);
       }
     }
   }
@@ -1270,24 +1272,6 @@ public final class ExistdbBrowserPanel extends JPanel {
    * Stores a resource, falling back to {@code text/plain} if eXist rejects the content as malformed
    * XML — e.g. non-well-formed HTML, which eXist would otherwise try to parse as XML and reject.
    */
-  private static void putResourceTolerant(ExistClient client, String path, String content,
-      String mime) throws IOException, InterruptedException {
-    try {
-      client.putResource(path, content, mime);
-    } catch (ExistHttpException e) {
-      if ("text/plain".equals(mime) || !isXmlParseError(e)) {
-        throw e;
-      }
-      client.putResource(path, content, "text/plain");
-    }
-  }
-
-  private static boolean isXmlParseError(ExistHttpException e) {
-    String body = e.getResponseBody();
-    return body != null
-        && (body.contains("XML parser") || body.contains("Content is not allowed in prolog"));
-  }
-
   private static void deleteFrom(ExistClient client, String path, boolean collection)
       throws IOException, InterruptedException {
     if (collection) {
@@ -1376,7 +1360,7 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
         int count = 0;
         for (File file : files) {
-          count += uploadRecursive(client, target.path, file);
+          count += Uploads.uploadRecursive(client, target.path, file);
         }
         return count;
       }
@@ -1396,49 +1380,6 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
-  }
-
-  /**
-   * Uploads a file (or, recursively, a directory) under {@code parentPath}; returns the count
-   * uploaded. Binary files are stored via the raw streaming PUT; text files via the tolerant text
-   * PUT. {@code skipped} collects the names of any files that couldn't be stored.
-   */
-  private static int uploadRecursive(ExistClient client, String parentPath, File file)
-      throws IOException, InterruptedException {
-    if (file.isDirectory()) {
-      String collection = parentPath + "/" + file.getName();
-      client.createCollection(collection);
-      int count = 0;
-      File[] children = file.listFiles();
-      if (children != null) {
-        for (File child : children) {
-          count += uploadRecursive(client, collection, child);
-        }
-      }
-      return count;
-    }
-    byte[] bytes = Files.readAllBytes(file.toPath());
-    String path = parentPath + "/" + file.getName();
-    String mime = MimeTypes.byName(file.getName());
-    if (isBinary(bytes)) {
-      client.putResourceBytes(path, bytes, mime); // null mime → application/octet-stream
-    } else {
-      // A known extension picks the right mime; otherwise store as plain text (never XML-parsed).
-      putResourceTolerant(client, path, new String(bytes, StandardCharsets.UTF_8),
-          mime != null ? mime : "text/plain");
-    }
-    return 1;
-  }
-
-  /** Heuristic: a NUL byte in the head means binary (existdb-openapi can't store binary as text). */
-  private static boolean isBinary(byte[] bytes) {
-    int limit = Math.min(bytes.length, 8192);
-    for (int i = 0; i < limit; i++) {
-      if (bytes[i] == 0) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /** Asks (on the EDT) whether to overwrite colliding resources; returns the user's choice. */

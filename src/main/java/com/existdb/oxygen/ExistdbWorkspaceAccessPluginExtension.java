@@ -28,6 +28,7 @@ import com.existdb.oxygen.ui.ExistResultsView;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
+import com.existdb.oxygen.ui.ProjectUploadCustomizer;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 import com.existdb.oxygen.ui.RunInResultsViewAction;
 import com.existdb.oxygen.ui.SignatureHelpAction;
@@ -79,6 +80,10 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
 
     // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
     new ExistAutoValidator(pluginWorkspace).install();
+
+    // "Upload to eXist…" in the Project pane's contextual menu (filesystem → server).
+    pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(
+        new ProjectUploadCustomizer(pluginWorkspace, profileStore));
 
     final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =
