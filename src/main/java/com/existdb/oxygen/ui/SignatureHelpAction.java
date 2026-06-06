@@ -31,9 +31,11 @@ import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 
 import java.awt.Color;
+import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.WindowAdapter;
@@ -76,6 +78,14 @@ public final class SignatureHelpAction extends AbstractAction {
   public SignatureHelpAction(StandalonePluginWorkspace workspace) {
     super("Parameter Hints (eXist-db)");
     this.workspace = workspace;
+    // Escape dismisses the hint while it's up (and only then — otherwise Escape behaves normally).
+    KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+      if (showing && e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+        hide();
+        return true; // consume so Escape only closes the hint, nothing else
+      }
+      return false;
+    });
   }
 
   @Override
