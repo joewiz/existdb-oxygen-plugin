@@ -40,6 +40,7 @@ import javax.swing.DefaultComboBoxModel;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 
@@ -100,6 +101,14 @@ public final class UploadToExistDialog {
     String target = dialog.targetField.getText().trim();
     if (target.isEmpty()) {
       target = "/db";
+    }
+    // eXist collections live under /db; the server silently reparents anything else (e.g. "/dbfoo"
+    // becomes "/db/dbfoo"). Reject that surprise with a clear message instead.
+    if (!target.equals("/db") && !target.startsWith("/db/")) {
+      JOptionPane.showMessageDialog(owner,
+          "The target collection must be under /db — for example /db/apps/myapp.",
+          "Upload to eXist-db", JOptionPane.ERROR_MESSAGE);
+      return null;
     }
     return new Result(dialog.profiles.get(dialog.serverCombo.getSelectedIndex()), target);
   }

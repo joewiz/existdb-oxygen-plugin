@@ -34,14 +34,19 @@ import ro.sync.exml.workspace.api.standalone.project.ProjectPopupMenuCustomizer;
 
 import java.awt.Frame;
 import java.awt.KeyboardFocusManager;
+import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.net.URL;
 import java.nio.file.Path;
 import java.util.List;
 
+import javax.swing.ImageIcon;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
+import javax.swing.KeyStroke;
 import javax.swing.SwingWorker;
 
 /**
@@ -52,6 +57,12 @@ import javax.swing.SwingWorker;
  * relative to the descriptor's directory is mirrored under the target collection.
  */
 public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer {
+
+  /** The eXist-db icon shown on the menu item (to match the other icon-bearing entries). */
+  private static final ImageIcon MENU_ICON = loadMenuIcon();
+  /** Cmd/Ctrl+Shift+U — shown on the menu item; actual handling is the global dispatcher. */
+  private static final KeyStroke UPLOAD_SHORTCUT = KeyStroke.getKeyStroke(KeyEvent.VK_U,
+      Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK);
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -71,9 +82,18 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
       return;
     }
     JMenuItem item = new JMenuItem("Upload to eXist-db…");
+    if (MENU_ICON != null) {
+      item.setIcon(MENU_ICON);
+    }
+    item.setAccelerator(UPLOAD_SHORTCUT);
     item.addActionListener(e -> upload(selected));
     menu.addSeparator();
     menu.add(item);
+  }
+
+  private static ImageIcon loadMenuIcon() {
+    URL url = ProjectUploadCustomizer.class.getResource("/images/exist-server.png");
+    return url == null ? null : new ImageIcon(url);
   }
 
   /** Uploads the currently selected Project-pane file(s); the Cmd/Ctrl+U accelerator entry point. */
