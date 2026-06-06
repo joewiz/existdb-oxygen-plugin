@@ -31,11 +31,14 @@ import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -67,6 +70,9 @@ import javax.swing.SwingWorker;
 public final class SearchDialog extends JDialog {
 
   private static final int LIMIT = 50;
+  private static final String INTRO_TEXT = "Searches across data that apps on the selected eXist-db "
+      + "server contribute to a Lucene full-text field called \"site-content\"; eXist 7's stock apps "
+      + "contribute their data to this.";
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient List<ConnectionProfile> profiles;
@@ -75,6 +81,8 @@ public final class SearchDialog extends JDialog {
   private final DefaultListModel<ExistClient.SearchHit> model = new DefaultListModel<>();
   private final JList<ExistClient.SearchHit> list = new JList<>(model);
   private final JLabel status = new JLabel(" ");
+  /** Intro line; its HTML wrap-width is re-bound to the dialog width on resize (see updateIntro). */
+  private final JLabel intro = new JLabel();
 
   private SearchDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
     super(owner, "Search eXist-db", false);
@@ -130,14 +138,27 @@ public final class SearchDialog extends JDialog {
         }
       }
     });
+    // Cells wrap to the list width; on resize, invalidate the cached cell sizes so they re-measure
+    // (and re-wrap) at the new width instead of overflowing horizontally.
+    list.addComponentListener(new ComponentAdapter() {
+      @Override
+      public void componentResized(ComponentEvent e) {
+        list.setFixedCellHeight(10);
+        list.setFixedCellHeight(-1);
+      }
+    });
 
+    // Match Oxygen's Open/Find Resource dialog: Cancel then Open (rightmost); Open is the blue
+    // default, enabled only when a result is selected.
     JButton open = OxygenUIComponentsFactory.createButton(new AbstractAction("Open") {
       @Override
       public void actionPerformed(ActionEvent e) {
         openSelected();
       }
     });
-    JButton close = OxygenUIComponentsFactory.createButton(new AbstractAction("Close") {
+    open.setEnabled(false);
+    list.addListSelectionListener(e -> open.setEnabled(list.getSelectedValue() != null));
+    JButton cancel = OxygenUIComponentsFactory.createButton(new AbstractAction("Cancel") {
       @Override
       public void actionPerformed(ActionEvent e) {
         dispose();
@@ -145,21 +166,51 @@ public final class SearchDialog extends JDialog {
     });
     JPanel south = new JPanel(new BorderLayout());
     JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+    buttons.add(cancel);
     buttons.add(open);
-    buttons.add(close);
     south.add(status, BorderLayout.WEST);
     south.add(buttons, BorderLayout.EAST);
 
+    // Intro line (like Oxygen's "Install new add-ons" dialog) explaining what /api/search covers.
+    // An HTML label whose wrap-width tracks the dialog width: a wrapping JTextArea collapses to one
+    // line in BorderLayout.NORTH (it computes its height before it knows its width), and a fixed-px
+    // HTML width clips when the window is narrower. Re-bind the width on resize instead.
+    intro.setBorder(BorderFactory.createEmptyBorder(0, 2, 8, 2));
+    updateIntro();
+    addComponentListener(new ComponentAdapter() {
+      @Override
+      public void componentResized(ComponentEvent e) {
+        updateIntro();
+      }
+    });
+    JPanel north = new JPanel(new BorderLayout(0, 4));
+    north.add(intro, BorderLayout.NORTH);
+    north.add(top, BorderLayout.CENTER);
+
     setLayout(new BorderLayout(8, 8));
     ((JPanel) getContentPane()).setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-    add(top, BorderLayout.NORTH);
+    add(north, BorderLayout.NORTH);
     add(OxygenUIComponentsFactory.createScrollPane(list,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER), BorderLayout.CENTER);
     add(south, BorderLayout.SOUTH);
-    getRootPane().setDefaultButton(searchButton);
+    getRootPane().setDefaultButton(open);
     getRootPane().registerKeyboardAction(e -> dispose(),
         KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JPanel.WHEN_IN_FOCUSED_WINDOW);
+  }
+
+  /**
+   * Re-renders the intro at a wrap width matching the current dialog width. Uses a table cell with a
+   * {@code width} attribute — Swing's {@code JLabel} HTML honors that for wrapping, but ignores
+   * {@code width} on {@code <body>}/{@code <div>} (which lays out as one long, clipped line).
+   */
+  private void updateIntro() {
+    int width = getContentPane().getWidth() - 32;
+    if (width < 120) {
+      width = 560;
+    }
+    intro.setText("<html><table><tr><td width='" + width + "'>" + escape(INTRO_TEXT)
+        + "</td></tr></table></html>");
   }
 
   private String selectedServerId() {
@@ -196,7 +247,11 @@ public final class SearchDialog extends JDialog {
               ? "Showing " + shown + " of " + results.total() + " matches"
               : shown + " match" + (shown == 1 ? "" : "es"));
           if (!model.isEmpty()) {
+            // Move focus to the results and select the first hit, so Up/Down navigate immediately
+            // and Enter (the default Open button) opens the selection.
             list.setSelectedIndex(0);
+            list.ensureIndexIsVisible(0);
+            list.requestFocusInWindow();
           }
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
@@ -229,9 +284,20 @@ public final class SearchDialog extends JDialog {
         ExistClient.SearchHit hit = (ExistClient.SearchHit) value;
         String title = hit.title() == null || hit.title().isBlank() || "(untitled)".equals(hit.title())
             ? leaf(hit.path()) : hit.title();
-        String html = "<html><b>" + escape(title) + "</b> &nbsp; <font color='gray'>"
-            + escape(hit.path()) + "</font><br><font color='gray'>" + escape(snippet(hit.snippet()))
-            + "</font></html>";
+        // The path/snippet are de-emphasized in gray, but gray-on-blue is unreadable when the row is
+        // selected — use the list's selection foreground there so the secondary text stays legible.
+        Color secondary = selected ? list.getSelectionForeground() : Color.GRAY;
+        String hex = String.format("#%02x%02x%02x",
+            secondary.getRed(), secondary.getGreen(), secondary.getBlue());
+        // Wrap to the list's width (minus insets/scrollbar) instead of overflowing horizontally.
+        // A table cell's width attribute is the constraint JLabel HTML actually honors (width on
+        // body/div is ignored — the line stays full length and clips).
+        int width = list.getWidth();
+        int wrapWidth = width > 60 ? width - 28 : 560;
+        String html = "<html><table><tr><td width='" + wrapWidth + "'><b>" + escape(title)
+            + "</b> &nbsp; <font color='" + hex + "'>" + escape(hit.path()) + "</font><br>"
+            + "<font color='" + hex + "'>" + highlightSnippet(hit.snippet())
+            + "</font></td></tr></table></html>";
         Component c = super.getListCellRendererComponent(list, html, index, selected, focus);
         setBorder(BorderFactory.createEmptyBorder(3, 4, 3, 4));
         return c;
@@ -247,6 +313,17 @@ public final class SearchDialog extends JDialog {
   private static String snippet(String snippet) {
     String s = snippet == null ? "" : snippet.replaceAll("\\s+", " ").trim();
     return s.length() > 200 ? s.substring(0, 200) + "…" : s;
+  }
+
+  /**
+   * Renders a snippet as HTML: collapse/truncate, escape, then turn the server's KWIC {@code <mark>}
+   * hit markers into a highlighted span (black on yellow, so it stays readable on selected rows too).
+   * Snippets without {@code <mark>} simply render as plain text.
+   */
+  private static String highlightSnippet(String raw) {
+    return escape(snippet(raw))
+        .replace("&lt;mark&gt;", "<span style='background-color:#fff59d; color:#000000'>")
+        .replace("&lt;/mark&gt;", "</span>");
   }
 
   private static String escape(String s) {
