@@ -274,7 +274,11 @@ public final class ExistClient {
     return out;
   }
 
-  /** POST /api/db/collection — creates a collection (and any missing ancestors). */
+  /**
+   * POST /api/db/collection — creates a single collection. Idempotent if it already exists, but the
+   * parent must exist: the server does <em>not</em> create missing ancestors (creating
+   * {@code /a/b/c} when {@code /a/b} is absent fails). Create intermediate levels top-down.
+   */
   public void createCollection(String dbPath) throws IOException, InterruptedException {
     JSONObject body = new JSONObject();
     body.put("path", dbPath);

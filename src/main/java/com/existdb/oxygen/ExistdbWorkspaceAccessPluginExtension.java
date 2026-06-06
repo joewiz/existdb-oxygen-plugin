@@ -28,6 +28,7 @@ import com.existdb.oxygen.ui.ExistResultsView;
 import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
+import com.existdb.oxygen.ui.ProjectUploadCustomizer;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 import com.existdb.oxygen.ui.RunInResultsViewAction;
 import com.existdb.oxygen.ui.SignatureHelpAction;
@@ -57,6 +58,7 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JPopupMenu;
+import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.text.JTextComponent;
 
@@ -79,6 +81,13 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
 
     // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
     new ExistAutoValidator(pluginWorkspace).install();
+
+    // "Upload to eXist-db…" in the Project pane's contextual menu (filesystem → server),
+    // also reachable via Cmd/Ctrl+U while a tree (Project pane) is focused.
+    final ProjectUploadCustomizer uploadCustomizer =
+        new ProjectUploadCustomizer(pluginWorkspace, profileStore);
+    pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(uploadCustomizer);
+    installUploadShortcut(uploadCustomizer);
 
     final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =
@@ -244,6 +253,30 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
             new ActionEvent(e.getSource(), ActionEvent.ACTION_PERFORMED, "F1"));
       }
       return true; // consume PRESSED and RELEASED so Oxygen's Help doesn't also fire
+    });
+  }
+
+  /**
+   * Binds Cmd/Ctrl+Shift+U to "Upload to eXist-db…" via a global dispatcher, scoped to when a tree
+   * (the Project pane) has focus, so it doesn't shadow the shortcut in editors. Cmd/Ctrl+Shift+U is
+   * unassigned in Oxygen's default Menu Shortcut Keys. Uploads the selected Project-pane files (a
+   * no-op when nothing is selected).
+   */
+  private static void installUploadShortcut(ProjectUploadCustomizer customizer) {
+    final int uploadMask =
+        Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK;
+    KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+      if (e.getKeyCode() != KeyEvent.VK_U || e.getModifiersEx() != uploadMask) {
+        return false;
+      }
+      if (!(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()
+          instanceof JTree)) {
+        return false;
+      }
+      if (e.getID() == KeyEvent.KEY_PRESSED) {
+        customizer.uploadSelected();
+      }
+      return true; // consume PRESSED and RELEASED so the keystroke isn't handled twice
     });
   }
 
