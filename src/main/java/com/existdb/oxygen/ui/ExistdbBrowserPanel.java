@@ -365,6 +365,10 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("New Collection…", () -> newCollection(node, existNode)));
       menu.addSeparator();
       menu.add(menuItem("Refresh", () -> reloadNode(node)));
+      if (DB_ROOT.equals(existNode.path)) {
+        menu.addSeparator();
+        menu.add(menuItem("Manage Packages…", () -> managePackages(existNode)));
+      }
     } else {
       menu.add(menuItem("Open", this::openSelected));
       menu.add(menuItem("Download…", () -> downloadResource(existNode)));
@@ -434,6 +438,30 @@ public final class ExistdbBrowserPanel extends JPanel {
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Download failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /** Fetches the server's installed packages, then opens the Package Manager for that server. */
+  private void managePackages(ExistNode serverNode) {
+    final ExistClient client = clientOrWarn(serverNode.serverId);
+    if (client == null) {
+      return;
+    }
+    new SwingWorker<List<ExistClient.PackageInfo>, Void>() {
+      @Override
+      protected List<ExistClient.PackageInfo> doInBackground() throws Exception {
+        return client.listPackages();
+      }
+
+      @Override
+      protected void done() {
+        try {
+          PackageManagerDialog.open(ownerFrame(), client, serverNode.name, get());
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Could not list packages: " + cause.getMessage());
         }
       }
     }.execute();

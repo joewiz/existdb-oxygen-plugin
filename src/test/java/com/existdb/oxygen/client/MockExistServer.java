@@ -43,6 +43,7 @@ public final class MockExistServer implements AutoCloseable {
   private volatile String lastPutBody;
   private volatile String lastQueryBody;
   private volatile String lastLangBody;
+  private volatile String lastPackageBody;
 
   public MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -156,7 +157,60 @@ public final class MockExistServer implements AutoCloseable {
           + "\"kind\":\"function\",\"uri\":\"/db/apps/myapp/lib.xqm\"}");
     });
 
+    registerPackageHandlers(prefix);
+
     server.start();
+  }
+
+  /**
+   * Registers the {@code /packages*} endpoints. Extracted from the constructor so each method stays
+   * under PMD's NPath threshold (the canned multi-branch handlers multiply quickly). createContext
+   * matches the longest registered prefix, so {@code /packages/install} and
+   * {@code /packages/update-check} win for their paths and {@code /packages} handles the list (GET)
+   * plus remove (DELETE {@code /packages/{abbrev}}).
+   */
+  private void registerPackageHandlers(String prefix) {
+    handle(prefix + "/packages", ex -> {
+      String path = ex.getRequestURI().getPath();
+      if ("GET".equals(ex.getRequestMethod()) && path.endsWith("/api/packages")) {
+        respond(ex, 200, "[{\"name\":\"http://e-editiones.org/roaster\",\"abbrev\":\"roaster\","
+            + "\"version\":\"1.12.1\",\"title\":\"Roaster\",\"type\":\"library\","
+            + "\"description\":\"OpenAPI router\",\"authors\":[\"e-editiones\"],"
+            + "\"website\":\"https://e-editiones.org\"},"
+            + "{\"name\":\"http://www.functx.com\",\"abbrev\":\"functx\",\"version\":\"1.0.0\","
+            + "\"title\":\"FunctX\",\"type\":\"library\",\"description\":\"\",\"authors\":[],"
+            + "\"website\":\"\"}]");
+      } else if ("DELETE".equals(ex.getRequestMethod())) {
+        boolean force = String.valueOf(ex.getRequestURI().getRawQuery()).contains("force=true");
+        if (path.endsWith("/roaster") && !force) {
+          respond(ex, 200, "{\"error\":\"Cannot remove: other packages depend on it\","
+              + "\"dependents\":[\"http://exist-db.org/apps/eXide\"],"
+              + "\"hint\":\"Use force=true to remove anyway\"}");
+        } else if (path.endsWith("/ghost")) {
+          respond(ex, 200, "{\"error\":\"Package not found: ghost\"}");
+        } else {
+          respond(ex, 200, "{\"name\":\"x\",\"undeploy\":true,\"remove\":true}");
+        }
+      } else {
+        respond(ex, 405, "{}");
+      }
+    });
+    handle(prefix + "/packages/install", ex -> {
+      lastPackageBody = readBody(ex);
+      if (lastPackageBody.contains("\"name\":\"fail\"")) {
+        respond(ex, 200, "{\"success\":false,\"error\":{\"code\":\"err:FAIL\","
+            + "\"description\":\"could not install\"}}");
+      } else {
+        respond(ex, 200, "{\"success\":true,\"result\":{\"name\":\"x\",\"version\":\"\","
+            + "\"target\":\"/db/system/repo/x\"}}");
+      }
+    });
+    handle(prefix + "/packages/update-check", ex -> {
+      lastPackageBody = readBody(ex);
+      respond(ex, 200, "{\"registry\":\"https://exist-db.org/exist/apps/public-repo\","
+          + "\"updates\":[{\"name\":\"http://www.functx.com\",\"abbrev\":\"functx\","
+          + "\"installed\":\"1.0.0\",\"available\":\"2.0.0\"}]}");
+    });
   }
 
   public String baseUrl() {
@@ -173,6 +227,10 @@ public final class MockExistServer implements AutoCloseable {
 
   String lastLangBody() {
     return lastLangBody;
+  }
+
+  String lastPackageBody() {
+    return lastPackageBody;
   }
 
   @Override
