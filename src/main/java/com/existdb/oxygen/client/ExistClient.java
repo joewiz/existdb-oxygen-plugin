@@ -40,6 +40,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -383,6 +384,152 @@ public final class ExistClient {
       return new ResourceBytes(raw.bytes(), raw.mimeType() != null ? raw.mimeType() : mime, true);
     }
     return new ResourceBytes(rc.content().getBytes(StandardCharsets.UTF_8), mime, false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Packages (EXPath / eXist apps)
+  // ---------------------------------------------------------------------------
+
+  /** An installed package: {@code abbrev} is the id used on {@code /packages/{name}} operations. */
+  public record PackageInfo(String name, String abbrev, String title, String version,
+      String type, String description, List<String> authors, String website) {
+  }
+
+  /** An available update for an installed package (from {@code /packages/update-check}). */
+  public record PackageUpdate(String name, String abbrev, String installed, String available) {
+  }
+
+  /** The registry URL checked plus the list of packages with newer versions available. */
+  public record UpdateCheck(String registry, List<PackageUpdate> updates) {
+  }
+
+  /**
+   * Outcome of a {@link #removePackage} call: {@code removed} is true on success; otherwise
+   * {@code dependents} lists the packages blocking removal (empty when blocked for another reason,
+   * e.g. not found) and {@code message} carries the server's explanation.
+   */
+  public record RemoveResult(boolean removed, List<String> dependents, String message) {
+  }
+
+  /** GET /api/packages — the installed packages, by title. */
+  public List<PackageInfo> listPackages() throws IOException, InterruptedException {
+    JSONArray arr = new JSONArray(send(request("/packages").GET().build()).body());
+    List<PackageInfo> out = new ArrayList<>(arr.length());
+    for (int i = 0; i < arr.length(); i++) {
+      JSONObject o = arr.getJSONObject(i);
+      List<String> authors = new ArrayList<>();
+      JSONArray a = o.optJSONArray("authors");
+      for (int j = 0; a != null && j < a.length(); j++) {
+        authors.add(a.optString(j, ""));
+      }
+      out.add(new PackageInfo(o.optString("name", ""), o.optString("abbrev", ""),
+          o.optString("title", ""), o.optString("version", ""), o.optString("type", ""),
+          o.optString("description", ""), authors, o.optString("website", "")));
+    }
+    return out;
+  }
+
+  /**
+   * DELETE /api/packages/{abbrev} — uninstalls a package. The server replies 200 even when it
+   * declines: with {@code force == false} a still-depended-on package yields a body listing the
+   * {@code dependents} (and is <em>not</em> removed); pass {@code force == true} to remove anyway.
+   * The parsed {@link RemoveResult} distinguishes success from a dependents/not-found refusal.
+   */
+  public RemoveResult removePackage(String abbrev, boolean force)
+      throws IOException, InterruptedException {
+    JSONObject o = new JSONObject(
+        send(request("/packages/" + enc(abbrev) + "?force=" + force).DELETE().build()).body());
+    if (o.has("dependents")) {
+      List<String> deps = new ArrayList<>();
+      JSONArray a = o.optJSONArray("dependents");
+      for (int i = 0; a != null && i < a.length(); i++) {
+        deps.add(a.optString(i, ""));
+      }
+      return new RemoveResult(false, deps, o.optString("error", "Cannot remove: other packages depend on it"));
+    }
+    if (o.has("error")) {
+      return new RemoveResult(false, List.of(), o.optString("error", "Remove failed"));
+    }
+    return new RemoveResult(true, List.of(), null);
+  }
+
+  /**
+   * POST /api/packages/install (multipart) — installs a package from a local {@code .xar}.
+   *
+   * <p>The existdb-openapi {@code packages:install} handler does not yet read the multipart
+   * {@code file} part (only the JSON registry path is implemented), so this currently has no effect
+   * server-side; the Package Manager's "Install .xar…" action stays disabled until the server ships
+   * the multipart branch (tasking filed 2026-06-06). Kept here so enabling it is a one-line change.
+   */
+  public void installPackageFile(String filename, byte[] xar)
+      throws IOException, InterruptedException {
+    String boundary = "----existdb-oxygen-" + UUID.randomUUID();
+    byte[] body = multipartFile(boundary, "file", filename, xar);
+    send(request("/packages/install")
+        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+        .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+        .build());
+  }
+
+  /**
+   * POST /api/packages/install (JSON) — installs/updates a package from a registry by {@code name}
+   * (its URI) and {@code findUrl} (the registry's {@code /find} endpoint, both required by the
+   * server), optionally pinning {@code version} (empty installs the latest). Used to apply an
+   * available update from {@link #checkPackageUpdates()}.
+   */
+  public void installPackage(String name, String findUrl, String version)
+      throws IOException, InterruptedException {
+    JSONObject body = new JSONObject().put("name", name).put("url", findUrl);
+    if (version != null && !version.isEmpty()) {
+      body.put("version", version);
+    }
+    JSONObject o = new JSONObject(send(request("/packages/install")
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+        .build()).body());
+    if (!o.optBoolean("success", false)) {
+      throw new IOException("Install failed: " + installError(o));
+    }
+  }
+
+  /** Extracts a human-readable message from an install response's {@code error} object/string. */
+  private static String installError(JSONObject response) {
+    Object error = response.opt("error");
+    if (error instanceof JSONObject obj) {
+      return obj.optString("description", obj.optString("code", "unknown error"));
+    }
+    return error != null ? error.toString() : "unknown error";
+  }
+
+  /** POST /api/packages/update-check — the registry and any installed packages with newer versions. */
+  public UpdateCheck checkPackageUpdates() throws IOException, InterruptedException {
+    JSONObject o = new JSONObject(send(request("/packages/update-check")
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8))
+        .build()).body());
+    List<PackageUpdate> updates = new ArrayList<>();
+    JSONArray arr = o.optJSONArray("updates");
+    for (int i = 0; arr != null && i < arr.length(); i++) {
+      JSONObject u = arr.getJSONObject(i);
+      updates.add(new PackageUpdate(u.optString("name", ""), u.optString("abbrev", ""),
+          u.optString("installed", ""), u.optString("available", "")));
+    }
+    return new UpdateCheck(o.optString("registry", ""), updates);
+  }
+
+  /** Builds a {@code multipart/form-data} body with one file part. */
+  private static byte[] multipartFile(String boundary, String field, String filename, byte[] data) {
+    String head = "--" + boundary + "\r\n"
+        + "Content-Disposition: form-data; name=\"" + field + "\"; filename=\"" + filename + "\"\r\n"
+        + "Content-Type: application/octet-stream\r\n\r\n";
+    String tail = "\r\n--" + boundary + "--\r\n";
+    byte[] headBytes = head.getBytes(StandardCharsets.UTF_8);
+    byte[] tailBytes = tail.getBytes(StandardCharsets.UTF_8);
+    byte[] out = new byte[headBytes.length + data.length + tailBytes.length];
+    System.arraycopy(headBytes, 0, out, 0, headBytes.length);
+    System.arraycopy(data, 0, out, headBytes.length, data.length);
+    System.arraycopy(tailBytes, 0, out, headBytes.length + data.length, tailBytes.length);
+    return out;
   }
 
   // ---------------------------------------------------------------------------
