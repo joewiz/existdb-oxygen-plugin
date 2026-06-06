@@ -148,13 +148,17 @@ public final class SearchDialog extends JDialog {
       }
     });
 
+    // Match Oxygen's Open/Find Resource dialog: Cancel then Open (rightmost); Open is the blue
+    // default, enabled only when a result is selected.
     JButton open = OxygenUIComponentsFactory.createButton(new AbstractAction("Open") {
       @Override
       public void actionPerformed(ActionEvent e) {
         openSelected();
       }
     });
-    JButton close = OxygenUIComponentsFactory.createButton(new AbstractAction("Close") {
+    open.setEnabled(false);
+    list.addListSelectionListener(e -> open.setEnabled(list.getSelectedValue() != null));
+    JButton cancel = OxygenUIComponentsFactory.createButton(new AbstractAction("Cancel") {
       @Override
       public void actionPerformed(ActionEvent e) {
         dispose();
@@ -162,8 +166,8 @@ public final class SearchDialog extends JDialog {
     });
     JPanel south = new JPanel(new BorderLayout());
     JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+    buttons.add(cancel);
     buttons.add(open);
-    buttons.add(close);
     south.add(status, BorderLayout.WEST);
     south.add(buttons, BorderLayout.EAST);
 
@@ -190,7 +194,7 @@ public final class SearchDialog extends JDialog {
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER), BorderLayout.CENTER);
     add(south, BorderLayout.SOUTH);
-    getRootPane().setDefaultButton(searchButton);
+    getRootPane().setDefaultButton(open);
     getRootPane().registerKeyboardAction(e -> dispose(),
         KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JPanel.WHEN_IN_FOCUSED_WINDOW);
   }
