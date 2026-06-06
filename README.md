@@ -88,6 +88,18 @@ Notional development goals, roughly by priority vs. effort. **P0 is the current 
 
 Out of scope: replacing Oxygen's built-in eXist integration, and the LSP wire protocol (existdb-openapi is REST with LSP-inspired shapes).
 
+## Oxygen SDK gaps (upstream wishlist)
+
+Limitations in Oxygen's plugin SDK (28.1) that forced a workaround here, or that block a feature outright. If Oxygen addresses any of these, the noted feature gets simpler or becomes possible — worth raising with the Oxygen team. (API claims verified against `oxygen.jar` 28.1 via `javap`.)
+
+- **Open a specific Preferences page programmatically.** No public API (e.g. `PluginWorkspace.showPreferencesPages(String[])`). A plugin *can* contribute a page via `OptionPagePluginExtension` (`<extension type="OptionPage">`), with per-key Global/Project scope via `getProjectLevelOptionKeys()` — but nothing can open it from our own UI. So we keep the query/result defaults in our own "Configure eXist-db Connections" dialog (reachable from the pane's gear) rather than Preferences; moving them to Preferences would lose that one-click access. *Unlocks:* relocating prefs to the native Preferences facility (with project/`.xpr` scoping) while still linking from the gear.
+- **Set an editor's display name independent of its URL.** No API to set a tab/Dock title or tooltip. We encode the server name into the `exist://<name-slug>/…` id so titles read meaningfully (and keep old slugs as aliases on rename). *Unlocks:* dropping the name-slug indirection and showing a friendly server label directly.
+- **Contribute to native XQuery content-completion and hover.** Oxygen owns content completion and mouse-hover for XQuery and only consults an external `ExternalContentCompletionProvider` when it has *no* proposals of its own, with no hook to merge ours into native Ctrl+Space / hover. So our eXist-aware completion, hover, and parameter hints are explicit actions (⌥⌘/, F1, ⇧⌘Space) instead of the native affordances. *Unlocks:* eXist proposals/docs appearing in Oxygen's own completion popup and hover tooltip.
+- **Override an editor accelerator cleanly.** Rebinding F1 (Oxygen's global Help accelerator) to our Hover Documentation required a `KeyEventDispatcher`; a component input-map binding loses to the global menu accelerator. *Unlocks:* per-editor shortcut overrides without a global key dispatcher.
+- **Alternating-row striping in `ApplicationTable`.** The factory table paints stripes only behind rows, not the empty area below the last row, so a custom view that wants full-height striping must paint its own (as the results view does). *Unlocks:* native-looking striped lists without custom painting.
+- **Hook into the XPath/XQuery Builder's result pipeline.** Beyond supplying the validation/transformation engine, there's no public hook to customize how the Builder renders or navigates results (e.g. stored-node jump-to-source) — which is why "Run Current Editor" uses its own Results-view integration. *Unlocks:* richer result navigation in the Builder's own pane.
+- **Headless/embeddable Workspace-Access harness for tests.** The SDK has no embeddable workspace, so the in-Oxygen UI (views, tree, `exist:` registration) is verified by a manual smoke checklist rather than CI. *Unlocks:* automated UI-layer regression tests.
+
 ## Requirements
 
 - Oxygen XML Editor **26.0+** (developed against 28.1, which bundles a Java 21 runtime).
