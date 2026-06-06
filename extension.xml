@@ -1,0 +1,39 @@
+<!-- Standalone add-on descriptor placed in the plugin directory so Oxygen's
+     Preferences → Plugins detail pane shows the plugin's license/author/description even for a
+     manually-installed (copied) plugin. Mirrors the <xt:extension> Oxygen writes when installing
+     from the update site (addon.xml). -->
+<xt:extension xmlns:xt="http://www.oxygenxml.com/ns/extension"
+    id="org.exist_db.oxygen.existdb">
+    <xt:location href="${project.build.finalName}-plugin.jar"/>
+    <xt:version>${project.version}</xt:version>
+    <xt:oxy_version>26.0+</xt:oxy_version>
+    <xt:type>plugin</xt:type>
+    <xt:author>eXist-db</xt:author>
+    <xt:name>eXist-db</xt:name>
+    <xt:description><html xmlns="http://www.w3.org/1999/xhtml">
+        <head><title>eXist-db Oxygen plugin</title></head>
+        <body>
+            <div>
+                <p>Connects Oxygen XML Editor to an eXist-db 7 server over HTTP through the
+                    existdb-openapi surface. Browse collections, open and save resources, and
+                    run XQuery against the database.</p>
+            </div>
+        </body>
+    </html></xt:description>
+    <xt:license><![CDATA[eXist-db Oxygen Plugin
+Copyright (C) 2026 The eXist-db Authors
+info@exist-db.org · https://www.exist-db.org
+
+This library is free software; you can redistribute it and/or modify it under the terms of the GNU
+Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the
+License, or (at your option) any later version.
+
+This library is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along with this library; if
+not, write to the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+02110-1301 USA. The full license text is in the bundled LICENSE file and at
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html]]></xt:license>
+</xt:extension>

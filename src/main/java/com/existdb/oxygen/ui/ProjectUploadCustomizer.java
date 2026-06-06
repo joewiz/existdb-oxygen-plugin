@@ -99,7 +99,7 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
     }
     final ExistClient client = new ExistClient(choice.server());
     final String target = choice.targetCollection();
-    final boolean includeHidden = profileStore.showHidden();
+    final boolean includeHidden = profileStore.uploadHidden();
     new SwingWorker<Integer, Void>() {
       @Override
       protected Integer doInBackground() throws Exception {

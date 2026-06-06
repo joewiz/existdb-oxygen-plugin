@@ -173,11 +173,59 @@ public final class ExistdbBrowserPanel extends JPanel {
         SwingUtilities.invokeLater(() -> refreshIfShowing(serverId, path)));
   }
 
-  /** Reloads the node for {@code (serverId, path)} if the tree is currently showing it (loaded). */
+  /**
+   * Surgically adds any newly-appeared children to the node for {@code (serverId, path)} if the tree
+   * is currently showing it (loaded), without rebuilding it — so already-expanded sibling nodes stay
+   * expanded (a full reload of {@code /db} would collapse an open sub-collection).
+   */
   private void refreshIfShowing(String serverId, String path) {
     DefaultMutableTreeNode node = findNode(serverId, path);
-    if (node != null && node.getUserObject() instanceof ExistNode existNode && existNode.loaded) {
-      reloadNode(node);
+    if (node == null || !(node.getUserObject() instanceof ExistNode existNode)
+        || !existNode.loaded) {
+      return;
+    }
+    final ExistClient client = ExistContext.clientById(serverId);
+    if (client == null) {
+      return;
+    }
+    new SwingWorker<List<ExistClient.ChildEntry>, Void>() {
+      @Override
+      protected List<ExistClient.ChildEntry> doInBackground() throws Exception {
+        return client.listChildren(existNode.path);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          mergeNewChildren(node, existNode, get());
+        } catch (Exception ex) {
+          // Best-effort refresh; a stale view is harmless and the user can Refresh manually.
+        }
+      }
+    }.execute();
+  }
+
+  /** Inserts children present on the server but not yet shown, leaving existing nodes untouched. */
+  private void mergeNewChildren(DefaultMutableTreeNode node, ExistNode existNode,
+      List<ExistClient.ChildEntry> entries) {
+    Set<String> present = new HashSet<>();
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode childInfo) {
+        present.add(childInfo.name);
+      }
+    }
+    boolean showHidden = profileStore.showHidden();
+    for (ExistClient.ChildEntry child : entries) {
+      if ((!showHidden && child.name().startsWith(".")) || present.contains(child.name())) {
+        continue;
+      }
+      DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(new ExistNode(
+          existNode.serverId, childPathOf(existNode, child), child.name(), child.collection()));
+      if (child.collection()) {
+        addPlaceholder(childNode);
+      }
+      treeModel.insertNodeInto(childNode, node, node.getChildCount());
     }
   }
 
@@ -1417,7 +1465,7 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
         int count = 0;
         for (File file : files) {
-          count += Uploads.uploadRecursive(client, target.path, file, profileStore.showHidden());
+          count += Uploads.uploadRecursive(client, target.path, file, profileStore.uploadHidden());
         }
         return count;
       }

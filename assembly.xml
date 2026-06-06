@@ -32,5 +32,12 @@
       <source>LICENSE</source>
       <outputDirectory>/</outputDirectory>
     </file>
+    <!-- Add-on descriptor so the Preferences → Plugins detail pane shows license/author even for a
+         manually-installed plugin (Oxygen reads <xt:license> from the extension descriptor). -->
+    <file>
+      <source>extension.xml</source>
+      <outputDirectory>/</outputDirectory>
+      <filtered>true</filtered>
+    </file>
   </files>
 </assembly>

@@ -90,6 +90,7 @@ public final class ManageServersDialog {
   private final JRadioButton destEditor = new JRadioButton("New editor window");
   private final JCheckBox indentPref = new JCheckBox("Indent");
   private final JCheckBox showHiddenPref = new JCheckBox("Show hidden files and directories");
+  private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
 
   private transient ConnectionProfile defaultProfile;
   private transient OKCancelDialog host;
@@ -200,17 +201,20 @@ public final class ManageServersDialog {
     return content;
   }
 
-  /** The eXist-db pane browsing preferences (currently: show hidden files/collections). */
+  /** Hidden-file preferences: showing them in the pane, and including them when uploading. */
   private JComponent buildBrowsingPrefs() {
     showHiddenPref.setSelected(store.showHidden());
+    uploadHiddenPref.setSelected(store.uploadHidden());
     JPanel prefs = new JPanel(new GridBagLayout());
-    prefs.setBorder(BorderFactory.createTitledBorder("Browsing"));
+    prefs.setBorder(BorderFactory.createTitledBorder("Hidden files"));
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.LINE_START;
     c.gridx = 0;
     c.gridy = 0;
     prefs.add(showHiddenPref, c);
+    c.gridy = 1;
+    prefs.add(uploadHiddenPref, c);
     return prefs;
   }
 
@@ -345,6 +349,7 @@ public final class ManageServersDialog {
     store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
     store.setResultsDestination(destEditor.isSelected() ? "editor" : "browse");
     store.setShowHidden(showHiddenPref.isSelected());
+    store.setUploadHidden(uploadHiddenPref.isSelected());
     // Apply the new defaults to an already-open results view immediately, not just next restart.
     store.notifyResultsPrefsChanged();
   }

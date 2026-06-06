@@ -257,14 +257,16 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
   }
 
   /**
-   * Binds Cmd/Ctrl+U to "Upload to eXist-db…" via a global dispatcher, scoped to when a tree (the
-   * Project pane) has focus, so it doesn't shadow the shortcut in editors. Uploads the selected
-   * Project-pane files (a no-op when nothing is selected).
+   * Binds Cmd/Ctrl+Shift+U to "Upload to eXist-db…" via a global dispatcher, scoped to when a tree
+   * (the Project pane) has focus, so it doesn't shadow the shortcut in editors. Cmd/Ctrl+Shift+U is
+   * unassigned in Oxygen's default Menu Shortcut Keys. Uploads the selected Project-pane files (a
+   * no-op when nothing is selected).
    */
   private static void installUploadShortcut(ProjectUploadCustomizer customizer) {
-    final int menuMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+    final int uploadMask =
+        Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | InputEvent.SHIFT_DOWN_MASK;
     KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
-      if (e.getKeyCode() != KeyEvent.VK_U || e.getModifiersEx() != menuMask) {
+      if (e.getKeyCode() != KeyEvent.VK_U || e.getModifiersEx() != uploadMask) {
         return false;
       }
       if (!(KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner()
