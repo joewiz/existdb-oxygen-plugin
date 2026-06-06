@@ -110,6 +110,9 @@ public final class PackageManagerDialog {
 
   private JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+    // Click a column header to sort by it (Title / Abbreviation / Type / Installed / Available).
+    // Selection lookups already map through convertRowIndexToModel, so sorting is safe.
+    table.setAutoCreateRowSorter(true);
     table.getSelectionModel().addListSelectionListener(e -> updateButtonStates());
 
     JComponent scroll = OxygenUIComponentsFactory.createScrollPane(table,
