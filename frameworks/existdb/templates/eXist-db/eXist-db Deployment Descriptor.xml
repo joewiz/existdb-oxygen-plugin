@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<meta xmlns="http://exist-db.org/xquery/repo">
+    <description>My eXist-db Application</description>
+    <author>Your Name</author>
+    <website>http://example.org/myapp</website>
+    <status>stable</status>
+    <license>GNU-LGPL</license>
+    <copyright>true</copyright>
+    <type>application</type>
+    <target>myapp</target>
+    <!-- Optional: deployment hooks and per-resource permissions, e.g.:
+    <prepare>pre-install.xq</prepare>
+    <finish>post-install.xq</finish>
+    <permissions user="admin" password="" group="dba" mode="rwxr-xr-x"/>
+    See https://exist-db.org/exist/apps/doc/repo for the full set of elements. -->
+</meta>
