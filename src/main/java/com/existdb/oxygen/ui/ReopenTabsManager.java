@@ -35,17 +35,23 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 /**
  * Reopens the {@code exist://} server editors that were open at the previous shutdown. Oxygen
  * restores {@code file:} tabs from its per-project session state but excludes custom-protocol URLs,
- * so resources opened from the eXist-db pane would otherwise be lost across restarts. This tracks
- * the open {@code exist://} editors via an editor-change listener, persists the list to the plugin
- * options on every open/close, and reopens them once at startup — best effort: a tab whose server
- * is unreachable or whose URL is malformed is simply skipped.
+ * so resources opened from the eXist-db pane would otherwise be lost across restarts.
+ *
+ * <p>Lifecycle: at startup the saved list is reopened once the workbench has settled (the reopen is
+ * debounced — each tab Oxygen restores pushes it later, so it fires only after Oxygen's own session
+ * restore quiesces, by which point the editor area is ready to accept {@code open()}). The saved
+ * list is then kept current as editors open/close, and the authoritative snapshot is taken in the
+ * extension's {@code applicationClosing()} (see {@link #persistBeforeClose()}).</p>
  */
 public final class ReopenTabsManager {
+
+  /** Debounce window: reopen fires this long after the last startup editor-restore event. */
+  private static final int REOPEN_DELAY_MS = 1200;
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -57,33 +63,51 @@ public final class ReopenTabsManager {
    * teardown close-storm is ignored.
    */
   private transient volatile boolean closing;
+  /** False until the one-time startup reopen has run; gates debouncing vs. live persistence. */
+  private transient boolean reopened;
+  /** Non-repeating, EDT-fired timer that runs the startup reopen once the restore settles. */
+  private transient Timer reopenTimer;
 
   public ReopenTabsManager(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     this.workspace = workspace;
     this.profileStore = profileStore;
   }
 
-  /** Reopens the persisted server tabs, then tracks open/close to keep the saved list current. */
+  /** Schedules the startup reopen and starts tracking open/close to keep the saved list current. */
   public void install() {
-    // Snapshot the saved list before any reopen: opening an editor fires editorOpened, which would
-    // otherwise rewrite the option from the (still-incomplete) live set and drop pending entries.
-    // Defer the reopen so the workbench has finished restoring its own (file:) tabs first.
+    // Snapshot the saved list now: as editors open (Oxygen's restore, then our own reopen) the
+    // editorOpened events would otherwise rewrite the option from the still-incomplete live set.
     final List<String> toReopen = profileStore.openTabs();
-    SwingUtilities.invokeLater(() -> reopen(toReopen));
+    if (toReopen.isEmpty()) {
+      reopened = true;
+    } else {
+      reopenTimer = new Timer(REOPEN_DELAY_MS, e -> reopen(toReopen));
+      reopenTimer.setRepeats(false);
+      reopenTimer.start();
+    }
     workspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorOpened(URL editorLocation) {
-        persistUnlessClosing();
+        if (reopened) {
+          persistUnlessClosing();
+        } else if (reopenTimer != null) {
+          // Oxygen is still restoring its own tabs — push the reopen until the burst settles.
+          reopenTimer.restart();
+        }
       }
 
       @Override
       public void editorClosed(URL editorLocation) {
-        persistUnlessClosing();
+        if (reopened) {
+          persistUnlessClosing();
+        }
       }
 
       @Override
       public void editorRelocated(URL fromLocation, URL toLocation) {
-        persistUnlessClosing();
+        if (reopened) {
+          persistUnlessClosing();
+        }
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
   }
@@ -106,28 +130,39 @@ public final class ReopenTabsManager {
   }
 
   private void reopen(List<String> urls) {
-    if (urls.isEmpty()) {
-      return;
-    }
+    // Mark reopened first: the editorOpened events from our own opens below should persist normally
+    // (not restart the debounce timer, which would loop).
+    reopened = true;
     // Populate the connection registry so exist:// URLs resolve to their server even if the
     // eXist-db pane hasn't been shown yet (it rebuilds the same registry when first opened).
     ExistContext.setProfiles(profileStore.loadAll(), profileStore.defaultProfileId());
     Set<String> alreadyOpen = existTabLocations();
+    int opened = 0;
+    int attempted = 0;
     for (String url : urls) {
       if (!alreadyOpen.contains(url)) {
-        reopenOne(url);
+        attempted++;
+        if (reopenOne(url)) {
+          opened++;
+        }
       }
     }
-    persistOpenTabs();
+    if (attempted > 0) {
+      workspace.showStatusMessage(opened == attempted
+          ? "Reopened " + opened + " eXist-db editor" + (opened == 1 ? "" : "s")
+          : "Reopened " + opened + " of " + attempted + " eXist-db editors");
+    }
+    // Note: no persist here. Successful opens fire editorOpened (which persists); a failed open
+    // leaves the saved list untouched so the tab can be retried on the next start.
   }
 
-  private void reopenOne(String url) {
+  private boolean reopenOne(String url) {
     try {
       // Build the URL with our handler explicitly: the exist: protocol isn't registered with the
       // JVM's global URL factory, so a plain new URL(url) would fail with "unknown protocol".
-      workspace.open(new URL(null, url, new ExistURLStreamHandler()));
+      return workspace.open(new URL(null, url, new ExistURLStreamHandler()));
     } catch (MalformedURLException e) {
-      // A malformed persisted location is skipped on restore.
+      return false; // a malformed persisted location is skipped on restore
     }
   }
 
