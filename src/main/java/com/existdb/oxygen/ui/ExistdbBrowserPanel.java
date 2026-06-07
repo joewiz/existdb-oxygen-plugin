@@ -1719,13 +1719,21 @@ public final class ExistdbBrowserPanel extends JPanel {
       Component component =
           super.getTreeCellEditorComponent(owningTree, value, isSelected, expanded, leaf, row);
       if (value instanceof DefaultMutableTreeNode node
-          && node.getUserObject() instanceof ExistNode existNode
-          && realEditor instanceof DefaultCellEditor cellEditor
-          && cellEditor.getComponent() instanceof JTextField field) {
-        field.setText(existNode.name);
-        // Defer until after the field's focus-gained "select all", so the base-name selection sticks.
-        SwingUtilities.invokeLater(
-            () -> selectBaseName(field, existNode.name, existNode.collection));
+          && node.getUserObject() instanceof ExistNode existNode) {
+        // Keep the node's real icon while editing (super falls back to the generic leaf icon).
+        if (renderer instanceof ExistTreeCellRenderer typeRenderer) {
+          editingIcon = typeRenderer.iconFor(existNode, expanded);
+          if (editingIcon != null) {
+            offset = renderer.getIconTextGap() + editingIcon.getIconWidth();
+          }
+        }
+        if (realEditor instanceof DefaultCellEditor cellEditor
+            && cellEditor.getComponent() instanceof JTextField field) {
+          field.setText(existNode.name);
+          // Defer until after the field's focus-gained "select all", so base-name selection sticks.
+          SwingUtilities.invokeLater(
+              () -> selectBaseName(field, existNode.name, existNode.collection));
+        }
       }
       return component;
     }
