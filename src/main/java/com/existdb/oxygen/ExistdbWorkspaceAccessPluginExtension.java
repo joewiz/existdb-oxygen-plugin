@@ -29,6 +29,7 @@ import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.ProjectUploadCustomizer;
+import com.existdb.oxygen.ui.ReopenTabsManager;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 import com.existdb.oxygen.ui.RunInResultsViewAction;
 import com.existdb.oxygen.ui.SignatureHelpAction;
@@ -92,6 +93,10 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
 
     // Upload-on-save: auto-upload a saved file when its .existdb.json opts in (sync.onSave).
     new UploadOnSaveWatcher(pluginWorkspace, profileStore).install();
+
+    // Reopen the exist:// server editors that were open at last shutdown (Oxygen restores file:
+    // tabs but not custom-protocol ones), and keep that list current as editors open/close.
+    new ReopenTabsManager(pluginWorkspace, profileStore).install();
 
     final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =

@@ -144,6 +144,23 @@ class ProfileStoreTest {
   }
 
   @Test
+  void openTabsRoundTripAndDefaultEmpty() {
+    ProfileStore store = store(new HashMap<>());
+    assertTrue(store.openTabs().isEmpty());
+
+    store.setOpenTabs(List.of(
+        "exist://srv-1/db/apps/myapp/index.xq",
+        "exist://srv-1/db/data/notes.xml"));
+    List<String> reloaded = store.openTabs();
+    assertEquals(2, reloaded.size());
+    assertEquals("exist://srv-1/db/apps/myapp/index.xq", reloaded.get(0));
+    assertEquals("exist://srv-1/db/data/notes.xml", reloaded.get(1));
+
+    store.setOpenTabs(List.of());
+    assertTrue(store.openTabs().isEmpty());
+  }
+
+  @Test
   void registriesDefaultToPublicRepoThenPersist() {
     ProfileStore store = store(new HashMap<>());
     assertEquals(List.of(ProfileStore.DEFAULT_REGISTRY), store.registries());

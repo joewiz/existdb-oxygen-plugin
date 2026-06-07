@@ -276,6 +276,25 @@ public final class ProfileStore {
     options.set("existdb.uploadHidden", Boolean.toString(uploadHidden));
   }
 
+  /**
+   * The {@code exist://} editor locations that were open at last shutdown, in tab order, so they can
+   * be reopened on the next start (Oxygen restores {@code file:} tabs but not custom-protocol ones).
+   * Stored newline-separated.
+   */
+  public List<String> openTabs() {
+    List<String> out = new ArrayList<>();
+    for (String url : options.get("existdb.openTabs", "").split("\n")) {
+      if (!url.isBlank()) {
+        out.add(url.trim());
+      }
+    }
+    return out;
+  }
+
+  public void setOpenTabs(List<String> urls) {
+    options.set("existdb.openTabs", String.join("\n", urls));
+  }
+
   /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
   public void addResultsPrefsListener(Runnable listener) {
     resultsPrefsListeners.add(listener);
