@@ -598,7 +598,7 @@ public final class ExistdbBrowserPanel extends JPanel {
       @Override
       protected void done() {
         try {
-          PackageManagerDialog.open(ownerFrame(), client, serverNode.name, get());
+          PackageManagerDialog.open(ownerFrame(), client, profileStore, serverNode.name, get());
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Could not list packages: " + cause.getMessage());

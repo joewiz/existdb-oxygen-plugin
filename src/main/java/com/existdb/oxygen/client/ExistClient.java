@@ -503,9 +503,22 @@ public final class ExistClient {
 
   /** POST /api/packages/update-check — the registry and any installed packages with newer versions. */
   public UpdateCheck checkPackageUpdates() throws IOException, InterruptedException {
+    return checkPackageUpdates(null);
+  }
+
+  /**
+   * POST /api/packages/update-check against a specific {@code registry} base URL (or the server's
+   * default public-repo when {@code null}/blank). Returns the registry checked and any installed
+   * packages with newer versions available there.
+   */
+  public UpdateCheck checkPackageUpdates(String registry) throws IOException, InterruptedException {
+    JSONObject body = new JSONObject();
+    if (registry != null && !registry.isEmpty()) {
+      body.put("registry", registry);
+    }
     JSONObject o = new JSONObject(send(request("/packages/update-check")
         .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8))
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
         .build()).body());
     List<PackageUpdate> updates = new ArrayList<>();
     JSONArray arr = o.optJSONArray("updates");
