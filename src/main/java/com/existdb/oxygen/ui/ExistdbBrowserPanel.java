@@ -397,6 +397,28 @@ public final class ExistdbBrowserPanel extends JPanel {
         openSelected();
       }
     });
+
+    // F5 refreshes the selected collection (or a resource's parent), like the contextual Refresh.
+    tree.getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), "existRefresh");
+    tree.getActionMap().put("existRefresh", new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        refreshSelected();
+      }
+    });
+  }
+
+  /** Reloads the selected collection node (or a selected resource's parent collection). */
+  private void refreshSelected() {
+    if (!(tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node)
+        || !(node.getUserObject() instanceof ExistNode existNode)) {
+      return;
+    }
+    DefaultMutableTreeNode target =
+        existNode.collection ? node : (DefaultMutableTreeNode) node.getParent();
+    if (target != null && target.getUserObject() instanceof ExistNode) {
+      reloadNode(target);
+    }
   }
 
   // ---------------------------------------------------------------------------
