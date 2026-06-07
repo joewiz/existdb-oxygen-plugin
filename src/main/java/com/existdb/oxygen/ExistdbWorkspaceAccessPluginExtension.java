@@ -32,6 +32,7 @@ import com.existdb.oxygen.ui.ProjectUploadCustomizer;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 import com.existdb.oxygen.ui.RunInResultsViewAction;
 import com.existdb.oxygen.ui.SignatureHelpAction;
+import com.existdb.oxygen.ui.UploadOnSaveWatcher;
 
 import ro.sync.ecss.extensions.api.AuthorAccess;
 import ro.sync.exml.plugin.workspace.WorkspaceAccessPluginExtension;
@@ -88,6 +89,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
         new ProjectUploadCustomizer(pluginWorkspace, profileStore);
     pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(uploadCustomizer);
     installUploadShortcut(uploadCustomizer);
+
+    // Upload-on-save: auto-upload a saved file when its .existdb.json opts in (sync.onSave).
+    new UploadOnSaveWatcher(pluginWorkspace, profileStore).install();
 
     final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =
