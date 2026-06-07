@@ -35,8 +35,10 @@ import java.awt.Dimension;
 import java.awt.Frame;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -182,6 +184,7 @@ public final class PackageManagerDialog {
   }
 
   private JComponent buildButtons() {
+    JButton installNewButton = button("Install New…", this::installNew);
     JButton checkButton = button("Check for Updates", this::checkUpdates);
     updateButton = button("Update", this::updateSelected);
     removeButton = button("Remove…", this::removeSelected);
@@ -192,8 +195,8 @@ public final class PackageManagerDialog {
 
     JPanel buttons = new JPanel();
     buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
-    for (JButton b : new JButton[] {checkButton, updateButton, removeButton, installButton,
-        refreshButton}) {
+    for (JButton b : new JButton[] {installNewButton, checkButton, updateButton, removeButton,
+        installButton, refreshButton}) {
       b.setAlignmentX(JComponent.LEFT_ALIGNMENT);
       b.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getPreferredSize().height));
       buttons.add(b);
@@ -230,6 +233,46 @@ public final class PackageManagerDialog {
   // ---------------------------------------------------------------------------
   // Operations (each runs off the EDT, then refreshes on the EDT)
   // ---------------------------------------------------------------------------
+
+  /** Browses the selected registry's catalog and opens the install-new dialog for what's missing. */
+  private void installNew() {
+    final String registry = selectedRegistryUrl();
+    profileStore.setSelectedRegistry(registry);
+    setBusy(true, "Fetching available packages from " + registry + "…");
+    new SwingWorker<List<ExistClient.AvailablePackage>, Void>() {
+      @Override
+      protected List<ExistClient.AvailablePackage> doInBackground() throws Exception {
+        return client.listAvailablePackages(registry);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          Set<String> installed = installedAbbrevs();
+          List<ExistClient.AvailablePackage> notInstalled = new ArrayList<>();
+          for (ExistClient.AvailablePackage pkg : get()) {
+            if (!installed.contains(pkg.abbrev())) {
+              notInstalled.add(pkg);
+            }
+          }
+          setBusy(false, notInstalled.size() + " package(s) available to install");
+          AvailablePackagesDialog.open(owner, client, registry + "/find", notInstalled,
+              () -> reloadAfter(null));
+        } catch (Exception ex) {
+          error("Could not fetch available packages", ex);
+          setBusy(false, null);
+        }
+      }
+    }.execute();
+  }
+
+  private Set<String> installedAbbrevs() {
+    Set<String> abbrevs = new HashSet<>();
+    for (int i = 0; i < model.getRowCount(); i++) {
+      abbrevs.add(model.packageAt(i).abbrev());
+    }
+    return abbrevs;
+  }
 
   private void checkUpdates() {
     final String registry = selectedRegistryUrl();
