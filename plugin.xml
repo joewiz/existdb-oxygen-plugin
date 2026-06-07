@@ -32,10 +32,9 @@
     class="com.existdb.oxygen.ExistdbXQueryTransformerPluginExtension"/>
 
   <!-- Document-type framework: validates + completes eXist config formats (collection.xconf) against
-       eXist's bundled schemas, and contributes a File → New template. -->
-  <extension type="AdditionalFrameworks">
-    <folder path="frameworks"/>
-  </extension>
+       eXist's bundled schemas, and contributes a File → New template. The path is the directory
+       (relative to the plugin) that Oxygen scans for framework subfolders. -->
+  <extension type="AdditionalFrameworks" path="frameworks"/>
 
   <!-- The eXist-db side view (collection tree + connection controls). -->
   <view id="ExistdbBrowserViewID" initialSide="WEST" initialRow="0"/>
