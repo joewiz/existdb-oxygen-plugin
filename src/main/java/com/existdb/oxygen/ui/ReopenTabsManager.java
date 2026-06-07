@@ -137,32 +137,22 @@ public final class ReopenTabsManager {
     // eXist-db pane hasn't been shown yet (it rebuilds the same registry when first opened).
     ExistContext.setProfiles(profileStore.loadAll(), profileStore.defaultProfileId());
     Set<String> alreadyOpen = existTabLocations();
-    int opened = 0;
-    int attempted = 0;
     for (String url : urls) {
       if (!alreadyOpen.contains(url)) {
-        attempted++;
-        if (reopenOne(url)) {
-          opened++;
-        }
+        reopenOne(url);
       }
-    }
-    if (attempted > 0) {
-      workspace.showStatusMessage(opened == attempted
-          ? "Reopened " + opened + " eXist-db editor" + (opened == 1 ? "" : "s")
-          : "Reopened " + opened + " of " + attempted + " eXist-db editors");
     }
     // Note: no persist here. Successful opens fire editorOpened (which persists); a failed open
     // leaves the saved list untouched so the tab can be retried on the next start.
   }
 
-  private boolean reopenOne(String url) {
+  private void reopenOne(String url) {
     try {
       // Build the URL with our handler explicitly: the exist: protocol isn't registered with the
       // JVM's global URL factory, so a plain new URL(url) would fail with "unknown protocol".
-      return workspace.open(new URL(null, url, new ExistURLStreamHandler()));
+      workspace.open(new URL(null, url, new ExistURLStreamHandler()));
     } catch (MalformedURLException e) {
-      return false; // a malformed persisted location is skipped on restore
+      // A malformed persisted location is skipped on restore.
     }
   }
 
