@@ -29,6 +29,7 @@ import com.existdb.oxygen.ui.ExistdbBrowserPanel;
 import com.existdb.oxygen.ui.GoToDefinitionAction;
 import com.existdb.oxygen.ui.HoverAction;
 import com.existdb.oxygen.ui.ProjectUploadCustomizer;
+import com.existdb.oxygen.ui.ReopenTabsManager;
 import com.existdb.oxygen.ui.RunCurrentEditorAction;
 import com.existdb.oxygen.ui.RunInResultsViewAction;
 import com.existdb.oxygen.ui.SignatureHelpAction;
@@ -76,6 +77,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
   /** Client-property flag so a text component's selection watcher is attached at most once. */
   private static final String SELECTION_WATCH_KEY = "existdb.selectionWatch";
 
+  /** Kept so {@link #applicationClosing()} can save the open exist:// tabs before Oxygen exits. */
+  private transient ReopenTabsManager reopenTabsManager;
+
   @Override
   public void applicationStarted(final StandalonePluginWorkspace pluginWorkspace) {
     final ProfileStore profileStore = new ProfileStore(pluginWorkspace);
@@ -92,6 +96,11 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
 
     // Upload-on-save: auto-upload a saved file when its .existdb.json opts in (sync.onSave).
     new UploadOnSaveWatcher(pluginWorkspace, profileStore).install();
+
+    // Reopen the exist:// server editors that were open at last shutdown (Oxygen restores file:
+    // tabs but not custom-protocol ones), and keep that list current as editors open/close.
+    reopenTabsManager = new ReopenTabsManager(pluginWorkspace, profileStore);
+    reopenTabsManager.install();
 
     final ExistResultsView resultsView = new ExistResultsView(pluginWorkspace, profileStore);
     final URL viewIcon =
@@ -331,6 +340,11 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
 
   @Override
   public boolean applicationClosing() {
+    // Snapshot the open exist:// editors now, while they're still open — Oxygen tears them down on
+    // close, which would otherwise leave nothing to reopen next session.
+    if (reopenTabsManager != null) {
+      reopenTabsManager.persistBeforeClose();
+    }
     return true;
   }
 }
