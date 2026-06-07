@@ -41,7 +41,10 @@
                     <xs:documentation>The name of the package. A package is named using an IRI, as defined by <a href="file:///Users/aretter/Desktop/expath-pkg-spec.html#rfc3987">[RFC 3987]</a>, excepted any IRI using the file: scheme (most frequent choices are http: and urn: scheme URIs). Note that the definition of IRI excludes relative references.</xs:documentation>
                 </xs:annotation>
             </xs:attribute>
-            <xs:attribute name="abrev" type="xs:NCName" use="required"/>
+            <!-- Local patch (existdb-oxygen-plugin, 2026-06-07): upstream eXist schema/expath-pkg.xsd
+                 misspells this attribute as "abrev"; the EXPath spec (and real files) use "abbrev".
+                 Pending an upstream fix; re-sync when eXist corrects it. -->
+            <xs:attribute name="abbrev" type="xs:NCName" use="required"/>
             <xs:attribute name="version" type="pkg:semVer2Type" use="required"/>
             <xs:attribute name="spec" type="xs:string" use="required" fixed="1.0">
                 <xs:annotation>
@@ -202,9 +205,13 @@
             </xs:annotation>
         </xs:assert>
         
-        <xs:assert test="(@versions and not(@semver) and not(@semver-min) and not(@semver-max)) or (not(@versions) and @semver and not(@semver-min) and not(@semver-max)) or (not(@versions) and not(@semver) and (@semver-min or @semver-max))">
+        <!-- Local patch (existdb-oxygen-plugin, 2026-06-07): added the final alternative so a
+             dependency with NO version constraint (any version) is allowed, per the EXPath spec.
+             Upstream eXist schema requires one of versions/semver/semver-min|max; pending upstream
+             fix, re-sync when corrected. -->
+        <xs:assert test="(@versions and not(@semver) and not(@semver-min) and not(@semver-max)) or (not(@versions) and @semver and not(@semver-min) and not(@semver-max)) or (not(@versions) and not(@semver) and (@semver-min or @semver-max)) or (not(@versions) and not(@semver) and not(@semver-min) and not(@semver-max))">
             <xs:annotation>
-                <xs:documentation>The @versions, @semver, and (@semver-min and/or @semver-max) attributes are mutually exclusive.</xs:documentation>
+                <xs:documentation>The @versions, @semver, and (@semver-min and/or @semver-max) attributes are mutually exclusive; all may be omitted (dependency on any version).</xs:documentation>
             </xs:annotation>
         </xs:assert>
     </xs:complexType>
