@@ -126,7 +126,7 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
         int count = 0;
         for (File file : files) {
           String parentPath = parentPathFor(file, config, target);
-          ensureCollection(client, parentPath);
+          Uploads.ensureCollection(client, parentPath);
           count += Uploads.uploadRecursive(client, parentPath, file, includeHidden);
         }
         return count;
@@ -152,7 +152,7 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
    * file's parent path relative to the descriptor's directory (so {@code repo/modules/foo.xqm} lands
    * in {@code <target>/modules}); otherwise the target collection directly.
    */
-  private static String parentPathFor(File file, ExistdbProjectConfig config, String target) {
+  static String parentPathFor(File file, ExistdbProjectConfig config, String target) {
     if (config == null) {
       return target;
     }
@@ -165,23 +165,6 @@ public final class ProjectUploadCustomizer implements ProjectPopupMenuCustomizer
       return target;
     }
     return target + "/" + relativeParent.toString().replace(File.separatorChar, '/');
-  }
-
-  /**
-   * Ensures {@code path} and all its ancestors exist, creating each level top-down. The server's
-   * createCollection does not create missing ancestors, so a deep target is built one level at a
-   * time; creating an existing level is a no-op.
-   */
-  private static void ensureCollection(ExistClient client, String path)
-      throws java.io.IOException, InterruptedException {
-    StringBuilder built = new StringBuilder();
-    for (String segment : path.split("/")) {
-      if (segment.isEmpty()) {
-        continue;
-      }
-      built.append('/').append(segment);
-      client.createCollection(built.toString());
-    }
   }
 
   /** The project's root directory (the {@code .xpr}'s folder), used as the descriptor-walk boundary. */

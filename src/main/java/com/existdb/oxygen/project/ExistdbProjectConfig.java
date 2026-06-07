@@ -52,14 +52,16 @@ public final class ExistdbProjectConfig {
   private final String user;
   private final String targetCollection;
   private final List<String> ignore;
+  private final boolean uploadOnSave;
 
   private ExistdbProjectConfig(File descriptorDir, String serverUrl, String user,
-      String targetCollection, List<String> ignore) {
+      String targetCollection, List<String> ignore, boolean uploadOnSave) {
     this.descriptorDir = descriptorDir;
     this.serverUrl = serverUrl;
     this.user = user;
     this.targetCollection = targetCollection;
     this.ignore = ignore;
+    this.uploadOnSave = uploadOnSave;
   }
 
   /** The directory containing the {@code .existdb.json} (the package/repo root for path mapping). */
@@ -85,6 +87,14 @@ public final class ExistdbProjectConfig {
   /** The {@code sync.ignore} globs (never {@code null}; empty when unset). */
   public List<String> ignore() {
     return ignore;
+  }
+
+  /**
+   * Whether {@code sync.onSave} is enabled — opt-in, per-project auto-upload of a saved file to its
+   * mapped collection. Off unless the descriptor sets it explicitly.
+   */
+  public boolean uploadOnSave() {
+    return uploadOnSave;
   }
 
   /**
@@ -134,7 +144,9 @@ public final class ExistdbProjectConfig {
         ignore.add(glob);
       }
     }
-    return new ExistdbProjectConfig(descriptor.getParentFile(), serverUrl, user, target, ignore);
+    boolean onSave = sync != null && sync.optBoolean("onSave", false);
+    return new ExistdbProjectConfig(
+        descriptor.getParentFile(), serverUrl, user, target, ignore, onSave);
   }
 
   /**

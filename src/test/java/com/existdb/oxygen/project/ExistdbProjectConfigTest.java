@@ -22,6 +22,7 @@
 package com.existdb.oxygen.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,6 +59,17 @@ class ExistdbProjectConfigTest {
     assertEquals(2, config.ignore().size());
     assertTrue(config.ignore().contains("target/**"));
     assertEquals(dir.toFile(), config.descriptorDir());
+    assertFalse(config.uploadOnSave()); // off unless sync.onSave is explicitly set
+  }
+
+  @Test
+  void readsUploadOnSaveFlag(@TempDir Path dir) throws Exception {
+    String json = """
+        { "servers": { "s": { "server": "http://h:8080/exist", "root": "/db/x" } },
+          "sync": { "server": "s", "onSave": true } }
+        """;
+    ExistdbProjectConfig config = ExistdbProjectConfig.parse(write(dir, ".existdb.json", json));
+    assertTrue(config.uploadOnSave());
   }
 
   @Test

@@ -112,4 +112,20 @@ public final class Uploads {
     return body != null
         && (body.contains("XML parser") || body.contains("Content is not allowed in prolog"));
   }
+
+  /**
+   * Ensures {@code path} and all its ancestors exist, creating each level top-down (the server's
+   * createCollection does not create missing ancestors; creating an existing level is a no-op).
+   */
+  public static void ensureCollection(ExistClient client, String path)
+      throws IOException, InterruptedException {
+    StringBuilder built = new StringBuilder();
+    for (String segment : path.split("/")) {
+      if (segment.isEmpty()) {
+        continue;
+      }
+      built.append('/').append(segment);
+      client.createCollection(built.toString());
+    }
+  }
 }
