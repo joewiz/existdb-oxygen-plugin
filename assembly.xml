@@ -16,6 +16,14 @@
         <include>**/*</include>
       </includes>
     </fileSet>
+    <!-- The eXist-db document-type framework (schemas, catalog, templates, .framework). -->
+    <fileSet>
+      <directory>frameworks</directory>
+      <outputDirectory>frameworks</outputDirectory>
+      <includes>
+        <include>**/*</include>
+      </includes>
+    </fileSet>
   </fileSets>
   <files>
     <file>

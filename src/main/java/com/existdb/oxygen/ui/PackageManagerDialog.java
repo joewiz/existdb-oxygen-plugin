@@ -25,6 +25,7 @@ import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistClient.PackageInfo;
 import com.existdb.oxygen.client.ExistClient.RemoveResult;
 import com.existdb.oxygen.client.ExistClient.UpdateCheck;
+import com.existdb.oxygen.model.ProfileStore;
 
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
@@ -34,19 +35,24 @@ import java.awt.Dimension;
 import java.awt.Frame;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTable;
+import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingWorker;
@@ -69,22 +75,25 @@ public final class PackageManagerDialog {
           + "implemented on the server). Update from the registry is available now.";
 
   private final transient ExistClient client;
+  private final transient ProfileStore profileStore;
   private final transient PackageTableModel model = new PackageTableModel();
   private final JTable table = OxygenUIComponentsFactory.createTable(model);
   private final transient Frame owner;
   private final String serverName;
 
   private transient OKCancelDialog host;
+  private JComboBox<String> registryCombo;
   private JButton updateButton;
   private JButton removeButton;
   private JLabel statusLabel;
-  /** The registry {@code /find} URL discovered by the last update-check (needed to apply updates). */
+  /** The registry {@code /find} URL for the selected registry (used to apply updates). */
   private transient String registryFindUrl;
 
-  private PackageManagerDialog(Frame owner, ExistClient client, String serverName,
-      List<PackageInfo> initial) {
+  private PackageManagerDialog(Frame owner, ExistClient client, ProfileStore profileStore,
+      String serverName, List<PackageInfo> initial) {
     this.owner = owner;
     this.client = client;
+    this.profileStore = profileStore;
     this.serverName = serverName;
     model.setPackages(initial);
   }
@@ -92,11 +101,12 @@ public final class PackageManagerDialog {
   /**
    * Opens the modal Package Manager for {@code serverName}, pre-populated with {@code initial} (the
    * already-fetched installed packages). Subsequent list/update/remove operations run against
-   * {@code client} on background threads.
+   * {@code client} on background threads; update-check/install use the registry selected from
+   * {@code profileStore}'s configurable registry list.
    */
-  public static void open(Frame owner, ExistClient client, String serverName,
-      List<PackageInfo> initial) {
-    new PackageManagerDialog(owner, client, serverName, initial).show();
+  public static void open(Frame owner, ExistClient client, ProfileStore profileStore,
+      String serverName, List<PackageInfo> initial) {
+    new PackageManagerDialog(owner, client, profileStore, serverName, initial).show();
   }
 
   private void show() {
@@ -122,6 +132,7 @@ public final class PackageManagerDialog {
 
     JPanel content = new JPanel(new BorderLayout(8, 8));
     content.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+    content.add(buildRegistryBar(), BorderLayout.NORTH);
     content.add(scroll, BorderLayout.CENTER);
     content.add(buildButtons(), BorderLayout.EAST);
     content.add(buildStatusBar(), BorderLayout.SOUTH);
@@ -129,7 +140,51 @@ public final class PackageManagerDialog {
     return content;
   }
 
+  /** The registry chooser (which registry update-check/install target) plus a manage-list button. */
+  private JComponent buildRegistryBar() {
+    registryCombo = OxygenUIComponentsFactory.createComboBox(
+        new DefaultComboBoxModel<>(profileStore.registries().toArray(new String[0])));
+    registryCombo.setSelectedItem(profileStore.selectedRegistry());
+    JButton manage = button("Registries…", this::manageRegistries);
+    JPanel bar = new JPanel(new BorderLayout(6, 0));
+    bar.add(new JLabel("Registry:"), BorderLayout.WEST);
+    bar.add(registryCombo, BorderLayout.CENTER);
+    bar.add(manage, BorderLayout.EAST);
+    return bar;
+  }
+
+  private String selectedRegistryUrl() {
+    Object selected = registryCombo.getSelectedItem();
+    return selected != null ? selected.toString() : ProfileStore.DEFAULT_REGISTRY;
+  }
+
+  /** Edits the registry list (one URL per line); reseeds the combo, keeping the current selection. */
+  private void manageRegistries() {
+    JTextArea editor = new JTextArea(String.join("\n", profileStore.registries()), 8, 40);
+    JComponent scroll = OxygenUIComponentsFactory.createScrollPane(editor,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+    int result = JOptionPane.showConfirmDialog(host, scroll,
+        "Package registries (one base URL per line)", JOptionPane.OK_CANCEL_OPTION,
+        JOptionPane.PLAIN_MESSAGE);
+    if (result != JOptionPane.OK_OPTION) {
+      return;
+    }
+    List<String> registries = new ArrayList<>();
+    for (String line : editor.getText().split("\n")) {
+      if (!line.isBlank()) {
+        registries.add(line.trim());
+      }
+    }
+    String current = selectedRegistryUrl();
+    profileStore.setRegistries(registries);
+    registryCombo.setModel(new DefaultComboBoxModel<>(profileStore.registries().toArray(new String[0])));
+    registryCombo.setSelectedItem(profileStore.registries().contains(current)
+        ? current : profileStore.selectedRegistry());
+  }
+
   private JComponent buildButtons() {
+    JButton installNewButton = button("Install New…", this::installNew);
     JButton checkButton = button("Check for Updates", this::checkUpdates);
     updateButton = button("Update", this::updateSelected);
     removeButton = button("Remove…", this::removeSelected);
@@ -140,8 +195,8 @@ public final class PackageManagerDialog {
 
     JPanel buttons = new JPanel();
     buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
-    for (JButton b : new JButton[] {checkButton, updateButton, removeButton, installButton,
-        refreshButton}) {
+    for (JButton b : new JButton[] {installNewButton, checkButton, updateButton, removeButton,
+        installButton, refreshButton}) {
       b.setAlignmentX(JComponent.LEFT_ALIGNMENT);
       b.setMaximumSize(new Dimension(Integer.MAX_VALUE, b.getPreferredSize().height));
       buttons.add(b);
@@ -179,19 +234,61 @@ public final class PackageManagerDialog {
   // Operations (each runs off the EDT, then refreshes on the EDT)
   // ---------------------------------------------------------------------------
 
+  /** Browses the selected registry's catalog and opens the install-new dialog for what's missing. */
+  private void installNew() {
+    final String registry = selectedRegistryUrl();
+    profileStore.setSelectedRegistry(registry);
+    setBusy(true, "Fetching available packages from " + registry + "…");
+    new SwingWorker<List<ExistClient.AvailablePackage>, Void>() {
+      @Override
+      protected List<ExistClient.AvailablePackage> doInBackground() throws Exception {
+        return client.listAvailablePackages(registry);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          Set<String> installed = installedAbbrevs();
+          List<ExistClient.AvailablePackage> notInstalled = new ArrayList<>();
+          for (ExistClient.AvailablePackage pkg : get()) {
+            if (!installed.contains(pkg.abbrev())) {
+              notInstalled.add(pkg);
+            }
+          }
+          setBusy(false, notInstalled.size() + " package(s) available to install");
+          AvailablePackagesDialog.open(owner, client, registry + "/find", notInstalled,
+              () -> reloadAfter(null));
+        } catch (Exception ex) {
+          error("Could not fetch available packages", ex);
+          setBusy(false, null);
+        }
+      }
+    }.execute();
+  }
+
+  private Set<String> installedAbbrevs() {
+    Set<String> abbrevs = new HashSet<>();
+    for (int i = 0; i < model.getRowCount(); i++) {
+      abbrevs.add(model.packageAt(i).abbrev());
+    }
+    return abbrevs;
+  }
+
   private void checkUpdates() {
-    setBusy(true, "Checking the registry for updates…");
+    final String registry = selectedRegistryUrl();
+    profileStore.setSelectedRegistry(registry);
+    registryFindUrl = registry + "/find";
+    setBusy(true, "Checking " + registry + " for updates…");
     new SwingWorker<UpdateCheck, Void>() {
       @Override
       protected UpdateCheck doInBackground() throws Exception {
-        return client.checkPackageUpdates();
+        return client.checkPackageUpdates(registry);
       }
 
       @Override
       protected void done() {
         try {
           UpdateCheck check = get();
-          registryFindUrl = check.registry() + "/find";
           model.setAvailableUpdates(check.updates());
           int n = check.updates().size();
           setStatus(n == 0 ? "No updates available" : n + " update(s) available");

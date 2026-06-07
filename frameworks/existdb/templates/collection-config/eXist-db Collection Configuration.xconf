@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<collection xmlns="http://exist-db.org/collection-config/1.0">
+    <index>
+        <!-- Lucene full-text index, e.g.:
+        <lucene>
+            <text qname="tei:p"/>
+        </lucene>
+        -->
+        <!-- Range index, e.g.:
+        <range>
+            <create qname="@xml:id" type="xs:string"/>
+        </range>
+        -->
+    </index>
+</collection>

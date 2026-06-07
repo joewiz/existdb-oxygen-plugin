@@ -304,6 +304,35 @@ class ExistClientTest {
   }
 
   @Test
+  void parseAvailablePackagesReadsCatalogEntries() throws Exception {
+    String appsXml = """
+        <apps version="2.2.0">
+          <app path="dashboard-2.0.9.xar">
+            <name>http://exist-db.org/apps/dashboard</name>
+            <title>Dashboard</title>
+            <abbrev>dashboard</abbrev>
+            <version>2.0.9</version>
+            <author>eXist Project</author>
+          </app>
+          <app path="functx-1.0.1.xar">
+            <name>http://www.functx.com</name>
+            <title>FunctX</title>
+            <abbrev>functx</abbrev>
+            <version>1.0.1</version>
+          </app>
+        </apps>
+        """;
+    List<ExistClient.AvailablePackage> available = ExistClient.parseAvailablePackages(appsXml);
+    assertEquals(2, available.size());
+    assertEquals("dashboard", available.get(0).abbrev());
+    assertEquals("Dashboard", available.get(0).title());
+    assertEquals("2.0.9", available.get(0).version());
+    assertEquals("eXist Project", available.get(0).author());
+    assertEquals("functx", available.get(1).abbrev());
+    assertEquals("", available.get(1).author()); // missing author → empty
+  }
+
+  @Test
   void checkPackageUpdatesParsesRegistryAndUpdates() throws Exception {
     ExistClient.UpdateCheck check = client.checkPackageUpdates();
     assertEquals("https://exist-db.org/exist/apps/public-repo", check.registry());

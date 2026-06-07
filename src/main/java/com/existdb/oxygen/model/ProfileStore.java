@@ -47,6 +47,9 @@ public final class ProfileStore {
   private static final String KEY_DEFAULT = "existdb.profiles.defaultId";
   private static final String PROFILE_PREFIX = "existdb.profile.";
 
+  /** The default package registry (eXist-db's public-repo), always present if the list is empty. */
+  public static final String DEFAULT_REGISTRY = "https://exist-db.org/exist/apps/public-repo";
+
   // Legacy single-profile keys (pre-multi-server), read once for migration.
   private static final String LEGACY_NAME = "existdb.profile.name";
   private static final String LEGACY_URL = "existdb.profile.baseUrl";
@@ -217,6 +220,35 @@ public final class ProfileStore {
 
   public void setResultsDestination(String destination) {
     options.set("existdb.results.destination", destination);
+  }
+
+  /** The configured package registries (base URLs); the default public-repo when none are set. */
+  public List<String> registries() {
+    List<String> out = new ArrayList<>();
+    for (String url : options.get("existdb.registries", "").split("\n")) {
+      if (!url.isBlank()) {
+        out.add(url.trim());
+      }
+    }
+    if (out.isEmpty()) {
+      out.add(DEFAULT_REGISTRY);
+    }
+    return out;
+  }
+
+  public void setRegistries(List<String> registries) {
+    options.set("existdb.registries", String.join("\n", registries));
+  }
+
+  /** The registry currently selected for update-check/install; the first configured one by default. */
+  public String selectedRegistry() {
+    String selected = options.get("existdb.registry.selected", "");
+    List<String> all = registries();
+    return all.contains(selected) ? selected : all.get(0);
+  }
+
+  public void setSelectedRegistry(String registry) {
+    options.set("existdb.registry.selected", registry == null ? "" : registry);
   }
 
   /**

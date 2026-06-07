@@ -142,4 +142,21 @@ class ProfileStoreTest {
     assertEquals(b.getId(), store.defaultProfileId());
     assertEquals("B", store.load().getName());
   }
+
+  @Test
+  void registriesDefaultToPublicRepoThenPersist() {
+    ProfileStore store = store(new HashMap<>());
+    assertEquals(List.of(ProfileStore.DEFAULT_REGISTRY), store.registries());
+    assertEquals(ProfileStore.DEFAULT_REGISTRY, store.selectedRegistry());
+
+    store.setRegistries(
+        List.of(ProfileStore.DEFAULT_REGISTRY, "https://example.org/exist/apps/repo"));
+    assertEquals(2, store.registries().size());
+    store.setSelectedRegistry("https://example.org/exist/apps/repo");
+    assertEquals("https://example.org/exist/apps/repo", store.selectedRegistry());
+
+    // A selection no longer in the list falls back to the first configured registry.
+    store.setRegistries(List.of(ProfileStore.DEFAULT_REGISTRY));
+    assertEquals(ProfileStore.DEFAULT_REGISTRY, store.selectedRegistry());
+  }
 }

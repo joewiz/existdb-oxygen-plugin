@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Resolves eXist-db config-format namespaces to the bundled schemas (offline). -->
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+  <uri name="http://exist-db.org/collection-config/1.0" uri="schema/collection.xconf.xsd"/>
+  <uri name="http://expath.org/ns/pkg" uri="schema/expath-pkg.xsd"/>
+  <uri name="http://exist-db.org/xquery/repo" uri="schema/expath-pkg-extensions/repo.xsd"/>
+  <uri name="http://exist-db.org/ns/expath-pkg" uri="schema/expath-pkg-extensions/exist.xsd"/>
+</catalog>

@@ -25,7 +25,12 @@ import com.existdb.oxygen.model.ConnectionProfile;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -45,6 +50,8 @@ import java.util.UUID;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 /**
  * Thin HTTP client for the existdb-openapi surface. Talks plain HTTP/JSON with HTTP Basic auth.
@@ -503,9 +510,22 @@ public final class ExistClient {
 
   /** POST /api/packages/update-check — the registry and any installed packages with newer versions. */
   public UpdateCheck checkPackageUpdates() throws IOException, InterruptedException {
+    return checkPackageUpdates(null);
+  }
+
+  /**
+   * POST /api/packages/update-check against a specific {@code registry} base URL (or the server's
+   * default public-repo when {@code null}/blank). Returns the registry checked and any installed
+   * packages with newer versions available there.
+   */
+  public UpdateCheck checkPackageUpdates(String registry) throws IOException, InterruptedException {
+    JSONObject body = new JSONObject();
+    if (registry != null && !registry.isEmpty()) {
+      body.put("registry", registry);
+    }
     JSONObject o = new JSONObject(send(request("/packages/update-check")
         .header("Content-Type", "application/json")
-        .POST(HttpRequest.BodyPublishers.ofString("{}", StandardCharsets.UTF_8))
+        .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
         .build()).body());
     List<PackageUpdate> updates = new ArrayList<>();
     JSONArray arr = o.optJSONArray("updates");
@@ -530,6 +550,62 @@ public final class ExistClient {
     System.arraycopy(data, 0, out, headBytes.length, data.length);
     System.arraycopy(tailBytes, 0, out, headBytes.length + data.length, tailBytes.length);
     return out;
+  }
+
+  /** A package offered by a registry's catalog (from {@code <registry>/public/apps.xml}). */
+  public record AvailablePackage(String abbrev, String name, String title, String version,
+      String author) {
+  }
+
+  /**
+   * Lists the packages a registry offers, by fetching its public catalog
+   * ({@code <registryBaseUrl>/public/apps.xml}) directly. This is a read-only call to the (public)
+   * registry, not to the eXist server; install still goes through {@link #installPackage}.
+   */
+  public List<AvailablePackage> listAvailablePackages(String registryBaseUrl)
+      throws IOException, InterruptedException {
+    String base = registryBaseUrl.endsWith("/")
+        ? registryBaseUrl.substring(0, registryBaseUrl.length() - 1) : registryBaseUrl;
+    HttpRequest req = HttpRequest.newBuilder()
+        .uri(URI.create(base + "/public/apps.xml"))
+        .timeout(Duration.ofSeconds(60))
+        .header("Accept", "application/xml")
+        .GET()
+        .build();
+    HttpResponse<String> resp = sendPrivileged(req);
+    int code = resp.statusCode();
+    if (code < 200 || code >= 300) {
+      throw new ExistHttpException(code, "GET " + req.uri(), resp.body());
+    }
+    return parseAvailablePackages(resp.body());
+  }
+
+  /** Parses a registry {@code apps.xml} catalog into {@link AvailablePackage} entries. */
+  static List<AvailablePackage> parseAvailablePackages(String xml) throws IOException {
+    List<AvailablePackage> out = new ArrayList<>();
+    try {
+      DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+      factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+      factory.setNamespaceAware(false);
+      Document doc = factory.newDocumentBuilder()
+          .parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+      NodeList apps = doc.getElementsByTagName("app");
+      for (int i = 0; i < apps.getLength(); i++) {
+        if (apps.item(i) instanceof Element app) {
+          out.add(new AvailablePackage(
+              childText(app, "abbrev"), childText(app, "name"), childText(app, "title"),
+              childText(app, "version"), childText(app, "author")));
+        }
+      }
+    } catch (ParserConfigurationException | SAXException e) {
+      throw new IOException("Could not parse the registry catalog", e);
+    }
+    return out;
+  }
+
+  private static String childText(Element parent, String tag) {
+    NodeList nodes = parent.getElementsByTagName(tag);
+    return nodes.getLength() > 0 ? nodes.item(0).getTextContent().trim() : "";
   }
 
   // ---------------------------------------------------------------------------
