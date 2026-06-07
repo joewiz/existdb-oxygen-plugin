@@ -49,6 +49,14 @@ public final class ReopenTabsManager {
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
+  /**
+   * Set once the application is closing. On shutdown Oxygen closes every editor, firing
+   * {@code editorClosed} for each; without this guard the last of those events would snapshot an
+   * empty editor list and overwrite the saved set with nothing. {@link #persistBeforeClose()} takes
+   * the authoritative snapshot first (while the editors are still open), then sets this so the
+   * teardown close-storm is ignored.
+   */
+  private transient volatile boolean closing;
 
   public ReopenTabsManager(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     this.workspace = workspace;
@@ -65,19 +73,36 @@ public final class ReopenTabsManager {
     workspace.addEditorChangeListener(new WSEditorChangeListener() {
       @Override
       public void editorOpened(URL editorLocation) {
-        persistOpenTabs();
+        persistUnlessClosing();
       }
 
       @Override
       public void editorClosed(URL editorLocation) {
-        persistOpenTabs();
+        persistUnlessClosing();
       }
 
       @Override
       public void editorRelocated(URL fromLocation, URL toLocation) {
-        persistOpenTabs();
+        persistUnlessClosing();
       }
     }, StandalonePluginWorkspace.MAIN_EDITING_AREA);
+  }
+
+  /**
+   * Saves the final set of open {@code exist://} editors at shutdown. Must be called from the
+   * workspace extension's {@code applicationClosing()} — i.e. while the editors are still open,
+   * before Oxygen tears them down — so the snapshot is the real session, not an empty list. After
+   * snapshotting it marks the manager closing so the teardown's {@code editorClosed} storm is a no-op.
+   */
+  public void persistBeforeClose() {
+    persistOpenTabs();
+    closing = true;
+  }
+
+  private void persistUnlessClosing() {
+    if (!closing) {
+      persistOpenTabs();
+    }
   }
 
   private void reopen(List<String> urls) {
