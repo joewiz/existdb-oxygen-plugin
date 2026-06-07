@@ -87,6 +87,7 @@ import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import javax.swing.Timer;
 import javax.swing.ToolTipManager;
 import javax.swing.TransferHandler;
 import javax.swing.event.TreeExpansionEvent;
@@ -1690,6 +1691,20 @@ public final class ExistdbBrowserPanel extends JPanel {
       super(owningTree, renderer);
     }
 
+    /**
+     * Shortens the click-to-edit delay from {@link DefaultTreeCellEditor}'s 1200 ms default to the
+     * OS double-click interval (the native click-to-rename cadence, e.g. 500 ms), which feels far
+     * more responsive.
+     */
+    @Override
+    protected void startEditingTimer() {
+      if (timer == null) {
+        timer = new Timer(editStartDelayMillis(), this);
+        timer.setRepeats(false);
+      }
+      timer.start();
+    }
+
     @Override
     public boolean isCellEditable(EventObject event) {
       return super.isCellEditable(event)
@@ -1714,6 +1729,12 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
       return component;
     }
+  }
+
+  /** The click-to-edit delay: the OS double-click interval, or 500 ms if unavailable. */
+  private static int editStartDelayMillis() {
+    Object interval = Toolkit.getDefaultToolkit().getDesktopProperty("awt.multiClickInterval");
+    return interval instanceof Integer millis && millis > 0 ? millis : 500;
   }
 
   /** Selects the base name (the part before a resource's extension), or the whole name otherwise. */
