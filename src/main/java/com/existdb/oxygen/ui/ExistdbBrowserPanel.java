@@ -41,6 +41,7 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
@@ -237,7 +238,8 @@ public final class ExistdbBrowserPanel extends JPanel {
       if (child.collection()) {
         addPlaceholder(childNode);
       }
-      treeModel.insertNodeInto(childNode, node, node.getChildCount());
+      treeModel.insertNodeInto(childNode, node,
+          insertionIndex(node, child.name(), child.collection()));
     }
   }
 
@@ -397,6 +399,32 @@ public final class ExistdbBrowserPanel extends JPanel {
         openSelected();
       }
     });
+
+    // F5 refreshes the selected collection (like the contextual Refresh). Oxygen binds F5 as a
+    // global accelerator (Project pane Refresh), which a component input-map binding can't beat — so
+    // a KeyEventDispatcher (which sees the key first) handles it while our tree is focused.
+    KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
+      if (e.getKeyCode() != KeyEvent.VK_F5 || e.getModifiersEx() != 0 || !tree.isFocusOwner()) {
+        return false;
+      }
+      if (e.getID() == KeyEvent.KEY_PRESSED) {
+        refreshSelected();
+      }
+      return true; // consume PRESSED + RELEASED so Oxygen's global F5 doesn't also fire
+    });
+  }
+
+  /** Reloads the selected collection node (or a selected resource's parent collection). */
+  private void refreshSelected() {
+    if (!(tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node)
+        || !(node.getUserObject() instanceof ExistNode existNode)) {
+      return;
+    }
+    DefaultMutableTreeNode target =
+        existNode.collection ? node : (DefaultMutableTreeNode) node.getParent();
+    if (target != null && target.getUserObject() instanceof ExistNode) {
+      reloadNode(target);
+    }
   }
 
   // ---------------------------------------------------------------------------
