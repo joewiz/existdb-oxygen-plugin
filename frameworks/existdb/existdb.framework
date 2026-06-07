@@ -9,7 +9,7 @@
 						<null/>
 					</field>
 					<field name="name">
-						<String>eXist-db Collection Configuration</String>
+						<String>eXist-db</String>
 					</field>
 					<field name="schemaDescriptor">
 						<docTypeSchema>
@@ -142,7 +142,7 @@
 					</field>
 					<field name="templatesLocations">
 						<String-array>
-							<String>${frameworkDir}/templates/collection-config</String>
+							<String>${frameworkDir}/templates/eXist-db</String>
 						</String-array>
 					</field>
 					<field name="xmlCatalogs">
@@ -481,7 +481,7 @@
 						<null/>
 					</field>
 					<field name="name">
-						<String>eXist-db Application Descriptor (repo.xml)</String>
+						<String>eXist-db Deployment Descriptor</String>
 					</field>
 					<field name="schemaDescriptor">
 						<docTypeSchema>
@@ -621,7 +621,7 @@
 						</String-array>
 					</field>
 					<field name="description">
-						<String>eXist-db application descriptor (repo.xml): eXist-specific package metadata (type, target, permissions, deployment).</String>
+						<String>eXist-db deployment descriptor (repo.xml): the eXist-db-specific deployment metadata controlling how a package is installed into the database (type, target, permissions).</String>
 					</field>
 					<field name="doctypeRules">
 						<documentTypeRule-array>
