@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://expath.org/ns/pkg"
+         name="http://example.org/myapp"
+         abbrev="myapp"
+         version="1.0.0"
+         spec="1.0">
+    <title>My eXist-db Application</title>
+    <!-- A link to more information about the package, e.g.:
+    <home>http://example.org/myapp</home>
+    -->
+    <!-- Dependencies on other packages, e.g.:
+    <dependency package="http://exist-db.org/apps/shared" semver-min="1.0.0"/>
+    -->
+    <!-- Library modules to register globally, e.g.:
+    <xquery>
+        <namespace>http://example.org/myapp/api</namespace>
+        <file>content/api.xqm</file>
+    </xquery>
+    -->
+</package>
