@@ -478,28 +478,35 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private JPopupMenu contextMenu(DefaultMutableTreeNode node, ExistNode existNode) {
     JPopupMenu menu = new JPopupMenu();
+    KeyStroke enter = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0);
+    KeyStroke f5 = KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0);
     if (existNode.collection) {
-      menu.add(menuItem("New File…", () -> newResource(node, existNode)));
-      menu.add(menuItem("New Collection…", () -> newCollection(node, existNode)));
+      menu.add(menuItem("New File…", "/images/New16.png", null, () -> newResource(node, existNode)));
+      menu.add(menuItem("New Collection…", "/images/NewFolder16.png", null,
+          () -> newCollection(node, existNode)));
       menu.addSeparator();
-      menu.add(menuItem("Refresh", () -> reloadNode(node)));
+      menu.add(menuItem("Refresh", "/images/Refresh16.png", f5, () -> reloadNode(node)));
       if (DB_ROOT.equals(existNode.path)) {
         menu.addSeparator();
         menu.add(menuItem("Manage Packages…", () -> managePackages(existNode)));
       }
     } else {
-      menu.add(menuItem("Open", this::openSelected));
-      menu.add(menuItem("Download…", () -> downloadResource(existNode)));
+      menu.add(menuItem("Open", "/images/Open16.png", enter, this::openSelected));
+      menu.add(menuItem("Download…", "/images/Save16.png", null, () -> downloadResource(existNode)));
     }
-    menu.add(menuItem("Copy Path", () -> copyToClipboard(existNode.path)));
+    menu.add(menuItem("Copy Location", () -> copyToClipboard(existNode.path)));
     if (!existNode.collection) {
-      menu.add(menuItem("Copy edit-in-oxygen Link", () -> copyToClipboard(editInOxygenLink(existNode))));
+      menu.add(menuItem("Copy edit-in-oxygen Link", "/images/Link16.png", null,
+          () -> copyToClipboard(editInOxygenLink(existNode))));
     }
     if (!DB_ROOT.equals(existNode.path)) {
       menu.addSeparator();
-      menu.add(menuItem("Rename…", () -> renameNode(node, existNode)));
-      menu.add(menuItem("Duplicate", () -> duplicateNode(node, existNode)));
-      menu.add(menuItem("Delete…", () -> deleteNode(node, existNode)));
+      menu.add(menuItem("Rename…", "/images/RenameResource16.png", null,
+          () -> renameNode(node, existNode)));
+      menu.add(menuItem("Duplicate", "/images/Copy16.png", null,
+          () -> duplicateNode(node, existNode)));
+      menu.add(menuItem("Delete…", "/images/Remove16.png", null,
+          () -> deleteNode(node, existNode)));
       menu.addSeparator();
       menu.add(menuItem("Permissions…", () -> editPermissions(existNode)));
     }
@@ -507,7 +514,22 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private static JMenuItem menuItem(String label, Runnable action) {
+    return menuItem(label, null, null, action);
+  }
+
+  /** A menu item with an optional stock Oxygen icon (classpath resource) and accelerator label. */
+  private static JMenuItem menuItem(String label, String iconResource, KeyStroke accelerator,
+      Runnable action) {
     JMenuItem item = new JMenuItem(label);
+    if (iconResource != null) {
+      ImageIcon icon = loadFirstIcon(iconResource);
+      if (icon != null) {
+        item.setIcon(icon);
+      }
+    }
+    if (accelerator != null) {
+      item.setAccelerator(accelerator);
+    }
     item.addActionListener(e -> action.run());
     return item;
   }
