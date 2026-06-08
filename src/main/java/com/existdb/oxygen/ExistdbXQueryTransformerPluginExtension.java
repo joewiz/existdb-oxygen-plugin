@@ -56,7 +56,8 @@ import javax.xml.transform.stream.StreamSource;
  */
 public final class ExistdbXQueryTransformerPluginExtension implements XQueryTransformerPluginExtension {
 
-  private static final String ENGINE_NAME = "eXist-db (HTTP)";
+  /** The engine name registered with Oxygen; also the value of the global XQuery-engine option. */
+  public static final String ENGINE_NAME = "eXist-db (HTTP)";
 
   @Override
   public String getTransformerName() {

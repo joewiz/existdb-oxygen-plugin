@@ -222,6 +222,19 @@ public final class ProfileStore {
     options.set("existdb.results.destination", destination);
   }
 
+  /**
+   * The XQuery validation/transformation engine that was Oxygen's default before the user switched
+   * it to eXist-db (HTTP) via our toggle — remembered so unchecking the toggle restores it exactly
+   * (rather than guessing a Saxon variant/version).
+   */
+  public String priorXQueryEngine() {
+    return options.get("existdb.xquery.priorEngine", "");
+  }
+
+  public void setPriorXQueryEngine(String engine) {
+    options.set("existdb.xquery.priorEngine", engine);
+  }
+
   /** The configured package registries (base URLs); the default public-repo when none are set. */
   public List<String> registries() {
     List<String> out = new ArrayList<>();

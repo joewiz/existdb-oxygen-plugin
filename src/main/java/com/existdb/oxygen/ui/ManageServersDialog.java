@@ -21,10 +21,12 @@
  */
 package com.existdb.oxygen.ui;
 
+import com.existdb.oxygen.ExistdbXQueryTransformerPluginExtension;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
 import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
+import ro.sync.exml.workspace.api.options.WSOptionsStorage;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -75,6 +77,10 @@ public final class ManageServersDialog {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
+  /** Oxygen's global option holding the default XQuery validation/transformation engine name. */
+  private static final String XQUERY_ENGINE_OPTION = "xquery.options.transformation.engine.v9";
+  /** Fallback when the toggle is switched off and no prior engine was remembered. */
+  private static final String DEFAULT_XQUERY_ENGINE = "Saxon-HE XQuery 12.9";
 
   private final transient Frame owner;
   private final transient ProfileStore store;
@@ -93,6 +99,8 @@ public final class ManageServersDialog {
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
       new JCheckBox("Restore open collections on startup");
+  private final JCheckBox useExistEnginePref =
+      new JCheckBox("Use eXist-db (HTTP) as the default XQuery validation engine");
 
   private transient ConnectionProfile defaultProfile;
   private transient Action moveUpAction;
@@ -244,6 +252,12 @@ public final class ManageServersDialog {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
     indentPref.setSelected(store.resultsIndent());
     pageSizePref.setSelectedItem(store.resultsPageSize());
+    useExistEnginePref.setSelected(
+        ExistdbXQueryTransformerPluginExtension.ENGINE_NAME.equals(currentXQueryEngine()));
+    useExistEnginePref.setToolTipText("<html>Validate XQuery (local files and exist:// alike) with "
+        + "eXist's compiler instead of Saxon, so eXist functions like <code>util:</code> and "
+        + "<code>xmldb:</code> resolve. Needs an active connection; sets Oxygen's global XQuery "
+        + "validation engine.</html>");
     boolean toEditor = "editor".equals(store.resultsDestination());
     destEditor.setSelected(toEditor);
     destBrowse.setSelected(!toEditor);
@@ -281,7 +295,41 @@ public final class ManageServersDialog {
     prefs.add(new JLabel("Results per page:"), c);
     c.gridx = 4;
     prefs.add(pageSizePref, c);
+
+    c.gridy = 2;
+    c.gridx = 0;
+    c.gridwidth = 5;
+    prefs.add(useExistEnginePref, c);
+    c.gridwidth = 1;
     return prefs;
+  }
+
+  /** Oxygen's current global XQuery validation/transformation engine name (empty if unset). */
+  private static String currentXQueryEngine() {
+    return optionsStorage().getOption(XQUERY_ENGINE_OPTION, "");
+  }
+
+  private static WSOptionsStorage optionsStorage() {
+    return PluginWorkspaceProvider.getPluginWorkspace().getOptionsStorage();
+  }
+
+  /**
+   * Applies the "use eXist-db (HTTP) as the default XQuery engine" toggle to Oxygen's global option.
+   * Turning it on remembers the prior engine so turning it off restores it exactly; only writes when
+   * the desired state differs from what's currently set, so it never clobbers an unrelated choice.
+   */
+  private void applyXQueryEngineToggle() {
+    String current = currentXQueryEngine();
+    boolean isExist = ExistdbXQueryTransformerPluginExtension.ENGINE_NAME.equals(current);
+    if (useExistEnginePref.isSelected() && !isExist) {
+      store.setPriorXQueryEngine(current);
+      optionsStorage().setOption(XQUERY_ENGINE_OPTION,
+          ExistdbXQueryTransformerPluginExtension.ENGINE_NAME);
+    } else if (!useExistEnginePref.isSelected() && isExist) {
+      String prior = store.priorXQueryEngine();
+      optionsStorage().setOption(XQUERY_ENGINE_OPTION,
+          prior.isEmpty() ? DEFAULT_XQUERY_ENGINE : prior);
+    }
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
@@ -367,6 +415,7 @@ public final class ManageServersDialog {
     store.setShowHidden(showHiddenPref.isSelected());
     store.setUploadHidden(uploadHiddenPref.isSelected());
     store.setRestorePane(restorePanePref.isSelected());
+    applyXQueryEngineToggle();
     // Apply the new defaults to an already-open results view immediately, not just next restart.
     store.notifyResultsPrefsChanged();
   }
