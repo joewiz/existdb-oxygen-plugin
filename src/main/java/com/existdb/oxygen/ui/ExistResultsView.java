@@ -35,7 +35,6 @@ import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -132,6 +131,9 @@ public final class ExistResultsView extends JPanel {
   /** One copy button per visible result row, floated at the viewport's right edge (parallel to
    *  {@link #rowPanels}). */
   private final transient List<JButton> rowCopyButtons = new ArrayList<>();
+  /** One "open source" button per visible result row, floated just left of the copy button (parallel
+   *  to {@link #rowPanels}); the entry stays hidden for results that have no stored source node. */
+  private final transient List<JButton> rowOpenButtons = new ArrayList<>();
 
   private transient ExistClient client;
   private transient String serverId;
@@ -334,24 +336,70 @@ public final class ExistResultsView extends JPanel {
     }
   }
 
-  /** Places each row's copy button at the viewport's right edge, level with its row (or hides it). */
+  /** A small "open source" button that floats next to a row's copy button for stored-node results. */
+  private JButton buildOpenButton(int rowIndex) {
+    JButton button = OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
+      {
+        putValue(SMALL_ICON, ExternalLinkIcon.INSTANCE);
+        putValue(SHORT_DESCRIPTION, "Open the source document and select this result");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        openSource(rowIndex);
+      }
+    }, false);
+    button.setOpaque(true);
+    button.setBackground(Color.WHITE);
+    button.setBorder(BorderFactory.createLineBorder(new Color(0xC8, 0xCE, 0xD6)));
+    button.setVisible(false);
+    return button;
+  }
+
+  private void openSource(int rowIndex) {
+    if (rowIndex >= 0 && rowIndex < pageItems.size()) {
+      QueryRunner.Item item = pageItems.get(rowIndex);
+      if (item.hasSource()) {
+        SourceNodeOpener.open(workspace, serverId, item.documentURI(), item.nodeId());
+      }
+    }
+  }
+
+  /**
+   * Places each row's floating controls at the viewport's right edge, level with its row (or hides
+   * them when the row is scrolled out of view). The copy button sits at the right edge; the
+   * open-source button, when the result maps to a stored node, sits just to its left.
+   */
   private void positionFloatingCopies() {
     JViewport viewport = scrollPane.getViewport();
     Rectangle visible = viewport.getViewRect();
     Point viewportTopLeft = SwingUtilities.convertPoint(viewport, 0, 0, layered);
     for (int i = 0; i < rowCopyButtons.size() && i < rowPanels.size(); i++) {
-      JButton button = rowCopyButtons.get(i);
+      JButton copyButton = rowCopyButtons.get(i);
+      JButton openButton = i < rowOpenButtons.size() ? rowOpenButtons.get(i) : null;
       Rectangle rowBounds = rowPanels.get(i).getBounds();
       if (!visible.intersects(rowBounds)) {
-        button.setVisible(false);
+        copyButton.setVisible(false);
+        if (openButton != null) {
+          openButton.setVisible(false);
+        }
         continue;
       }
-      int width = button.getPreferredSize().width;
-      int height = button.getPreferredSize().height;
+      int width = copyButton.getPreferredSize().width;
+      int height = copyButton.getPreferredSize().height;
       int x = viewportTopLeft.x + viewport.getWidth() - width - 6;
       int y = viewportTopLeft.y + Math.max(0, rowBounds.y - visible.y) + 4;
-      button.setBounds(x, y, width, height);
-      button.setVisible(true);
+      copyButton.setBounds(x, y, width, height);
+      copyButton.setVisible(true);
+      if (openButton != null) {
+        if (i < pageItems.size() && pageItems.get(i).hasSource()) {
+          int openWidth = openButton.getPreferredSize().width;
+          openButton.setBounds(x - openWidth - 2, y, openWidth, height);
+          openButton.setVisible(true);
+        } else {
+          openButton.setVisible(false);
+        }
+      }
     }
   }
 
@@ -478,6 +526,10 @@ public final class ExistResultsView extends JPanel {
         layered.remove(button);
       }
       rowCopyButtons.clear();
+      for (JButton button : rowOpenButtons) {
+        layered.remove(button);
+      }
+      rowOpenButtons.clear();
       layered.repaint();
       rangeLabel.setText("No results");
       rows.revalidate();
@@ -528,11 +580,15 @@ public final class ExistResultsView extends JPanel {
     rowTextPanes.clear();
     pageItems.clear();
     pageItems.addAll(items);
-    // Drop the previous page's floating copy buttons before laying out the new ones.
+    // Drop the previous page's floating buttons before laying out the new ones.
     for (JButton button : rowCopyButtons) {
       layered.remove(button);
     }
     rowCopyButtons.clear();
+    for (JButton button : rowOpenButtons) {
+      layered.remove(button);
+    }
+    rowOpenButtons.clear();
     for (int i = 0; i < items.size(); i++) {
       JPanel row = buildRow(startIndex + i, items.get(i), method);
       rowPanels.add(row);
@@ -540,6 +596,9 @@ public final class ExistResultsView extends JPanel {
       JButton copyButton = buildCopyButton(i);
       rowCopyButtons.add(copyButton);
       layered.add(copyButton, JLayeredPane.PALETTE_LAYER);
+      JButton openButton = buildOpenButton(i);
+      rowOpenButtons.add(openButton);
+      layered.add(openButton, JLayeredPane.PALETTE_LAYER);
     }
     rows.revalidate();
     rows.repaint();
@@ -595,7 +654,7 @@ public final class ExistResultsView extends JPanel {
       }
     });
 
-    row.add(buildNumberLabel(number, item), BorderLayout.WEST);
+    row.add(buildNumberLabel(number), BorderLayout.WEST);
 
     JTextPane area = new JTextPane() {
       @Override
@@ -668,28 +727,50 @@ public final class ExistResultsView extends JPanel {
   }
 
   /**
-   * The row's number cell. For a stored database node it's a link that opens the source document and
-   * selects the originating element; otherwise it's a plain grey number.
+   * The row's number cell — a plain grey number. Opening the source document is offered by the
+   * floating open-source button next to the row's copy button (see {@link #buildOpenButton(int)}).
    */
-  private JLabel buildNumberLabel(int number, QueryRunner.Item item) {
+  private JLabel buildNumberLabel(int number) {
     JLabel num = new JLabel(String.valueOf(number), SwingConstants.CENTER);
     num.setPreferredSize(new Dimension(44, 1));
     num.setVerticalAlignment(SwingConstants.TOP);
-    if (item.hasSource()) {
-      num.setText("<html><u>" + number + "</u></html>");
-      num.setForeground(new Color(0x2A, 0x66, 0xC8));
-      num.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-      num.setToolTipText("Open source: " + item.documentURI());
-      num.addMouseListener(new MouseAdapter() {
-        @Override
-        public void mouseClicked(MouseEvent e) {
-          SourceNodeOpener.open(workspace, serverId, item.documentURI(), item.nodeId());
-        }
-      });
-    } else {
-      num.setForeground(Color.GRAY);
-    }
+    num.setForeground(Color.GRAY);
     return num;
+  }
+
+  /**
+   * A vector "external link" icon — a box with an arrow leaving its top-right corner — for the
+   * open-source button, drawn (like {@link ChevronIcon}) so it stays crisp at any zoom level.
+   */
+  private static final class ExternalLinkIcon implements Icon {
+    static final Icon INSTANCE = new ExternalLinkIcon();
+    private static final int SIZE = 16;
+
+    @Override
+    public int getIconWidth() {
+      return SIZE;
+    }
+
+    @Override
+    public int getIconHeight() {
+      return SIZE;
+    }
+
+    @Override
+    public void paintIcon(Component c, Graphics g, int x, int y) {
+      Graphics2D g2 = (Graphics2D) g.create();
+      g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+      g2.setColor(c.isEnabled() ? new Color(0x55, 0x5F, 0x6D) : new Color(0xB8, 0xBE, 0xC6));
+      g2.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+      // The box, drawn with its top-right corner left open so the arrow can exit through it.
+      g2.drawPolyline(
+          new int[] {x + 8, x + 3, x + 3, x + 12, x + 12},
+          new int[] {y + 4, y + 4, y + 13, y + 13, y + 8}, 5);
+      // The arrow: a shaft from inside the box to the top-right, plus its head.
+      g2.drawLine(x + 7, y + 9, x + 13, y + 3);
+      g2.drawPolyline(new int[] {x + 9, x + 13, x + 13}, new int[] {y + 3, y + 3, y + 7}, 3);
+      g2.dispose();
+    }
   }
 
   /** A uniform, vector chevron icon for the navigation buttons (so widths match, unlike glyphs). */
