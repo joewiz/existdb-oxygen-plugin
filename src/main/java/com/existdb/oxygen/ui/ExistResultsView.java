@@ -394,7 +394,7 @@ public final class ExistResultsView extends JPanel {
       if (openButton != null) {
         if (i < pageItems.size() && pageItems.get(i).hasSource()) {
           int openWidth = openButton.getPreferredSize().width;
-          openButton.setBounds(x - openWidth - 2, y, openWidth, height);
+          openButton.setBounds(x - openWidth - 6, y, openWidth, height);
           openButton.setVisible(true);
         } else {
           openButton.setVisible(false);
@@ -645,7 +645,7 @@ public final class ExistResultsView extends JPanel {
   private JPanel buildRow(int number, QueryRunner.Item item, String method) {
     String value = item.value();
     JPanel row = new JPanel(new BorderLayout(8, 0));
-    row.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+    row.setBorder(BorderFactory.createEmptyBorder(7, 6, 7, 6));
     row.addMouseListener(new MouseAdapter() {
       @Override
       public void mousePressed(MouseEvent e) {
