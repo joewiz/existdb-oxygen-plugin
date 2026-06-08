@@ -26,10 +26,13 @@ import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.project.BuildConfig;
 import com.existdb.oxygen.project.ProjectConnection;
 
+import ro.sync.exml.workspace.api.editor.WSEditor;
+import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.project.ProjectController;
 import ro.sync.exml.workspace.api.standalone.project.ProjectPopupMenuCustomizer;
 
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GridLayout;
 import java.awt.KeyboardFocusManager;
@@ -50,6 +53,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.text.JTextComponent;
 
 /**
  * Adds a "Build" item to Oxygen's Project-pane contextual menu. It finds the package's build root
@@ -87,7 +91,6 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     if (selected == null || selected.length == 0) {
       return;
     }
-    menu.addSeparator();
     menu.add(menuItem("Build", () -> build(selected[0], false)));
     menu.add(menuItem("Build & Deploy", () -> build(selected[0], true)));
   }
@@ -121,6 +124,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
       }
     }
     workspace.showView(buildViewId, true);
+    console.setConsoleFont(currentEditorFont());
     console.clear();
     console.appendLine("$ " + config.command());
     console.appendLine("  (in " + config.dir().getAbsolutePath() + ")");
@@ -212,7 +216,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     panel.add(new JLabel("Deploy to:"));
     panel.add(serverCombo);
     panel.add(remember);
-    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build and deploy?",
+    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build and Deploy",
         JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
     if (choice != JOptionPane.OK_OPTION) {
       return null;
@@ -286,7 +290,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     panel.add(new JLabel(config.command()));
     panel.add(new JLabel(dirPath));
     panel.add(remember);
-    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Run build command?",
+    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build",
         JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
     if (choice != JOptionPane.OK_OPTION) {
       return false;
@@ -309,6 +313,20 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     } catch (URISyntaxException e) {
       return null;
     }
+  }
+
+  /**
+   * The active editor's text font — Oxygen's effective editor font (default or user-customized) — so
+   * the build console matches the editor. {@code null} when no text editor is open (keeps the
+   * console's monospaced default). The SDK exposes no editor-font option, so we read it live.
+   */
+  private Font currentEditorFont() {
+    WSEditor editor = workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
+    if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
+        && page.getTextComponent() instanceof JTextComponent component) {
+      return component.getFont();
+    }
+    return null;
   }
 
   private static ImageIcon loadMenuIcon() {

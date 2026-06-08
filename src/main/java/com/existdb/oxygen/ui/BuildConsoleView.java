@@ -51,6 +51,16 @@ public final class BuildConsoleView extends JPanel {
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
   }
 
+  /**
+   * Uses the given font for the console (the caller passes Oxygen's current editor font so build
+   * output matches the editor); ignores {@code null}, keeping the monospaced default.
+   */
+  public void setConsoleFont(Font font) {
+    if (font != null) {
+      output.setFont(font);
+    }
+  }
+
   /** Clears the console (called at the start of each build). */
   public void clear() {
     output.setText("");
