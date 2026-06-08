@@ -295,6 +295,36 @@ public final class ProfileStore {
     options.set("existdb.openTabs", String.join("\n", urls));
   }
 
+  /**
+   * Whether the eXist-db pane re-expands, on startup, the servers and collections that were open at
+   * last shutdown (re-fetching them live). On by default; turning it off gives a clean, fast pane.
+   */
+  public boolean restorePane() {
+    return Boolean.parseBoolean(options.get("existdb.restorePane", "true"));
+  }
+
+  public void setRestorePane(boolean restore) {
+    options.set("existdb.restorePane", Boolean.toString(restore));
+  }
+
+  /**
+   * The {@code exist://} collection locations expanded in the pane at last shutdown (the server node
+   * is {@code …/db}), used to restore the tree's expansion state. Stored newline-separated.
+   */
+  public List<String> expandedCollections() {
+    List<String> out = new ArrayList<>();
+    for (String url : options.get("existdb.expandedCollections", "").split("\n")) {
+      if (!url.isBlank()) {
+        out.add(url.trim());
+      }
+    }
+    return out;
+  }
+
+  public void setExpandedCollections(List<String> paths) {
+    options.set("existdb.expandedCollections", String.join("\n", paths));
+  }
+
   /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
   public void addResultsPrefsListener(Runnable listener) {
     resultsPrefsListeners.add(listener);
