@@ -92,6 +92,7 @@ import javax.swing.Timer;
 import javax.swing.ToolTipManager;
 import javax.swing.TransferHandler;
 import javax.swing.event.TreeExpansionEvent;
+import javax.swing.event.TreeExpansionListener;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellEditor;
@@ -143,6 +144,17 @@ public final class ExistdbBrowserPanel extends JPanel {
   private boolean linkWithEditor;
   /** One-shot continuation run after the next lazy child-load completes (drives deep reveals). */
   private transient Runnable pendingAfterLoad;
+  /**
+   * The {@code exist://} collection keys still to re-expand during the startup restore. As each is
+   * reached (its parent loads) it is removed and the node expanded, cascading deeper. Consulted only
+   * while {@link #restoring} is true.
+   */
+  private final transient Set<String> pathsToRestore = new HashSet<>();
+  /**
+   * True during the startup restore: gates the restore cascade and suppresses expansion-state
+   * persistence so the restore's own expand events don't overwrite the saved set mid-restore.
+   */
+  private transient boolean restoring;
 
   public ExistdbBrowserPanel(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
@@ -159,6 +171,7 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     configureTree();
     loadServers();
+    restorePaneState();
 
     // Link with Editor: when enabled, follow editor focus by revealing the matching tree node.
     // Also: when an exist: editor opens, watch for saves so a newly-created resource appears in the
@@ -311,6 +324,17 @@ public final class ExistdbBrowserPanel extends JPanel {
         SearchDialog.open(ownerFrame(), profileStore, workspace);
       }
     };
+    Action collapseAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/CollapseAll16.png"));
+        putValue(SHORT_DESCRIPTION, "Collapse All");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        collapseAll();
+      }
+    };
     Action gearAction = new AbstractAction() {
       {
         // The Data Source Explorer's gear-with-menu-lines glyph.
@@ -325,6 +349,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     };
 
     // Oxygen's factory buttons inherit the workbench's flat rollover (and toggle) styling exactly.
+    JButton collapse = OxygenUIComponentsFactory.createToolbarButton(collapseAction, false);
     JButton search = OxygenUIComponentsFactory.createToolbarButton(searchAction, false);
     JButton link = OxygenUIComponentsFactory.createToolbarToggleButton(linkAction, false);
     JButton gear = OxygenUIComponentsFactory.createToolbarButton(gearAction, false);
@@ -333,11 +358,19 @@ public final class ExistdbBrowserPanel extends JPanel {
     bar.setFloatable(false);
     bar.setRollover(true);
     bar.add(Box.createHorizontalGlue());
+    bar.add(collapse);
     bar.add(search);
     bar.add(link);
     bar.addSeparator();
     bar.add(gear);
     return bar;
+  }
+
+  /** Collapses every expanded node back to the top-level server rows (mirrors the Project pane). */
+  private void collapseAll() {
+    for (int row = tree.getRowCount() - 1; row >= 0; row--) {
+      tree.collapseRow(row);
+    }
   }
 
   private void configureTree() {
@@ -368,6 +401,20 @@ public final class ExistdbBrowserPanel extends JPanel {
       @Override
       public void treeWillCollapse(TreeExpansionEvent event) {
         // No-op.
+      }
+    });
+
+    // Persist the expansion state as the user expands/collapses, so it survives a restart. Suppressed
+    // during the startup restore (its own expansions would otherwise overwrite the saved set).
+    tree.addTreeExpansionListener(new TreeExpansionListener() {
+      @Override
+      public void treeExpanded(TreeExpansionEvent event) {
+        persistExpansionUnlessRestoring();
+      }
+
+      @Override
+      public void treeCollapsed(TreeExpansionEvent event) {
+        persistExpansionUnlessRestoring();
       }
     });
 
@@ -443,6 +490,88 @@ public final class ExistdbBrowserPanel extends JPanel {
       rootNode.add(serverNode);
     }
     treeModel.reload();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Expansion state: persist across restarts, and restore (re-fetching) on startup
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Re-expands the servers and collections that were open at last shutdown, re-fetching each level
+   * live so the pane reflects the current server state. Cascades through {@link #loadChildren}'s
+   * completion; a saved collection that no longer exists is simply skipped. No-op when the user has
+   * turned restore off.
+   */
+  private void restorePaneState() {
+    if (!profileStore.restorePane()) {
+      return;
+    }
+    pathsToRestore.addAll(profileStore.expandedCollections());
+    if (pathsToRestore.isEmpty()) {
+      return;
+    }
+    restoring = true;
+    // Safety net: if some saved collections no longer exist the cascade won't drain pathsToRestore,
+    // so re-enable persistence after a grace period regardless of whether every path was reached.
+    Timer safety = new Timer(8000, e -> finishRestore());
+    safety.setRepeats(false);
+    safety.start();
+    // Expand each saved top-level server node; deeper levels follow as each load completes.
+    for (int i = 0; i < rootNode.getChildCount(); i++) {
+      if (rootNode.getChildAt(i) instanceof DefaultMutableTreeNode serverNode
+          && serverNode.getUserObject() instanceof ExistNode existNode
+          && pathsToRestore.remove(nodeKey(existNode))) {
+        tree.expandPath(new TreePath(serverNode.getPath()));
+      }
+    }
+  }
+
+  /** During restore: expands any just-loaded children that were open last session, cascading deeper. */
+  private void restoreChildrenOf(DefaultMutableTreeNode node) {
+    for (int i = 0; i < node.getChildCount(); i++) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode existNode
+          && existNode.collection && pathsToRestore.remove(nodeKey(existNode))) {
+        tree.expandPath(new TreePath(child.getPath())); // triggers its load → cascade
+      }
+    }
+    if (pathsToRestore.isEmpty()) {
+      finishRestore();
+    }
+  }
+
+  /** Ends the startup restore: re-enables persistence and saves the now-current expansion state. */
+  private void finishRestore() {
+    if (!restoring) {
+      return;
+    }
+    restoring = false;
+    pathsToRestore.clear();
+    persistExpansion();
+  }
+
+  private void persistExpansionUnlessRestoring() {
+    if (!restoring) {
+      persistExpansion();
+    }
+  }
+
+  /** Saves the currently-expanded collection nodes (server nodes included) for the next startup. */
+  private void persistExpansion() {
+    List<String> expanded = new ArrayList<>();
+    for (int row = 0; row < tree.getRowCount(); row++) {
+      if (tree.isExpanded(row)
+          && tree.getPathForRow(row).getLastPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode && existNode.collection) {
+        expanded.add(nodeKey(existNode));
+      }
+    }
+    profileStore.setExpandedCollections(expanded);
+  }
+
+  /** The {@code exist://<serverId><path>} key for a collection node (matches the saved format). */
+  private static String nodeKey(ExistNode node) {
+    return "exist://" + node.serverId + node.path;
   }
 
   // ---------------------------------------------------------------------------
@@ -1064,6 +1193,9 @@ public final class ExistdbBrowserPanel extends JPanel {
         treeModel.reload(node);
         tree.expandPath(new TreePath(node.getPath()));
         resumeReveal(existNode.loaded);
+        if (restoring && existNode.loaded) {
+          restoreChildrenOf(node);
+        }
       }
     }.execute();
   }

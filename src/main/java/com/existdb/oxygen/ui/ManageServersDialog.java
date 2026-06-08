@@ -91,6 +91,8 @@ public final class ManageServersDialog {
   private final JCheckBox indentPref = new JCheckBox("Indent");
   private final JCheckBox showHiddenPref = new JCheckBox("Show hidden files and directories");
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
+  private final JCheckBox restorePanePref =
+      new JCheckBox("Restore open collections on startup");
 
   private transient ConnectionProfile defaultProfile;
   private transient OKCancelDialog host;
@@ -201,20 +203,32 @@ public final class ManageServersDialog {
     return content;
   }
 
-  /** Hidden-file preferences: showing them in the pane, and including them when uploading. */
+  /** Pane preferences: hidden-file handling, and restoring the open collections on startup. */
   private JComponent buildBrowsingPrefs() {
     showHiddenPref.setSelected(store.showHidden());
     uploadHiddenPref.setSelected(store.uploadHidden());
-    JPanel prefs = new JPanel(new GridBagLayout());
-    prefs.setBorder(BorderFactory.createTitledBorder("Hidden files"));
+    restorePanePref.setSelected(store.restorePane());
+
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.LINE_START;
     c.gridx = 0;
+
+    JPanel hidden = new JPanel(new GridBagLayout());
+    hidden.setBorder(BorderFactory.createTitledBorder("Hidden files"));
     c.gridy = 0;
-    prefs.add(showHiddenPref, c);
+    hidden.add(showHiddenPref, c);
     c.gridy = 1;
-    prefs.add(uploadHiddenPref, c);
+    hidden.add(uploadHiddenPref, c);
+
+    JPanel pane = new JPanel(new GridBagLayout());
+    pane.setBorder(BorderFactory.createTitledBorder("eXist-db pane"));
+    c.gridy = 0;
+    pane.add(restorePanePref, c);
+
+    JPanel prefs = new JPanel(new BorderLayout());
+    prefs.add(hidden, BorderLayout.NORTH);
+    prefs.add(pane, BorderLayout.SOUTH);
     return prefs;
   }
 
@@ -350,6 +364,7 @@ public final class ManageServersDialog {
     store.setResultsDestination(destEditor.isSelected() ? "editor" : "browse");
     store.setShowHidden(showHiddenPref.isSelected());
     store.setUploadHidden(uploadHiddenPref.isSelected());
+    store.setRestorePane(restorePanePref.isSelected());
     // Apply the new defaults to an already-open results view immediately, not just next restart.
     store.notifyResultsPrefsChanged();
   }
