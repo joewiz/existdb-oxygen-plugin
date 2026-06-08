@@ -358,8 +358,9 @@ public final class ExistdbBrowserPanel extends JPanel {
     bar.setFloatable(false);
     bar.setRollover(true);
     bar.add(Box.createHorizontalGlue());
-    bar.add(collapse);
     bar.add(search);
+    bar.addSeparator();
+    bar.add(collapse);
     bar.add(link);
     bar.addSeparator();
     bar.add(gear);
