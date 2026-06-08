@@ -32,7 +32,8 @@
             "description": "Default target collection, e.g. /db/apps/myapp."
           }
         },
-        "required": ["server"]
+        "required": ["server"],
+        "additionalProperties": false
       }
     },
     "sync": {
@@ -68,7 +69,8 @@
           "type": ["integer", "string"],
           "description": "Polling interval (ms)."
         }
-      }
+      },
+      "additionalProperties": false
     },
     "build": {
       "type": "object",
@@ -86,7 +88,9 @@
           "type": "string",
           "description": "Glob locating the produced .xar (relative to this file), e.g. \"build/*.xar\". Defaults to the most recently built .xar when absent."
         }
-      }
+      },
+      "additionalProperties": false
     }
-  }
+  },
+  "additionalProperties": false
 }
