@@ -43,6 +43,7 @@ import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
+import java.awt.image.BufferedImage;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
@@ -124,6 +125,11 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** Maps a file extension (lower-case) to one of Oxygen's bundled file-type icons, and caches them. */
   private static final Map<String, String> TYPE_ICON_RESOURCES = buildTypeIconResources();
   private static final Map<String, ImageIcon> TYPE_ICON_CACHE = new ConcurrentHashMap<>();
+
+  /** A transparent 16×16 icon so iconless menu items reserve the icon gutter and their labels line up
+   * with the icon'd items' labels, matching Oxygen's native contextual menus. */
+  private static final ImageIcon BLANK_MENU_ICON =
+      new ImageIcon(new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB));
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -651,12 +657,10 @@ public final class ExistdbBrowserPanel extends JPanel {
   private static JMenuItem menuItem(String label, String iconResource, KeyStroke accelerator,
       Runnable action) {
     JMenuItem item = new JMenuItem(label);
-    if (iconResource != null) {
-      ImageIcon icon = loadFirstIcon(iconResource);
-      if (icon != null) {
-        item.setIcon(icon);
-      }
-    }
+    ImageIcon icon = iconResource != null ? loadFirstIcon(iconResource) : null;
+    // Always set an icon (a blank placeholder when there's none) so every label aligns at the same
+    // x, as in Oxygen's Project-pane menu — rather than iconless labels sliding under the gutter.
+    item.setIcon(icon != null ? icon : BLANK_MENU_ICON);
     if (accelerator != null) {
       item.setAccelerator(accelerator);
     }
