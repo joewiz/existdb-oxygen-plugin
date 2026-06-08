@@ -24,7 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.project.BuildConfig;
-import com.existdb.oxygen.project.ExistdbProjectConfig;
+import com.existdb.oxygen.project.ProjectConnection;
 
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.project.ProjectController;
@@ -44,6 +44,7 @@ import java.util.Optional;
 
 import javax.swing.ImageIcon;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -107,13 +108,17 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
           + "section to .existdb.json, or a build.xml, pom.xml, package.json, or gulpfile.js.");
       return;
     }
-    DeployTarget target = deploy ? resolveDeployTarget(config.dir()) : null;
-    if (deploy && target == null) {
-      workspace.showInformationMessage("Add an eXist-db connection first (eXist-db pane → gear).");
-      return;
-    }
-    if (!confirmTrusted(config, target)) {
-      return;
+    DeployTarget target;
+    if (deploy) {
+      target = chooseDeployTarget(config);
+      if (target == null) {
+        return; // no saved connections, or the user cancelled
+      }
+    } else {
+      target = null;
+      if (!confirmBuild(config)) {
+        return;
+      }
     }
     workspace.showView(buildViewId, true);
     console.clear();
@@ -173,33 +178,61 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
   /** Where to deploy: the eXist server root + credentials, and a display label. */
   private record DeployTarget(String serverRoot, String user, String password,
       boolean acceptSelfSigned, String label) {
+
+    static DeployTarget of(ConnectionProfile profile) {
+      return new DeployTarget(profile.getServerRoot(), profile.getUser(), profile.getPassword(),
+          profile.isAcceptSelfSigned(), profile.getName());
+    }
   }
 
   /**
-   * Resolves the deploy target for {@code buildRoot}: the server named in the nearest
-   * {@code .existdb.json} matched to a saved connection (for credentials), else the default
-   * connection. {@code null} only when there are no saved connections at all.
+   * Resolves the deploy target, deploying always through a saved connection (the credential store).
+   * A trusted project deploys one-click to its resolved connection; otherwise the user confirms and
+   * may override the server. Returns {@code null} when there are no connections or the user cancels.
    */
-  private DeployTarget resolveDeployTarget(File buildRoot) {
+  private DeployTarget chooseDeployTarget(BuildConfig config) {
     List<ConnectionProfile> profiles = profileStore.loadAll();
     if (profiles.isEmpty()) {
+      workspace.showInformationMessage("Add an eXist-db connection first (eXist-db pane → gear).");
       return null;
     }
-    ExistdbProjectConfig config =
-        ExistdbProjectConfig.findNearest(buildRoot, projectRoot()).orElse(null);
-    if (config != null && config.serverUrl() != null) {
-      String serverRoot = stripTrailingSlash(config.serverUrl());
-      ConnectionProfile match = matchProfile(serverRoot, profiles);
-      if (match != null) {
-        return new DeployTarget(serverRoot, match.getUser(), match.getPassword(),
-            match.isAcceptSelfSigned(), match.getName());
-      }
-      String user = config.user() == null ? "admin" : config.user();
-      return new DeployTarget(serverRoot, user, "", serverRoot.startsWith("https"), serverRoot);
+    ConnectionProfile resolved = resolveDefaultProfile(config.dir(), profiles);
+    String dirPath = config.dir().getAbsolutePath();
+    if (profileStore.isBuildDirTrusted(dirPath)) {
+      return DeployTarget.of(resolved); // trusted → one-click to the resolved connection
     }
-    ConnectionProfile def = defaultProfile(profiles);
-    return new DeployTarget(def.getServerRoot(), def.getUser(), def.getPassword(),
-        def.isAcceptSelfSigned(), def.getName());
+    String[] names = profiles.stream().map(ConnectionProfile::getName).toArray(String[]::new);
+    JComboBox<String> serverCombo = new JComboBox<>(names);
+    serverCombo.setSelectedIndex(Math.max(0, profiles.indexOf(resolved)));
+    JCheckBox remember = new JCheckBox("Don't ask again for this project");
+    JPanel panel = new JPanel(new GridLayout(0, 1, 0, 4));
+    panel.add(new JLabel("Build, then deploy this project?"));
+    panel.add(new JLabel(config.command()));
+    panel.add(new JLabel(dirPath));
+    panel.add(new JLabel("Deploy to:"));
+    panel.add(serverCombo);
+    panel.add(remember);
+    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build and deploy?",
+        JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+    if (choice != JOptionPane.OK_OPTION) {
+      return null;
+    }
+    if (remember.isSelected()) {
+      profileStore.addTrustedBuildDir(dirPath);
+    }
+    return DeployTarget.of(profiles.get(serverCombo.getSelectedIndex()));
+  }
+
+  /**
+   * The connection to deploy {@code buildRoot} to by default: the server named in the closest
+   * {@code .existdb.json} or {@code .env} (see {@link ProjectConnection}) matched to a saved
+   * connection, falling back to the default connection.
+   */
+  private ConnectionProfile resolveDefaultProfile(File buildRoot, List<ConnectionProfile> profiles) {
+    ConnectionProfile match = ProjectConnection.resolve(buildRoot, projectRoot())
+        .map(resolved -> matchProfile(resolved.serverRoot(), profiles))
+        .orElse(null);
+    return match != null ? match : defaultProfile(profiles);
   }
 
   /** The saved connection whose base URL matches {@code serverRoot} (eXist root), or {@code null}. */
@@ -242,24 +275,18 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
    * Returns true if the build may proceed: already-trusted directories run immediately; otherwise the
    * user is shown the exact command and directory and must approve (optionally remembering the choice).
    */
-  private boolean confirmTrusted(BuildConfig config, DeployTarget target) {
+  private boolean confirmBuild(BuildConfig config) {
     String dirPath = config.dir().getAbsolutePath();
     if (profileStore.isBuildDirTrusted(dirPath)) {
       return true;
     }
     JCheckBox remember = new JCheckBox("Don't ask again for this project");
     JPanel panel = new JPanel(new GridLayout(0, 1, 0, 4));
-    panel.add(new JLabel(target == null ? "Run this build command?"
-        : "Build, then deploy this project?"));
+    panel.add(new JLabel("Run this build command?"));
     panel.add(new JLabel(config.command()));
     panel.add(new JLabel(dirPath));
-    if (target != null) {
-      panel.add(new JLabel("Then install the built .xar to: " + target.serverRoot()
-          + " (as " + target.user() + ")"));
-    }
     panel.add(remember);
-    String title = target == null ? "Run build command?" : "Build and deploy?";
-    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, title,
+    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Run build command?",
         JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
     if (choice != JOptionPane.OK_OPTION) {
       return false;
