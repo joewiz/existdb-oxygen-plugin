@@ -5,4 +5,6 @@
   <uri name="http://expath.org/ns/pkg" uri="schema/expath-pkg.xsd"/>
   <uri name="http://exist-db.org/xquery/repo" uri="schema/expath-pkg-extensions/repo.xsd"/>
   <uri name="http://exist-db.org/ns/expath-pkg" uri="schema/expath-pkg-extensions/exist.xsd"/>
+  <!-- Resolve the .existdb.json $schema reference to the bundled copy (offline; works before the main-branch raw URL is published). -->
+  <uri name="https://raw.githubusercontent.com/joewiz/existdb-oxygen-plugin/main/frameworks/existdb/schema/existdb-json.schema.json" uri="schema/existdb-json.schema.json"/>
 </catalog>

@@ -27,6 +27,7 @@ import com.existdb.oxygen.client.ExistClient.RemoveResult;
 import com.existdb.oxygen.client.ExistClient.UpdateCheck;
 import com.existdb.oxygen.model.ProfileStore;
 
+import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -49,7 +50,6 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
@@ -164,10 +164,13 @@ public final class PackageManagerDialog {
     JComponent scroll = OxygenUIComponentsFactory.createScrollPane(editor,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    int result = JOptionPane.showConfirmDialog(host, scroll,
-        "Package registries (one base URL per line)", JOptionPane.OK_CANCEL_OPTION,
-        JOptionPane.PLAIN_MESSAGE);
-    if (result != JOptionPane.OK_OPTION) {
+    OKCancelDialog dialog = OxygenUIComponentsFactory.createOkCancelDialog(
+        owner, "Package registries (one base URL per line)", true);
+    dialog.getContentPane().add(scroll, BorderLayout.CENTER);
+    dialog.pack();
+    dialog.setLocationRelativeTo(host);
+    dialog.setVisible(true);
+    if (dialog.getResult() != OKCancelDialog.RESULT_OK) {
       return;
     }
     List<String> registries = new ArrayList<>();
@@ -426,15 +429,14 @@ public final class PackageManagerDialog {
   }
 
   private boolean confirm(String message, String title) {
-    return JOptionPane.showConfirmDialog(host, message, title,
-        JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE) == JOptionPane.OK_OPTION;
+    return PluginWorkspaceProvider.getPluginWorkspace().showConfirmDialog(
+        title, message, new String[] {"OK", "Cancel"}, new int[] {0, 1}) == 0;
   }
 
   private void error(String prefix, Exception ex) {
     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
     setStatus(prefix + ": " + cause.getMessage());
-    JOptionPane.showMessageDialog(host, prefix + ":\n" + cause.getMessage(),
-        "Package Manager", JOptionPane.ERROR_MESSAGE);
+    PluginWorkspaceProvider.getPluginWorkspace().showErrorMessage(prefix + ":\n" + cause.getMessage());
   }
 
   private static String displayName(PackageInfo pkg) {

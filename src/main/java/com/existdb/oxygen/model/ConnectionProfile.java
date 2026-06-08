@@ -141,10 +141,26 @@ public final class ConnectionProfile {
 
   /** The {@code /api} root, with any trailing slash on the base URL normalized away. */
   public String getApiRoot() {
+    return normalizedBase() + "/api";
+  }
+
+  /**
+   * The eXist server root (servlet context, e.g. {@code http://localhost:8080/exist}) — the base URL
+   * with the {@code /apps/existdb-openapi} application path removed. This is what {@code xst} /
+   * node-exist connect to over REST/XML-RPC, as opposed to the openapi {@code /api} surface this
+   * plugin itself uses.
+   */
+  public String getServerRoot() {
+    String base = normalizedBase();
+    String appPath = "/apps/existdb-openapi";
+    return base.endsWith(appPath) ? base.substring(0, base.length() - appPath.length()) : base;
+  }
+
+  private String normalizedBase() {
     String base = baseUrl == null ? "" : baseUrl.trim();
     while (base.endsWith("/")) {
       base = base.substring(0, base.length() - 1);
     }
-    return base + "/api";
+    return base;
   }
 }

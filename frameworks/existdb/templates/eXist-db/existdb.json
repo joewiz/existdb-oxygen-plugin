@@ -1,0 +1,20 @@
+{
+    "$schema": "https://raw.githubusercontent.com/joewiz/existdb-oxygen-plugin/main/frameworks/existdb/schema/existdb-json.schema.json",
+    "servers": {
+        "localhost": {
+            "server": "http://localhost:8080/exist",
+            "user": "admin",
+            "password": "",
+            "root": "/db/apps/myapp"
+        }
+    },
+    "sync": {
+        "server": "localhost",
+        "root": "/db/apps/myapp",
+        "ignore": [".git/**", "node_modules/**", "build/**"]
+    },
+    "build": {
+        "command": "ant",
+        "artifact": "build/*.xar"
+    }
+}

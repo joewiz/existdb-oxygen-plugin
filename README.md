@@ -47,6 +47,71 @@ Right-click in an XQuery editor (or use the keyboard shortcuts) for the eXist-db
 
 The completion, hover (rich Markdown with Parameters/Returns), parameter hints, and variable-type hover need a server with existdb-openapi [#42](https://github.com/eXist-db/existdb-openapi/pull/42), [#44](https://github.com/eXist-db/existdb-openapi/pull/44), and [#45](https://github.com/eXist-db/existdb-openapi/pull/45); they degrade gracefully (show nothing) against older servers.
 
+## Project configuration (`.existdb.json`)
+
+When you work on an eXist app from the **Project** pane (files on disk, not the database), a `.existdb.json` in the app's directory tells the plugin which server the app belongs to and how to build and install it. This is the same `.existdb.json` convention used by [existdb-langserver](https://github.com/eXist-db/existdb-langserver) (and atom-existdb / vscode-existdb) — the plugin reads the established `servers` and `sync` sections and adds a `build` section described below.
+
+The descriptor is discovered by a **closest-ancestor walk**: from the selected file or folder the plugin walks up to the nearest directory containing a `.existdb.json` (bounded by the Oxygen project root), so a project that holds many app repositories side by side resolves each one to its own descriptor.
+
+**Schema, validation, and File > New.** The plugin ships a JSON Schema for `.existdb.json` (`frameworks/existdb/schema/existdb-json.schema.json`) and offers an **eXist-db Project Descriptor** starter under **File > New → eXist-db**, which includes a `$schema` reference so Oxygen validates it and offers content-completion. To get the same validation on an existing `.existdb.json`, add the `$schema` line pointing at that schema. The framework's `catalog.xml` maps that `$schema` URL to the bundled schema copy, so validation resolves **offline** — Oxygen never has to fetch the schema over the network. (Oxygen associates a JSON Schema via the in-file `$schema` keyword; it has no plugin-frameworkable way to bind a JSON Schema purely by filename — see [Oxygen SDK gaps](#oxygen-sdk-gaps-upstream-wishlist).)
+
+```json
+{
+  "servers": {
+    "localhost": {
+      "server": "http://localhost:8080/exist",
+      "user": "admin",
+      "password": "",
+      "root": "/db/apps/my-app"
+    }
+  },
+  "sync": {
+    "server": "localhost",
+    "root": "/db/apps/my-app",
+    "onSave": true,
+    "ignore": [".git/**", "node_modules/**", "build/**"]
+  },
+  "build": {
+    "tool": "ant",
+    "command": "ant xar",
+    "artifact": "build/*.xar"
+  }
+}
+```
+
+- **`servers`** / **`sync`** — the standard sections. `sync.server` names which `servers` entry to use; `sync.root` is the target collection; `sync.ignore` is a list of globs to skip. The plugin uses these for **Upload to eXist-db…** (Project-pane context menu) and, when `sync.onSave` is `true`, for **upload-on-save** (each saved file is mirrored to its mapped collection). The `server` URL is the eXist *servlet-context* root (e.g. `http://localhost:8080/exist`), and is matched to one of your saved connections (eXist-db pane → gear) so credentials come from there.
+
+- **`build`** *(plugin extension to the convention)* — how to build the app. All keys are optional:
+  - **`tool`** — `ant`, `maven`, `npm`, `gulp`, or `custom`.
+  - **`command`** — the exact shell command (defaults from `tool`: `ant`, `mvn package`, `npm run build`, `gulp`).
+  - **`artifact`** — a glob locating the produced `.xar` (defaults to the most recently built `.xar` under the directory).
+
+  When there is no `build` section (or no `.existdb.json` at all), the plugin **auto-detects** the tool from a build marker: `build.xml` → Ant, `pom.xml` → Maven, `package.json` → npm, `gulpfile.js` → gulp. So an existing eXist app with a standard `build.xml` builds with no configuration.
+
+  **Build-time parameters (e.g. a version).** Many eXist apps take the version as a build argument — the standard app `build.xml` substitutes `${app.version}` into `expath-pkg.xml`, and release tooling passes it (e.g. semantic-release runs `ant -Dapp.version=…`). Since `command` is a full shell command, just include the argument there for local builds: `"command": "ant -Dapp.version=1.0.0-dev"`. (Without it, a local `ant` leaves `${app.version}` unexpanded and produces an `.xar` that won't install cleanly.) Real release versions still come from your CI/release tooling; the `command` value is only for local Build / Build & Install.
+
+### Build & install
+
+The Project-pane context menu offers **Build** and **Build & Install**:
+
+- **Build** runs the resolved command and streams its output to the **eXist-db Build** console. Commands run through your **login shell** (`$SHELL -l -i -c`), so tools installed via Homebrew, asdf, nvm, etc. resolve exactly as they do in your terminal — no need to put them on Oxygen's PATH or hardcode paths.
+- **Build & Install** then installs the freshly built `.xar` on the target server with [`xst`](https://github.com/eXist-db/xst) (`xst package install`), over eXist's existing REST. The first time (before you trust the project) a dialog shows the build command and lets you pick/override the **target connection** (defaulting to the resolved one). Credentials always come from your saved connection and are passed to `xst` through the environment, never on the command line. (`xst` must be installed — `npm install --global @existdb/xst`.)
+
+Because running a project-defined command executes code on your machine, the first build per project shows a **trust prompt** with the exact command and directory; "Don't ask again for this project" remembers your choice (after which Build & Install is one click, to the resolved connection).
+
+### How the install connection is resolved
+
+Several files can name a server, so the plugin resolves the install target by a single, predictable rule and always lets you see and override it:
+
+1. **Closest-ancestor walk.** From the selected item, the plugin walks up (bounded by the project root) and uses the **first directory** that names a server, via either:
+   - **`.existdb.json`** — `sync.server` → the matching `servers` entry (the convention's primary descriptor), or
+   - **`.env`** — its `EXISTDB_SERVER` value (the [`xst`](https://github.com/eXist-db/xst) / [node-exist](https://github.com/eXist-db/node-exist) connection convention).
+2. **If a directory has both, `.existdb.json` wins** — it is the richer, plugin-native descriptor (it also carries the sync target and build section); `.env` is connection-only.
+3. **Credentials never come from the dotfile.** The resolved server URL is matched to one of your **saved connections** (eXist-db pane → gear), and that connection's stored (encrypted) credentials are used — the plugin never reads a password out of a `.env` or `.existdb.json`.
+4. **Fallbacks.** If no file names a server, or none matches a saved connection, the **default connection** is used. The Build & Install dialog shows the resolved connection and lets you change it, so the choice is always visible.
+
+(Browsing, opening, and saving in the eXist-db pane are unaffected by these files — they always use the saved connection named in the `exist://` URL.)
+
 ## Roadmap
 
 Notional development goals, roughly by priority vs. effort. **P0 is the current MVP** (the Features above); P1–P4 are planned and may change.
@@ -94,10 +159,13 @@ Limitations in Oxygen's plugin SDK (28.1) that forced a workaround here, or that
 
 - **Open a specific Preferences page programmatically.** No public API (e.g. `PluginWorkspace.showPreferencesPages(String[])`). A plugin *can* contribute a page via `OptionPagePluginExtension` (`<extension type="OptionPage">`), with per-key Global/Project scope via `getProjectLevelOptionKeys()` — but nothing can open it from our own UI. So we keep the query/result defaults in our own "Configure eXist-db Connections" dialog (reachable from the pane's gear) rather than Preferences; moving them to Preferences would lose that one-click access. *Unlocks:* relocating prefs to the native Preferences facility (with project/`.xpr` scoping) while still linking from the gear.
 - **Set an editor's display name independent of its URL.** No API to set a tab/Dock title or tooltip. We encode the server name into the `exist://<name-slug>/…` id so titles read meaningfully (and keep old slugs as aliases on rename). *Unlocks:* dropping the name-slug indirection and showing a friendly server label directly.
+- **Read the configured editor font.** No public API to get Oxygen's editor/text font (Preferences → Fonts); it's not exposed on the workspace and isn't even persisted in the options until the user customizes it. So the eXist-db Build console reads the font live off the active editor's text component instead (falling back to monospaced when no text editor is open). *Unlocks:* custom views/consoles matching the editor font directly, regardless of whether an editor is open.
+- **Associate a JSON Schema by file name from a framework.** XML document types bind a schema by namespace/root/filename, but a JSON document type can't drive JSON-Schema validation from a shipped framework purely by filename: the JSON validation machinery lives in `frameworks/json/json.jar` (not on the classpath), and Oxygen's own JSON-schema associations are done by patching the built-in JSON framework (`extensionPatch`/`poPatch`). So `.existdb.json` validation relies on the in-file `$schema` keyword instead of a filename-only association — the file must carry a `$schema` line. *Partial workaround:* a framework `catalog.xml` **does** get consulted when Oxygen resolves a JSON `$schema` URI, even for `.json` files owned by the built-in JSON framework — so we map the `$schema` URL to the bundled schema and validation works offline. (Earlier we believed framework catalogs only applied to a framework's own documents; that's wrong for `$schema` URI resolution.) The remaining gap is the *filename-only* binding (no `$schema` line in the file). *Unlocks:* shipping a "files named X validate against schema Y" JSON association the way XML document types can.
 - **Contribute to native XQuery content-completion and hover.** Oxygen owns content completion and mouse-hover for XQuery and only consults an external `ExternalContentCompletionProvider` when it has *no* proposals of its own, with no hook to merge ours into native Ctrl+Space / hover. So our eXist-aware completion, hover, and parameter hints are explicit actions (⌥⌘/, F1, ⇧⌘Space) instead of the native affordances. *Unlocks:* eXist proposals/docs appearing in Oxygen's own completion popup and hover tooltip.
 - **Override an editor accelerator cleanly.** Rebinding F1 (Oxygen's global Help accelerator) to our Hover Documentation required a `KeyEventDispatcher`; a component input-map binding loses to the global menu accelerator. *Unlocks:* per-editor shortcut overrides without a global key dispatcher.
 - **Alternating-row striping in `ApplicationTable`.** The factory table paints stripes only behind rows, not the empty area below the last row, so a custom view that wants full-height striping must paint its own (as the results view does). *Unlocks:* native-looking striped lists without custom painting.
 - **Hook into the XPath/XQuery Builder's result pipeline.** Beyond supplying the validation/transformation engine, there's no public hook to customize how the Builder renders or navigates results (e.g. stored-node jump-to-source) — which is why "Run Current Editor" uses its own Results-view integration. *Unlocks:* richer result navigation in the Builder's own pane.
+- **Register a Data Source Explorer driver / connection type.** None of the SDK's plugin extension types (verified against the full `*PluginExtension` set in `oxygen.jar` and the [Types of Plugin Extensions](https://www.oxygenxml.com/doc/ug-oxygen/topics/pluginTypes.html) list) lets a plugin add a driver, a database/native-XML connection type, or a node to the **Data Source Explorer**. The built-in driver list (Generic JDBC, eXist, MarkLogic, XQJ, …) is internal; a user can only add a *Generic JDBC* driver (JARs + driver class). The sole data-source API, `WorkspaceUtilities.getDataSourceAccess()`, is **read-only**: it lists/reads connections the user already configured (`getAvailableDataSourceConnectionInfos()`, `getDataSourceConnectionInfo(name)`; `DataSourceConnectionInfo` is an immutable property bag) with no register/add method. This is why we ship our own **eXist-db** tree view over existdb-openapi HTTP rather than appearing as a native driver — and why Oxygen's broken legacy XML:DB "eXist" data source can't be fixed from a plugin. *Unlocks:* a first-class eXist node in the Data Source Explorer (and, separately, importing an existing eXist data-source connection to pre-fill one of our profiles — the one thing the read-only API would already allow).
 - **Headless/embeddable Workspace-Access harness for tests.** The SDK has no embeddable workspace, so the in-Oxygen UI (views, tree, `exist:` registration) is verified by a manual smoke checklist rather than CI. *Unlocks:* automated UI-layer regression tests.
 
 ## Requirements

@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://exist-db.org/existdb-oxygen-plugin/schema/existdb-json",
+  "title": "eXist-db project descriptor (.existdb.json)",
+  "description": "Configuration for an eXist-db application worked on from disk: the servers it belongs to, how files sync to a collection, and (eXist-db Oxygen plugin extension) how it is built and installed. Shared with the eXist-db VS Code plugin / langserver, atom-existdb, xst and node-exist (which read the servers/sync connection).",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional reference to this schema."
+    },
+    "servers": {
+      "type": "object",
+      "description": "Named connections; the key is referenced by sync.server.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "server": {
+            "type": "string",
+            "description": "The eXist server root URL, e.g. http://localhost:8080/exist."
+          },
+          "user": {
+            "type": "string",
+            "description": "Username for authentication."
+          },
+          "password": {
+            "type": "string",
+            "description": "Password for the user (often empty for a local admin dev server)."
+          },
+          "root": {
+            "type": "string",
+            "description": "Default target collection, e.g. /db/apps/myapp."
+          }
+        },
+        "required": ["server"],
+        "additionalProperties": false
+      }
+    },
+    "sync": {
+      "type": "object",
+      "description": "How files sync to a collection (used for Upload to eXist-db and upload-on-save).",
+      "properties": {
+        "server": {
+          "type": "string",
+          "description": "Name of the servers entry to sync to."
+        },
+        "root": {
+          "type": "string",
+          "description": "Target collection the files are mirrored under, e.g. /db/apps/myapp."
+        },
+        "onSave": {
+          "type": "boolean",
+          "description": "When true, each saved file is uploaded to its mapped collection."
+        },
+        "ignore": {
+          "type": "array",
+          "description": "Glob patterns of files to skip (e.g. \".git/**\", \"node_modules/**\").",
+          "items": {"type": "string"}
+        },
+        "dir": {
+          "type": "string",
+          "description": "Subdirectory (relative to this file) treated as the sync root."
+        },
+        "polling": {
+          "type": "boolean",
+          "description": "Watch-and-sync via polling (consumed by some toolchains)."
+        },
+        "interval": {
+          "type": ["integer", "string"],
+          "description": "Polling interval (ms)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "build": {
+      "type": "object",
+      "description": "How the eXist-db Oxygen plugin builds and installs this app (plugin extension to the convention).",
+      "properties": {
+        "tool": {
+          "description": "The build tool. Optional — auto-detected from a build marker when absent.",
+          "enum": ["ant", "maven", "npm", "gulp", "custom"]
+        },
+        "command": {
+          "type": "string",
+          "description": "The exact shell command to build, run through the login shell. Include any build-time arguments here, e.g. \"ant -Dapp.version=1.0.0-dev\". Defaults from tool when absent."
+        },
+        "artifact": {
+          "type": "string",
+          "description": "Glob locating the produced .xar (relative to this file), e.g. \"build/*.xar\". Defaults to the most recently built .xar when absent."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
