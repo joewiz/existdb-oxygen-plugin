@@ -41,4 +41,7 @@
 
   <!-- The eXist-db results view (eXide-style paginated query results). -->
   <view id="ExistdbResultsViewID" initialSide="SOUTH" initialRow="0"/>
+
+  <!-- The eXist-db build console (streams output of project build commands). -->
+  <view id="ExistdbBuildViewID" initialSide="SOUTH" initialRow="1"/>
 </plugin>

@@ -325,6 +325,32 @@ public final class ProfileStore {
     options.set("existdb.expandedCollections", String.join("\n", paths));
   }
 
+  /**
+   * Absolute paths of project directories the user has approved for running build commands (the
+   * "don't ask again" set behind the build trust gate). Stored newline-separated.
+   */
+  public List<String> trustedBuildDirs() {
+    List<String> out = new ArrayList<>();
+    for (String dir : options.get("existdb.trustedBuildDirs", "").split("\n")) {
+      if (!dir.isBlank()) {
+        out.add(dir.trim());
+      }
+    }
+    return out;
+  }
+
+  public boolean isBuildDirTrusted(String absolutePath) {
+    return trustedBuildDirs().contains(absolutePath);
+  }
+
+  public void addTrustedBuildDir(String absolutePath) {
+    List<String> dirs = trustedBuildDirs();
+    if (!dirs.contains(absolutePath)) {
+      dirs.add(absolutePath);
+      options.set("existdb.trustedBuildDirs", String.join("\n", dirs));
+    }
+  }
+
   /** Registers a callback run whenever {@link #notifyResultsPrefsChanged()} is invoked. */
   public void addResultsPrefsListener(Runnable listener) {
     resultsPrefsListeners.add(listener);
