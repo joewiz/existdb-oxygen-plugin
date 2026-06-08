@@ -47,6 +47,54 @@ Right-click in an XQuery editor (or use the keyboard shortcuts) for the eXist-db
 
 The completion, hover (rich Markdown with Parameters/Returns), parameter hints, and variable-type hover need a server with existdb-openapi [#42](https://github.com/eXist-db/existdb-openapi/pull/42), [#44](https://github.com/eXist-db/existdb-openapi/pull/44), and [#45](https://github.com/eXist-db/existdb-openapi/pull/45); they degrade gracefully (show nothing) against older servers.
 
+## Project configuration (`.existdb.json`)
+
+When you work on an eXist app from the **Project** pane (files on disk, not the database), a `.existdb.json` in the app's directory tells the plugin which server the app belongs to and how to build and deploy it. This is the same `.existdb.json` convention used by [existdb-langserver](https://github.com/eXist-db/existdb-langserver) (and atom-existdb / vscode-existdb) — the plugin reads the established `servers` and `sync` sections and adds a `build` section described below.
+
+The descriptor is discovered by a **closest-ancestor walk**: from the selected file or folder the plugin walks up to the nearest directory containing a `.existdb.json` (bounded by the Oxygen project root), so a project that holds many app repositories side by side resolves each one to its own descriptor.
+
+```json
+{
+  "servers": {
+    "localhost": {
+      "server": "http://localhost:8080/exist",
+      "user": "admin",
+      "password": "",
+      "root": "/db/apps/my-app"
+    }
+  },
+  "sync": {
+    "server": "localhost",
+    "root": "/db/apps/my-app",
+    "onSave": true,
+    "ignore": [".git/**", "node_modules/**", "build/**"]
+  },
+  "build": {
+    "tool": "ant",
+    "command": "ant xar",
+    "artifact": "build/*.xar"
+  }
+}
+```
+
+- **`servers`** / **`sync`** — the standard sections. `sync.server` names which `servers` entry to use; `sync.root` is the target collection; `sync.ignore` is a list of globs to skip. The plugin uses these for **Upload to eXist-db…** (Project-pane context menu) and, when `sync.onSave` is `true`, for **upload-on-save** (each saved file is mirrored to its mapped collection). The `server` URL is the eXist *servlet-context* root (e.g. `http://localhost:8080/exist`), and is matched to one of your saved connections (eXist-db pane → gear) so credentials come from there.
+
+- **`build`** *(plugin extension to the convention)* — how to build the app. All keys are optional:
+  - **`tool`** — `ant`, `maven`, `npm`, `gulp`, or `custom`.
+  - **`command`** — the exact shell command (defaults from `tool`: `ant`, `mvn package`, `npm run build`, `gulp`).
+  - **`artifact`** — a glob locating the produced `.xar` (defaults to the most recently built `.xar` under the directory).
+
+  When there is no `build` section (or no `.existdb.json` at all), the plugin **auto-detects** the tool from a build marker: `build.xml` → Ant, `pom.xml` → Maven, `package.json` → npm, `gulpfile.js` → gulp. So an existing eXist app with a standard `build.xml` builds with no configuration.
+
+### Build & deploy
+
+The Project-pane context menu offers **Build** and **Build & Deploy**:
+
+- **Build** runs the resolved command and streams its output to the **eXist-db Build** console. Commands run through your **login shell** (`$SHELL -l -i -c`), so tools installed via Homebrew, asdf, nvm, etc. resolve exactly as they do in your terminal — no need to put them on Oxygen's PATH or hardcode paths.
+- **Build & Deploy** then installs the freshly built `.xar` on the target server with [`xst`](https://github.com/eXist-db/xst) (`xst package install`), which deploys over eXist's existing REST. Credentials are passed to `xst` through the environment, never on the command line. (`xst` must be installed — `npm install --global @existdb/xst`.)
+
+Because running a project-defined command executes code on your machine, the first build per project shows a **trust prompt** with the exact command and directory; "Don't ask again for this project" remembers your choice.
+
 ## Roadmap
 
 Notional development goals, roughly by priority vs. effort. **P0 is the current MVP** (the Features above); P1–P4 are planned and may change.
