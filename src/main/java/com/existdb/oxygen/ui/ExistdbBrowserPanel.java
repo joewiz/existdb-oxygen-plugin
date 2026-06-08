@@ -384,7 +384,17 @@ public final class ExistdbBrowserPanel extends JPanel {
   private void configureTree() {
     tree.setRootVisible(false);
     tree.setShowsRootHandles(true);
-    tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+    // Discontiguous selection enables shift-click spans and ⌘/Ctrl-click toggles across the tree.
+    tree.getSelectionModel().setSelectionMode(TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION);
+    // ⌦ (forward delete) removes the selected resource(s)/collection(s), matching the Delete menu.
+    tree.getInputMap(WHEN_FOCUSED)
+        .put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), "existDelete");
+    tree.getActionMap().put("existDelete", new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        deleteSelected();
+      }
+    });
     ExistTreeCellRenderer renderer = new ExistTreeCellRenderer();
     tree.setCellRenderer(renderer);
     // Inline rename (Finder/Project style): click an already-selected resource to edit its name.
@@ -605,12 +615,64 @@ public final class ExistdbBrowserPanel extends JPanel {
     if (path == null) {
       return;
     }
-    tree.setSelectionPath(path);
+    // Preserve a multi-selection when right-clicking inside it; otherwise select just the clicked row.
+    if (!tree.isPathSelected(path)) {
+      tree.setSelectionPath(path);
+    }
+    List<DefaultMutableTreeNode> selected = selectedNodes();
+    if (selected.size() > 1) {
+      multiSelectionMenu(selected).show(tree, e.getX(), e.getY());
+      return;
+    }
     if (!(path.getLastPathComponent() instanceof DefaultMutableTreeNode node)
         || !(node.getUserObject() instanceof ExistNode existNode)) {
       return;
     }
     contextMenu(node, existNode).show(tree, e.getX(), e.getY());
+  }
+
+  /** The selected tree nodes that carry an {@link ExistNode} (empty if none/placeholder rows). */
+  private List<DefaultMutableTreeNode> selectedNodes() {
+    TreePath[] paths = tree.getSelectionPaths();
+    List<DefaultMutableTreeNode> nodes = new ArrayList<>();
+    if (paths == null) {
+      return nodes;
+    }
+    for (TreePath p : paths) {
+      if (p.getLastPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode) {
+        nodes.add(node);
+      }
+    }
+    return nodes;
+  }
+
+  /** The reduced contextual menu shown when several rows are selected: batch open/download/delete. */
+  private JPopupMenu multiSelectionMenu(List<DefaultMutableTreeNode> nodes) {
+    JPopupMenu menu = new JPopupMenu();
+    long resources = nodes.stream().filter(n -> !asExist(n).collection).count();
+    if (resources > 0) {
+      menu.add(menuItem("Open " + resources + " " + plural(resources, "resource"),
+          "/images/Open16.png", null, () -> batchOpen(nodes)));
+      menu.add(menuItem("Download " + resources + " " + plural(resources, "resource") + "…",
+          "/images/Save16.png", null, () -> batchDownload(nodes)));
+    }
+    menu.add(menuItem("Copy " + nodes.size() + " Locations", () -> copyLocations(nodes)));
+    long deletable = nodes.stream().filter(n -> !DB_ROOT.equals(asExist(n).path)).count();
+    if (deletable > 0) {
+      menu.addSeparator();
+      menu.add(menuItem("Delete " + deletable + " " + plural(deletable, "item") + "…",
+          "/images/Remove16.png", null, () -> batchDelete(nodes)));
+    }
+    return menu;
+  }
+
+  private static ExistNode asExist(DefaultMutableTreeNode node) {
+    return (ExistNode) node.getUserObject();
+  }
+
+  private static String plural(long count, String noun) {
+    return count == 1 ? noun : noun + "s";
   }
 
   private JPopupMenu contextMenu(DefaultMutableTreeNode node, ExistNode existNode) {
@@ -824,6 +886,207 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
+  }
+
+  /** Deletes the current selection: a single node via the single-node flow, several via a batch. */
+  private void deleteSelected() {
+    List<DefaultMutableTreeNode> nodes = selectedNodes();
+    if (nodes.size() == 1) {
+      ExistNode en = asExist(nodes.get(0));
+      if (!DB_ROOT.equals(en.path)) {
+        deleteNode(nodes.get(0), en);
+      }
+    } else if (nodes.size() > 1) {
+      batchDelete(nodes);
+    }
+  }
+
+  /** Deletes every selected resource/collection (skipping server roots) after one combined confirm. */
+  private void batchDelete(List<DefaultMutableTreeNode> nodes) {
+    List<DefaultMutableTreeNode> targets = deletableNodes(nodes);
+    if (targets.isEmpty() || !confirmBatchDelete(targets.size())) {
+      return;
+    }
+    new SwingWorker<List<DefaultMutableTreeNode>, Void>() {
+      private final List<String> failures = new ArrayList<>();
+
+      @Override
+      protected List<DefaultMutableTreeNode> doInBackground() {
+        return runDeletions(targets, failures);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          applyDeletions(get(), failures);
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }.execute();
+  }
+
+  /** The subset of {@code nodes} that may be deleted — everything but a server's {@code /db} root. */
+  private List<DefaultMutableTreeNode> deletableNodes(List<DefaultMutableTreeNode> nodes) {
+    List<DefaultMutableTreeNode> targets = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      if (!DB_ROOT.equals(asExist(node).path)) {
+        targets.add(node);
+      }
+    }
+    return targets;
+  }
+
+  private boolean confirmBatchDelete(int count) {
+    return workspace.showConfirmDialog("Confirm delete",
+        "Delete these " + count + " items from eXist-db? Collections are removed with all their "
+            + "contents. This cannot be undone.",
+        new String[] {"Delete", "Cancel"}, new int[] {0, 1}) == 0;
+  }
+
+  /** Deletes each target off the EDT, collecting failures; returns the nodes actually removed. */
+  private List<DefaultMutableTreeNode> runDeletions(List<DefaultMutableTreeNode> targets,
+      List<String> failures) {
+    List<DefaultMutableTreeNode> deleted = new ArrayList<>();
+    for (DefaultMutableTreeNode node : targets) {
+      String failure = deleteOne(node);
+      if (failure == null) {
+        deleted.add(node);
+      } else {
+        failures.add(failure);
+      }
+    }
+    return deleted;
+  }
+
+  /** Removes the deleted nodes from the tree, closes their editors, and reports the outcome. */
+  private void applyDeletions(List<DefaultMutableTreeNode> deleted, List<String> failures) {
+    for (DefaultMutableTreeNode node : deleted) {
+      if (node.getParent() != null) {
+        treeModel.removeNodeFromParent(node);
+      }
+      offerToCloseDeletedEditors(asExist(node));
+    }
+    reportBatch("Deleted", deleted.size(), failures);
+  }
+
+  /** Deletes one node's resource/collection; returns {@code null} on success or a failure line. */
+  private String deleteOne(DefaultMutableTreeNode node) {
+    ExistNode en = asExist(node);
+    ExistClient client = ExistContext.clientById(en.serverId);
+    if (client == null) {
+      return en.path + " (not connected)";
+    }
+    try {
+      if (en.collection) {
+        client.deleteCollection(en.path);
+      } else {
+        client.deleteResource(en.path);
+      }
+      return null;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      return en.path + " (interrupted)";
+    } catch (Exception ex) {
+      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+      return en.path + " (" + cause.getMessage() + ")";
+    }
+  }
+
+  /** Downloads every selected resource (collections are skipped) into the user's Downloads folder. */
+  private void batchDownload(List<DefaultMutableTreeNode> nodes) {
+    List<ExistNode> resources = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      ExistNode en = asExist(node);
+      if (!en.collection) {
+        resources.add(en);
+      }
+    }
+    if (resources.isEmpty()) {
+      workspace.showInformationMessage(
+          "Select one or more resources to download (collections can't be downloaded).");
+      return;
+    }
+    final Path dir = Path.of(System.getProperty("user.home"), "Downloads");
+    new SwingWorker<List<String>, Void>() {
+      @Override
+      protected List<String> doInBackground() {
+        List<String> failures = new ArrayList<>();
+        for (ExistNode en : resources) {
+          String failure = downloadOne(en, dir);
+          if (failure != null) {
+            failures.add(failure);
+          }
+        }
+        return failures;
+      }
+
+      @Override
+      protected void done() {
+        List<String> failures;
+        try {
+          failures = get();
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        reportBatch("Downloaded", resources.size() - failures.size(), failures);
+      }
+    }.execute();
+  }
+
+  /** Downloads one resource into {@code dir}; returns {@code null} on success or a failure line. */
+  private String downloadOne(ExistNode en, Path dir) {
+    ExistClient client = ExistContext.clientById(en.serverId);
+    if (client == null) {
+      return en.path + " (not connected)";
+    }
+    try {
+      ExistClient.ResourceBytes resource = client.readResource(en.path);
+      Files.write(dir.resolve(en.name), resource.bytes());
+      return null;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      return en.path + " (interrupted)";
+    } catch (Exception ex) {
+      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+      return en.path + " (" + cause.getMessage() + ")";
+    }
+  }
+
+  /** Opens every selected resource (collections are skipped) in its own editor tab. */
+  private void batchOpen(List<DefaultMutableTreeNode> nodes) {
+    int opened = 0;
+    for (DefaultMutableTreeNode node : nodes) {
+      ExistNode en = asExist(node);
+      if (!en.collection && openOne(en)) {
+        opened++;
+      }
+    }
+    if (opened > 0) {
+      workspace.showStatusMessage("Opened " + opened + " " + plural(opened, "resource"));
+    }
+  }
+
+  /** Copies the selected resources'/collections' DB paths to the clipboard, one per line. */
+  private void copyLocations(List<DefaultMutableTreeNode> nodes) {
+    List<String> paths = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      paths.add(asExist(node).path);
+    }
+    Toolkit.getDefaultToolkit().getSystemClipboard()
+        .setContents(new StringSelection(String.join("\n", paths)), null);
+    workspace.showStatusMessage("Copied " + paths.size() + " locations");
+  }
+
+  /** Status (all succeeded) or error (with the failure lines) summary for a batch operation. */
+  private void reportBatch(String verb, int succeeded, List<String> failures) {
+    if (failures.isEmpty()) {
+      workspace.showStatusMessage(verb + " " + succeeded + " " + plural(succeeded, "item"));
+    } else {
+      workspace.showErrorMessage(verb + " " + succeeded + ", failed " + failures.size() + ":\n"
+          + String.join("\n", failures));
+    }
   }
 
   private void newResource(DefaultMutableTreeNode node, ExistNode coll) {
@@ -1329,13 +1592,21 @@ public final class ExistdbBrowserPanel extends JPanel {
       tree.expandPath(new TreePath(node.getPath()));
       return;
     }
+    openOne(existNode);
+  }
+
+  /** Opens one stored resource in an editor; returns {@code true} if Oxygen opened it. */
+  private boolean openOne(ExistNode existNode) {
     try {
       URL url = ExistURLStreamHandler.toUrl(existNode.serverId, existNode.path);
-      if (!workspace.open(url)) {
-        workspace.showErrorMessage("Oxygen declined to open " + existNode.path);
+      if (workspace.open(url)) {
+        return true;
       }
+      workspace.showErrorMessage("Oxygen declined to open " + existNode.path);
+      return false;
     } catch (Exception ex) {
       workspace.showErrorMessage("Failed to open " + existNode.path + ": " + ex.getMessage());
+      return false;
     }
   }
 
