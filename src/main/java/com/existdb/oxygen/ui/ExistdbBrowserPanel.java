@@ -35,6 +35,7 @@ import ro.sync.exml.workspace.api.editor.WSEditor;
 import ro.sync.exml.workspace.api.listeners.WSEditorChangeListener;
 import ro.sync.exml.workspace.api.listeners.WSEditorListener;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
+import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
@@ -76,9 +77,9 @@ import javax.swing.DropMode;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
@@ -789,10 +790,10 @@ public final class ExistdbBrowserPanel extends JPanel {
       return;
     }
     String kind = existNode.collection ? "collection (and all its contents)" : "resource";
-    int choice = JOptionPane.showConfirmDialog(this,
+    int choice = workspace.showConfirmDialog("Confirm delete",
         "Delete the " + kind + " " + existNode.path + "?",
-        "Confirm delete", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-    if (choice != JOptionPane.OK_OPTION) {
+        new String[] {"Delete", "Cancel"}, new int[] {0, 1});
+    if (choice != 0) {
       return;
     }
     final DefaultMutableTreeNode parent = (DefaultMutableTreeNode) node.getParent();
@@ -922,11 +923,11 @@ public final class ExistdbBrowserPanel extends JPanel {
     for (WSEditor editor : affectedEditors(existNode)) {
       String dbPath = LangServiceSupport.dbPath(editor.getEditorLocation().toString());
       // Mirror Oxygen's native Missing-File prompt (wording, Yes = keep open).
-      int choice = JOptionPane.showConfirmDialog(this,
+      int choice = workspace.showConfirmDialog("Missing File",
           "The following resource no longer exists in the database:\n" + dbPath
               + "\n\nKeep it open in the editor?",
-          "Missing File", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-      if (choice == JOptionPane.YES_OPTION) {
+          new String[] {"Keep Open", "Close"}, new int[] {0, 1});
+      if (choice == 0) {
         editor.setModified(true); // mark dirty so a save re-creates the resource
       } else {
         editor.close(false);
@@ -977,12 +978,21 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   /** Prompts for a single path segment, rejecting blanks and names containing {@code /}. */
   private String promptName(String title, String prompt, String initial) {
-    Object input = JOptionPane.showInputDialog(this, prompt, title,
-        JOptionPane.PLAIN_MESSAGE, null, null, initial);
-    if (input == null) {
+    JTextField field = OxygenUIComponentsFactory.createTextField();
+    field.setColumns(30);
+    field.setText(initial == null ? "" : initial);
+    JPanel panel = new JPanel(new BorderLayout(8, 8));
+    panel.add(new JLabel(prompt), BorderLayout.NORTH);
+    panel.add(field, BorderLayout.CENTER);
+    OKCancelDialog dialog = OxygenUIComponentsFactory.createOkCancelDialog(ownerFrame(), title, true);
+    dialog.getContentPane().add(panel, BorderLayout.CENTER);
+    dialog.pack();
+    dialog.setLocationRelativeTo(this);
+    dialog.setVisible(true);
+    if (dialog.getResult() != OKCancelDialog.RESULT_OK) {
       return null;
     }
-    String name = input.toString().trim();
+    String name = field.getText().trim();
     if (name.isEmpty() || name.contains("/")) {
       workspace.showErrorMessage("Please enter a name without a '/'.");
       return null;
@@ -1508,11 +1518,10 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   private boolean confirmCollectionRelocate(String path, boolean copy) {
-    return JOptionPane.showConfirmDialog(this,
-        (copy ? "Copy" : "Move") + " the collection " + path + "? "
-            + "It is transferred recursively and may take a while.",
-        (copy ? "Copy" : "Move") + " collection",
-        JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+    String verb = copy ? "Copy" : "Move";
+    return workspace.showConfirmDialog(verb + " collection",
+        verb + " the collection " + path + "? It is transferred recursively and may take a while.",
+        new String[] {verb, "Cancel"}, new int[] {0, 1}) == 0;
   }
 
   private void performRelocate(ExistClient sourceClient, ExistClient targetClient,
@@ -1714,10 +1723,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** Asks (on the EDT) whether to overwrite colliding resources; returns the user's choice. */
   private boolean confirmOverwrite(String collectionPath) {
     final boolean[] confirmed = {false};
-    Runnable ask = () -> confirmed[0] = JOptionPane.showConfirmDialog(this,
+    Runnable ask = () -> confirmed[0] = workspace.showConfirmDialog("Confirm overwrite",
         "Some items already exist in " + collectionPath + ". Overwrite them?",
-        "Confirm overwrite", JOptionPane.OK_CANCEL_OPTION,
-        JOptionPane.WARNING_MESSAGE) == JOptionPane.OK_OPTION;
+        new String[] {"Overwrite", "Cancel"}, new int[] {0, 1}) == 0;
     try {
       if (SwingUtilities.isEventDispatchThread()) {
         ask.run();

@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistClient.AvailablePackage;
 
+import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -39,7 +40,6 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
@@ -62,7 +62,6 @@ public final class AvailablePackagesDialog {
   private final AvailableTableModel model;
   private final JTable table;
 
-  private transient OKCancelDialog host;
   private JButton installButton;
   private JLabel statusLabel;
 
@@ -83,7 +82,8 @@ public final class AvailablePackagesDialog {
   }
 
   private void show() {
-    host = OxygenUIComponentsFactory.createOkCancelDialog(owner, "Install New Package", true);
+    OKCancelDialog host =
+        OxygenUIComponentsFactory.createOkCancelDialog(owner, "Install New Package", true);
     host.getContentPane().add(buildContent(), BorderLayout.CENTER);
     host.pack();
     host.setLocationRelativeTo(owner);
@@ -157,8 +157,8 @@ public final class AvailablePackagesDialog {
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           statusLabel.setText("Install failed: " + cause.getMessage());
-          JOptionPane.showMessageDialog(host, "Install failed:\n" + cause.getMessage(),
-              "Install New Package", JOptionPane.ERROR_MESSAGE);
+          PluginWorkspaceProvider.getPluginWorkspace().showErrorMessage(
+              "Install failed:\n" + cause.getMessage());
         } finally {
           updateInstallEnabled();
         }

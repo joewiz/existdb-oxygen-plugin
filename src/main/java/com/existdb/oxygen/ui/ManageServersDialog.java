@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
+import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -52,7 +53,6 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
 import javax.swing.JTable;
@@ -95,7 +95,6 @@ public final class ManageServersDialog {
       new JCheckBox("Restore open collections on startup");
 
   private transient ConnectionProfile defaultProfile;
-  private transient OKCancelDialog host;
   private transient Action moveUpAction;
   private transient Action moveDownAction;
 
@@ -121,7 +120,7 @@ public final class ManageServersDialog {
   }
 
   private boolean show() {
-    host =
+    OKCancelDialog host =
         OxygenUIComponentsFactory.createOkCancelDialog(owner, "Configure eXist-db Connections", true);
     host.getContentPane().add(buildContent(), BorderLayout.CENTER);
     if (!profiles.isEmpty()) {
@@ -427,9 +426,10 @@ public final class ManageServersDialog {
     if (p == null) {
       return;
     }
-    int choice = JOptionPane.showConfirmDialog(host, "Remove the server \"" + p.getName() + "\"?",
-        "Remove server", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-    if (choice == JOptionPane.OK_OPTION) {
+    int choice = PluginWorkspaceProvider.getPluginWorkspace().showConfirmDialog(
+        "Remove server", "Remove the server \"" + p.getName() + "\"?",
+        new String[] {"Remove", "Cancel"}, new int[] {0, 1});
+    if (choice == 0) {
       profiles.remove(p);
       if (p == defaultProfile) {
         defaultProfile = null;

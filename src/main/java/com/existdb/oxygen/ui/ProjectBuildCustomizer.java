@@ -31,7 +31,10 @@ import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.project.ProjectController;
 import ro.sync.exml.workspace.api.standalone.project.ProjectPopupMenuCustomizer;
+import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
+import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
+import java.awt.BorderLayout;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GridLayout;
@@ -48,9 +51,9 @@ import java.util.Optional;
 import javax.swing.ImageIcon;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.text.JTextComponent;
@@ -216,9 +219,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     panel.add(new JLabel("Install to:"));
     panel.add(serverCombo);
     panel.add(remember);
-    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build and Install",
-        JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-    if (choice != JOptionPane.OK_OPTION) {
+    if (!showConfirm("Build and Install", panel)) {
       return null;
     }
     if (remember.isSelected()) {
@@ -290,9 +291,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     panel.add(new JLabel(config.command()));
     panel.add(new JLabel(dirPath));
     panel.add(remember);
-    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build",
-        JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-    if (choice != JOptionPane.OK_OPTION) {
+    if (!showConfirm("Build", panel)) {
       return false;
     }
     if (remember.isSelected()) {
@@ -313,6 +312,16 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     } catch (URISyntaxException e) {
       return null;
     }
+  }
+
+  /** Shows {@code content} in a native Oxygen OK/Cancel dialog; returns true when OK was pressed. */
+  private boolean showConfirm(String title, JComponent content) {
+    OKCancelDialog dialog = OxygenUIComponentsFactory.createOkCancelDialog(activeFrame(), title, true);
+    dialog.getContentPane().add(content, BorderLayout.CENTER);
+    dialog.pack();
+    dialog.setLocationRelativeTo(activeFrame());
+    dialog.setVisible(true);
+    return dialog.getResult() == OKCancelDialog.RESULT_OK;
   }
 
   /**

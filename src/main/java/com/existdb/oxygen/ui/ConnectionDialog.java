@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.model.ConnectionProfile;
 
+import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -39,7 +40,6 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
@@ -148,13 +148,11 @@ public final class ConnectionDialog {
     try {
       client.systemInfo();
       String who = client.whoamiUser();
-      JOptionPane.showMessageDialog(host,
-          "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".",
-          "Test connection", JOptionPane.INFORMATION_MESSAGE);
+      PluginWorkspaceProvider.getPluginWorkspace().showInformationMessage(
+          "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".");
     } catch (Exception ex) {
-      JOptionPane.showMessageDialog(host,
-          "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage(),
-          "Test connection", JOptionPane.ERROR_MESSAGE);
+      PluginWorkspaceProvider.getPluginWorkspace().showErrorMessage(
+          "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage());
     }
   }
 
