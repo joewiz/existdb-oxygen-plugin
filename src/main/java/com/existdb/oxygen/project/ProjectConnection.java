@@ -27,7 +27,7 @@ import java.nio.file.Files;
 import java.util.Optional;
 
 /**
- * Resolves which eXist-db server a filesystem project deploys to, recognizing the two connection
+ * Resolves which eXist-db server a filesystem project installs to, recognizing the two connection
  * conventions in the eXist toolchain: the {@code .existdb.json} sync descriptor (eXistdb VS Code
  * plugin / langserver) and a {@code .env} file ({@code EXISTDB_SERVER}, the xst / node-exist
  * convention).

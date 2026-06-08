@@ -49,7 +49,7 @@ The completion, hover (rich Markdown with Parameters/Returns), parameter hints, 
 
 ## Project configuration (`.existdb.json`)
 
-When you work on an eXist app from the **Project** pane (files on disk, not the database), a `.existdb.json` in the app's directory tells the plugin which server the app belongs to and how to build and deploy it. This is the same `.existdb.json` convention used by [existdb-langserver](https://github.com/eXist-db/existdb-langserver) (and atom-existdb / vscode-existdb) — the plugin reads the established `servers` and `sync` sections and adds a `build` section described below.
+When you work on an eXist app from the **Project** pane (files on disk, not the database), a `.existdb.json` in the app's directory tells the plugin which server the app belongs to and how to build and install it. This is the same `.existdb.json` convention used by [existdb-langserver](https://github.com/eXist-db/existdb-langserver) (and atom-existdb / vscode-existdb) — the plugin reads the established `servers` and `sync` sections and adds a `build` section described below.
 
 The descriptor is discovered by a **closest-ancestor walk**: from the selected file or folder the plugin walks up to the nearest directory containing a `.existdb.json` (bounded by the Oxygen project root), so a project that holds many app repositories side by side resolves each one to its own descriptor.
 
@@ -86,25 +86,25 @@ The descriptor is discovered by a **closest-ancestor walk**: from the selected f
 
   When there is no `build` section (or no `.existdb.json` at all), the plugin **auto-detects** the tool from a build marker: `build.xml` → Ant, `pom.xml` → Maven, `package.json` → npm, `gulpfile.js` → gulp. So an existing eXist app with a standard `build.xml` builds with no configuration.
 
-### Build & deploy
+### Build & install
 
-The Project-pane context menu offers **Build** and **Build & Deploy**:
+The Project-pane context menu offers **Build** and **Build & Install**:
 
 - **Build** runs the resolved command and streams its output to the **eXist-db Build** console. Commands run through your **login shell** (`$SHELL -l -i -c`), so tools installed via Homebrew, asdf, nvm, etc. resolve exactly as they do in your terminal — no need to put them on Oxygen's PATH or hardcode paths.
-- **Build & Deploy** then installs the freshly built `.xar` on the target server with [`xst`](https://github.com/eXist-db/xst) (`xst package install`), which deploys over eXist's existing REST. The first time (before you trust the project) a dialog shows the build command and lets you pick/override the **deploy connection** (defaulting to the resolved one). Credentials always come from your saved connection and are passed to `xst` through the environment, never on the command line. (`xst` must be installed — `npm install --global @existdb/xst`.)
+- **Build & Install** then installs the freshly built `.xar` on the target server with [`xst`](https://github.com/eXist-db/xst) (`xst package install`), over eXist's existing REST. The first time (before you trust the project) a dialog shows the build command and lets you pick/override the **target connection** (defaulting to the resolved one). Credentials always come from your saved connection and are passed to `xst` through the environment, never on the command line. (`xst` must be installed — `npm install --global @existdb/xst`.)
 
-Because running a project-defined command executes code on your machine, the first build per project shows a **trust prompt** with the exact command and directory; "Don't ask again for this project" remembers your choice (after which Build & Deploy is one click, to the resolved connection).
+Because running a project-defined command executes code on your machine, the first build per project shows a **trust prompt** with the exact command and directory; "Don't ask again for this project" remembers your choice (after which Build & Install is one click, to the resolved connection).
 
-### How the deploy connection is resolved
+### How the install connection is resolved
 
-Several files can name a server, so the plugin resolves the deploy target by a single, predictable rule and always lets you see and override it:
+Several files can name a server, so the plugin resolves the install target by a single, predictable rule and always lets you see and override it:
 
 1. **Closest-ancestor walk.** From the selected item, the plugin walks up (bounded by the project root) and uses the **first directory** that names a server, via either:
    - **`.existdb.json`** — `sync.server` → the matching `servers` entry (the convention's primary descriptor), or
    - **`.env`** — its `EXISTDB_SERVER` value (the [`xst`](https://github.com/eXist-db/xst) / [node-exist](https://github.com/eXist-db/node-exist) connection convention).
 2. **If a directory has both, `.existdb.json` wins** — it is the richer, plugin-native descriptor (it also carries the sync target and build section); `.env` is connection-only.
 3. **Credentials never come from the dotfile.** The resolved server URL is matched to one of your **saved connections** (eXist-db pane → gear), and that connection's stored (encrypted) credentials are used — the plugin never reads a password out of a `.env` or `.existdb.json`.
-4. **Fallbacks.** If no file names a server, or none matches a saved connection, the **default connection** is used. The Build & Deploy dialog shows the resolved connection and lets you change it, so the choice is always visible.
+4. **Fallbacks.** If no file names a server, or none matches a saved connection, the **default connection** is used. The Build & Install dialog shows the resolved connection and lets you change it, so the choice is always visible.
 
 (Browsing, opening, and saving in the eXist-db pane are unaffected by these files — they always use the saved connection named in the `exist://` URL.)
 

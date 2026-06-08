@@ -92,7 +92,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
       return;
     }
     menu.add(menuItem("Build", () -> build(selected[0], false)));
-    menu.add(menuItem("Build & Deploy", () -> build(selected[0], true)));
+    menu.add(menuItem("Build & Install", () -> build(selected[0], true)));
   }
 
   private JMenuItem menuItem(String label, Runnable action) {
@@ -104,16 +104,16 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     return item;
   }
 
-  private void build(File selected, boolean deploy) {
+  private void build(File selected, boolean installAfter) {
     BuildConfig config = BuildConfig.findNearest(selected, projectRoot()).orElse(null);
     if (config == null) {
       workspace.showInformationMessage("No build file found for this selection — add a \"build\" "
           + "section to .existdb.json, or a build.xml, pom.xml, package.json, or gulpfile.js.");
       return;
     }
-    DeployTarget target;
-    if (deploy) {
-      target = chooseDeployTarget(config);
+    InstallTarget target;
+    if (installAfter) {
+      target = chooseInstallTarget(config);
       if (target == null) {
         return; // no saved connections, or the user cancelled
       }
@@ -133,7 +133,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
         exitCode -> onBuildFinished(config, exitCode, target));
   }
 
-  private void onBuildFinished(BuildConfig config, int exitCode, DeployTarget target) {
+  private void onBuildFinished(BuildConfig config, int exitCode, InstallTarget target) {
     console.appendLine("");
     if (exitCode != 0) {
       console.appendLine("BUILD FAILED (exit code " + exitCode + ")");
@@ -146,15 +146,15 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     if (target == null) {
       workspace.showStatusMessage("Build succeeded: " + config.dir().getName());
     } else if (artifact.isEmpty()) {
-      console.appendLine("No .xar artifact found to deploy.");
-      workspace.showStatusMessage("Build succeeded, but no .xar to deploy");
+      console.appendLine("No .xar artifact found to install.");
+      workspace.showStatusMessage("Build succeeded, but no .xar to install");
     } else {
-      deploy(config.dir(), artifact.get(), target);
+      install(config.dir(), artifact.get(), target);
     }
   }
 
   /** Installs the built {@code .xar} on the target server via {@code xst package install}. */
-  private void deploy(File dir, File xar, DeployTarget target) {
+  private void install(File dir, File xar, InstallTarget target) {
     console.appendLine("");
     console.appendLine("$ xst package install " + xar.getName()
         + "  →  " + target.serverRoot() + " (as " + target.user() + ")");
@@ -170,31 +170,31 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     BuildRunner.run(command, dir, env, console::appendLine, exitCode -> {
       console.appendLine("");
       if (exitCode == 0) {
-        console.appendLine("DEPLOY SUCCESSFUL");
-        workspace.showStatusMessage("Deployed " + xar.getName() + " to " + target.label());
+        console.appendLine("INSTALL SUCCESSFUL");
+        workspace.showStatusMessage("Installed " + xar.getName() + " to " + target.label());
       } else {
-        console.appendLine("DEPLOY FAILED (exit code " + exitCode + ")");
-        workspace.showStatusMessage("Deploy failed: " + xar.getName());
+        console.appendLine("INSTALL FAILED (exit code " + exitCode + ")");
+        workspace.showStatusMessage("Install failed: " + xar.getName());
       }
     });
   }
 
-  /** Where to deploy: the eXist server root + credentials, and a display label. */
-  private record DeployTarget(String serverRoot, String user, String password,
+  /** Where to install: the eXist server root + credentials, and a display label. */
+  private record InstallTarget(String serverRoot, String user, String password,
       boolean acceptSelfSigned, String label) {
 
-    static DeployTarget of(ConnectionProfile profile) {
-      return new DeployTarget(profile.getServerRoot(), profile.getUser(), profile.getPassword(),
+    static InstallTarget of(ConnectionProfile profile) {
+      return new InstallTarget(profile.getServerRoot(), profile.getUser(), profile.getPassword(),
           profile.isAcceptSelfSigned(), profile.getName());
     }
   }
 
   /**
-   * Resolves the deploy target, deploying always through a saved connection (the credential store).
-   * A trusted project deploys one-click to its resolved connection; otherwise the user confirms and
+   * Resolves the install target, installing always through a saved connection (the credential store).
+   * A trusted project installs one-click to its resolved connection; otherwise the user confirms and
    * may override the server. Returns {@code null} when there are no connections or the user cancels.
    */
-  private DeployTarget chooseDeployTarget(BuildConfig config) {
+  private InstallTarget chooseInstallTarget(BuildConfig config) {
     List<ConnectionProfile> profiles = profileStore.loadAll();
     if (profiles.isEmpty()) {
       workspace.showInformationMessage("Add an eXist-db connection first (eXist-db pane → gear).");
@@ -203,20 +203,20 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     ConnectionProfile resolved = resolveDefaultProfile(config.dir(), profiles);
     String dirPath = config.dir().getAbsolutePath();
     if (profileStore.isBuildDirTrusted(dirPath)) {
-      return DeployTarget.of(resolved); // trusted → one-click to the resolved connection
+      return InstallTarget.of(resolved); // trusted → one-click to the resolved connection
     }
     String[] names = profiles.stream().map(ConnectionProfile::getName).toArray(String[]::new);
     JComboBox<String> serverCombo = new JComboBox<>(names);
     serverCombo.setSelectedIndex(Math.max(0, profiles.indexOf(resolved)));
     JCheckBox remember = new JCheckBox("Don't ask again for this project");
     JPanel panel = new JPanel(new GridLayout(0, 1, 0, 4));
-    panel.add(new JLabel("Build, then deploy this project?"));
+    panel.add(new JLabel("Build, then install this project?"));
     panel.add(new JLabel(config.command()));
     panel.add(new JLabel(dirPath));
-    panel.add(new JLabel("Deploy to:"));
+    panel.add(new JLabel("Install to:"));
     panel.add(serverCombo);
     panel.add(remember);
-    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build and Deploy",
+    int choice = JOptionPane.showConfirmDialog(activeFrame(), panel, "Build and Install",
         JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
     if (choice != JOptionPane.OK_OPTION) {
       return null;
@@ -224,11 +224,11 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     if (remember.isSelected()) {
       profileStore.addTrustedBuildDir(dirPath);
     }
-    return DeployTarget.of(profiles.get(serverCombo.getSelectedIndex()));
+    return InstallTarget.of(profiles.get(serverCombo.getSelectedIndex()));
   }
 
   /**
-   * The connection to deploy {@code buildRoot} to by default: the server named in the closest
+   * The connection to install {@code buildRoot} to by default: the server named in the closest
    * {@code .existdb.json} or {@code .env} (see {@link ProjectConnection}) matched to a saved
    * connection, falling back to the default connection.
    */
