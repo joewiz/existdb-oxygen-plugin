@@ -26,6 +26,7 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
@@ -49,11 +50,22 @@ public final class BuildRunner {
 
   /** Runs {@code command} in {@code dir}, streaming output to {@code onLine}, then {@code onDone(exit)}. */
   public static void run(String command, File dir, Consumer<String> onLine, IntConsumer onDone) {
+    run(command, dir, Map.of(), onLine, onDone);
+  }
+
+  /**
+   * As {@link #run(String, File, Consumer, IntConsumer)}, with extra environment variables merged
+   * into the process environment (e.g. {@code EXISTDB_SERVER}/{@code EXISTDB_USER}/{@code EXISTDB_PASS}
+   * for {@code xst}). Keeping secrets in the environment avoids putting them on the command line.
+   */
+  public static void run(String command, File dir, Map<String, String> env,
+      Consumer<String> onLine, IntConsumer onDone) {
     new SwingWorker<Integer, String>() {
       @Override
       protected Integer doInBackground() throws Exception {
         ProcessBuilder pb = new ProcessBuilder(shellCommand(command));
         pb.directory(dir);
+        pb.environment().putAll(env);
         pb.redirectErrorStream(true);
         // Never block on stdin: a build tool that reads input would otherwise hang the worker.
         pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
