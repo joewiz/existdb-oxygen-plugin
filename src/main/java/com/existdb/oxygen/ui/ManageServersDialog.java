@@ -127,7 +127,7 @@ public final class ManageServersDialog {
       table.setRowSelectionInterval(0, 0);
     }
     host.setResizable(true);
-    host.setSize(720, 380);
+    host.pack();
     host.setLocationRelativeTo(owner);
     host.setVisible(true);
     if (host.getResult() == OKCancelDialog.RESULT_OK) {
@@ -182,11 +182,14 @@ public final class ManageServersDialog {
     JPanel actions = new JPanel(new BorderLayout());
     actions.add(right, BorderLayout.EAST);
 
+    JComponent connectionsScroll = OxygenUIComponentsFactory.createScrollPane(table,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+    // Floor the table height so the prefs groups below can't squeeze it to nothing.
+    connectionsScroll.setPreferredSize(new Dimension(680, 160));
     JPanel connections = new JPanel(new BorderLayout());
     connections.setBorder(BorderFactory.createTitledBorder("Connections"));
-    connections.add(OxygenUIComponentsFactory.createScrollPane(table,
-        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
+    connections.add(connectionsScroll, BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
 
     table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
