@@ -86,6 +86,8 @@ The descriptor is discovered by a **closest-ancestor walk**: from the selected f
 
   When there is no `build` section (or no `.existdb.json` at all), the plugin **auto-detects** the tool from a build marker: `build.xml` → Ant, `pom.xml` → Maven, `package.json` → npm, `gulpfile.js` → gulp. So an existing eXist app with a standard `build.xml` builds with no configuration.
 
+  **Build-time parameters (e.g. a version).** Many eXist apps take the version as a build argument — the standard app `build.xml` substitutes `${app.version}` into `expath-pkg.xml`, and release tooling passes it (e.g. semantic-release runs `ant -Dapp.version=…`). Since `command` is a full shell command, just include the argument there for local builds: `"command": "ant -Dapp.version=1.0.0-dev"`. (Without it, a local `ant` leaves `${app.version}` unexpanded and produces an `.xar` that won't install cleanly.) Real release versions still come from your CI/release tooling; the `command` value is only for local Build / Build & Install.
+
 ### Build & install
 
 The Project-pane context menu offers **Build** and **Build & Install**:
