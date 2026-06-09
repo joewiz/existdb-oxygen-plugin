@@ -26,6 +26,11 @@
   <extension type="URLStreamHandler"
     class="com.existdb.oxygen.ExistdbURLStreamHandlerPluginExtension"/>
 
+  <!-- Preferences > Plugins > eXist-db: connections + query/result and browsing defaults. The
+       eXist-db pane's gear deep-links here via showPreferencesPages. -->
+  <extension type="OptionPage"
+    class="com.existdb.oxygen.ui.ExistdbOptionPage"/>
+
   <!-- "eXist-db (HTTP)" XQuery engine: eXist-accurate validation (and, later, execution) via
        existdb-openapi. Appears in Oxygen's XQuery validation/transformation engine list. -->
   <extension type="XQueryTransformer"

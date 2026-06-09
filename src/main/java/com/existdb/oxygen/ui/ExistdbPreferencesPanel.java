@@ -25,7 +25,7 @@ import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
 import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
-import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
+import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
@@ -64,19 +64,18 @@ import javax.swing.table.AbstractTableModel;
 import javax.swing.table.TableCellRenderer;
 
 /**
- * A single window for managing saved eXist servers — a Data Source Explorer-style "Connections"
- * table (Name, URL, Default) with a flat icon toolbar for Add / Edit / Duplicate / Remove and
- * reordering (Move Up/Down, Sort A–Z), plus choosing the default server and testing a connection.
- * Hosted in Oxygen's {@link OKCancelDialog}; edits are made on a working copy and persisted only on
- * <b>OK</b>; <b>Cancel</b> (or Escape) discards them.
+ * The content of the <b>Preferences → Plugins → eXist-db</b> option page — a Data Source
+ * Explorer-style "Connections" table (Name, URL, Default) with a flat icon toolbar for Add / Edit /
+ * Duplicate / Remove and reordering (Move Up/Down, Sort A–Z), plus the query/result and browsing
+ * defaults. Edits are made on a working copy and persisted by {@link #save()} (called from the option
+ * page's Apply/OK); {@link #buildContent()} builds the component and {@link #restoreDefaults()} resets
+ * the display defaults. Driven by {@link ExistdbOptionPage}.
  */
-public final class ManageServersDialog {
+public final class ExistdbPreferencesPanel {
 
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
-
-  private final transient Frame owner;
   private final transient ProfileStore store;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
@@ -98,8 +97,7 @@ public final class ManageServersDialog {
   private transient Action moveUpAction;
   private transient Action moveDownAction;
 
-  private ManageServersDialog(Frame owner, ProfileStore store) {
-    this.owner = owner;
+  ExistdbPreferencesPanel(ProfileStore store) {
     this.store = store;
     profiles.addAll(store.loadAll());
     String defaultId = store.defaultProfileId();
@@ -110,34 +108,15 @@ public final class ManageServersDialog {
     }
   }
 
-  /**
-   * Opens the modal dialog. Returns {@code true} if the user clicked OK (changes persisted), so the
-   * caller can refresh; {@code false} on Cancel/Escape.
-   */
-  public static boolean open(Frame owner, ProfileStore store) {
-    ManageServersDialog controller = new ManageServersDialog(owner, store);
-    return controller.show();
+  /** The Oxygen main window — the parent for the Add/Edit sub-dialogs (a Preferences page is in a
+   *  JDialog, not a Frame, so the OK/Cancel dialog factory can't use it). */
+  private static Frame mainFrame() {
+    return (Frame) ((StandalonePluginWorkspace) PluginWorkspaceProvider.getPluginWorkspace())
+        .getParentFrame();
   }
 
-  private boolean show() {
-    OKCancelDialog host =
-        OxygenUIComponentsFactory.createOkCancelDialog(owner, "Configure eXist-db Connections", true);
-    host.getContentPane().add(buildContent(), BorderLayout.CENTER);
-    if (!profiles.isEmpty()) {
-      table.setRowSelectionInterval(0, 0);
-    }
-    host.setResizable(true);
-    host.pack();
-    host.setLocationRelativeTo(owner);
-    host.setVisible(true);
-    if (host.getResult() == OKCancelDialog.RESULT_OK) {
-      commit();
-      return true;
-    }
-    return false;
-  }
-
-  private JComponent buildContent() {
+  /** Builds the option-page component (connections table + the query/result and browsing defaults). */
+  JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     table.addMouseListener(new MouseAdapter() {
       @Override
@@ -202,6 +181,9 @@ public final class ManageServersDialog {
     JPanel content = new JPanel(new BorderLayout());
     content.add(connections, BorderLayout.CENTER);
     content.add(bottom, BorderLayout.SOUTH);
+    if (!profiles.isEmpty()) {
+      table.setRowSelectionInterval(0, 0);
+    }
     return content;
   }
 
@@ -331,7 +313,7 @@ public final class ManageServersDialog {
   }
 
   private static Action iconAction(String resource, String tooltip, Runnable action) {
-    URL url = ManageServersDialog.class.getResource(resource);
+    URL url = ExistdbPreferencesPanel.class.getResource(resource);
     return new AbstractAction() {
       {
         if (url != null) {
@@ -350,14 +332,14 @@ public final class ManageServersDialog {
   }
 
   private static void setDisabledIcon(JButton button, String resource) {
-    URL url = ManageServersDialog.class.getResource(resource);
+    URL url = ExistdbPreferencesPanel.class.getResource(resource);
     if (url != null) {
       button.setDisabledIcon(new ImageIcon(url));
     }
   }
 
-  /** Persists the working copy, the chosen default, and the result-display defaults. */
-  private void commit() {
+  /** Persists the working copy, the chosen default, and the display defaults (option-page Apply/OK). */
+  void save() {
     store.saveAll(profiles);
     store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
@@ -367,8 +349,20 @@ public final class ManageServersDialog {
     store.setShowHidden(showHiddenPref.isSelected());
     store.setUploadHidden(uploadHiddenPref.isSelected());
     store.setRestorePane(restorePanePref.isSelected());
-    // Apply the new defaults to an already-open results view immediately, not just next restart.
+    // Apply the new defaults live: results view re-applies display prefs; the pane rebuilds servers.
     store.notifyResultsPrefsChanged();
+    store.notifyConnectionsChanged();
+  }
+
+  /** Resets the display/browsing defaults to their factory values (connections are left untouched). */
+  void restoreDefaults() {
+    methodPref.setSelectedIndex(methodIndex("adaptive"));
+    indentPref.setSelected(true);
+    pageSizePref.setSelectedItem(10);
+    destBrowse.setSelected(true);
+    showHiddenPref.setSelected(false);
+    uploadHiddenPref.setSelected(false);
+    restorePanePref.setSelected(true);
   }
 
   private ConnectionProfile selected() {
@@ -386,7 +380,7 @@ public final class ManageServersDialog {
   }
 
   private void add() {
-    ConnectionProfile created = ConnectionDialog.edit(owner, new ConnectionProfile());
+    ConnectionProfile created = ConnectionDialog.edit(mainFrame(), new ConnectionProfile());
     if (created != null) {
       profiles.add(created);
       model.fireTableDataChanged();
@@ -400,7 +394,7 @@ public final class ManageServersDialog {
       return;
     }
     int row = table.getSelectedRow();
-    ConnectionProfile edited = ConnectionDialog.edit(owner, current);
+    ConnectionProfile edited = ConnectionDialog.edit(mainFrame(), current);
     if (edited != null) {
       edited.setId(current.getId());
       profiles.set(row, edited);

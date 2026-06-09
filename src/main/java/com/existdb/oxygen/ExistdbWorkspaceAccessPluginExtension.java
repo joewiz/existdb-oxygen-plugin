@@ -86,6 +86,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
   @Override
   public void applicationStarted(final StandalonePluginWorkspace pluginWorkspace) {
     final ProfileStore profileStore = new ProfileStore(pluginWorkspace);
+    // Share this instance so the Preferences > Plugins > eXist-db page acts on the same store
+    // (its change listeners only reach subscribers registered on this very instance).
+    ExistContext.setProfileStore(profileStore);
 
     // Auto-validate exist: XQuery editors (Problems view) without a manual engine selection.
     new ExistAutoValidator(pluginWorkspace).install();
