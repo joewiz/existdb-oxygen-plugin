@@ -31,6 +31,7 @@ import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -60,6 +61,7 @@ import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
+import javax.swing.border.TitledBorder;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.TableCellRenderer;
 
@@ -164,10 +166,11 @@ public final class ExistdbPreferencesPanel {
     JComponent connectionsScroll = OxygenUIComponentsFactory.createScrollPane(table,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    // Floor the table height so the prefs groups below can't squeeze it to nothing.
-    connectionsScroll.setPreferredSize(new Dimension(680, 160));
+    // Fixed ~10-row height, like the Data Sources Connections table (not stretched to fill the page).
+    int header = table.getTableHeader().getPreferredSize().height;
+    connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 10 + header + 4));
     JPanel connections = new JPanel(new BorderLayout());
-    connections.setBorder(BorderFactory.createTitledBorder("Connections"));
+    connections.setBorder(boldTitledBorder("Connections"));
     connections.add(connectionsScroll, BorderLayout.CENTER);
     connections.add(actions, BorderLayout.SOUTH);
 
@@ -178,13 +181,28 @@ public final class ExistdbPreferencesPanel {
     bottom.add(buildResultPrefs(), BorderLayout.CENTER);
     bottom.add(buildBrowsingPrefs(), BorderLayout.SOUTH);
 
+    // Stack connections over the defaults at the top; extra page height falls below (not into the
+    // table) — so the Connections table keeps its fixed height like Oxygen's Data Sources page.
+    JPanel stacked = new JPanel(new BorderLayout());
+    stacked.add(connections, BorderLayout.NORTH);
+    stacked.add(bottom, BorderLayout.CENTER);
     JPanel content = new JPanel(new BorderLayout());
-    content.add(connections, BorderLayout.CENTER);
-    content.add(bottom, BorderLayout.SOUTH);
+    content.add(stacked, BorderLayout.NORTH);
     if (!profiles.isEmpty()) {
       table.setRowSelectionInterval(0, 0);
     }
     return content;
+  }
+
+  /** A titled border with a bold title, matching Oxygen's bold section headings. */
+  private static TitledBorder boldTitledBorder(String title) {
+    TitledBorder border = BorderFactory.createTitledBorder(title);
+    Font base = border.getTitleFont();
+    if (base == null) {
+      base = new JLabel().getFont();
+    }
+    border.setTitleFont(base.deriveFont(Font.BOLD));
+    return border;
   }
 
   /** Pane preferences: hidden-file handling, and restoring the open collections on startup. */
@@ -199,14 +217,14 @@ public final class ExistdbPreferencesPanel {
     c.gridx = 0;
 
     JPanel hidden = new JPanel(new GridBagLayout());
-    hidden.setBorder(BorderFactory.createTitledBorder("Hidden files"));
+    hidden.setBorder(boldTitledBorder("Hidden files"));
     c.gridy = 0;
     hidden.add(showHiddenPref, c);
     c.gridy = 1;
     hidden.add(uploadHiddenPref, c);
 
     JPanel pane = new JPanel(new GridBagLayout());
-    pane.setBorder(BorderFactory.createTitledBorder("eXist-db pane"));
+    pane.setBorder(boldTitledBorder("eXist-db pane"));
     c.gridy = 0;
     pane.add(restorePanePref, c);
 
@@ -237,7 +255,7 @@ public final class ExistdbPreferencesPanel {
     constrainWidth(pageSizePref, 90);
 
     JPanel prefs = new JPanel(new GridBagLayout());
-    prefs.setBorder(BorderFactory.createTitledBorder("Query & result defaults"));
+    prefs.setBorder(boldTitledBorder("Query & result defaults"));
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.BASELINE_LEADING;

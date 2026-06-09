@@ -40,6 +40,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.BorderFactory;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
@@ -107,12 +108,21 @@ public final class ConnectionDialog {
   }
 
   private JPanel buildForm() {
-    JPanel form = new JPanel(new GridBagLayout());
-    addRow(form, 0, "Name:", nameField);
-    addRow(form, 1, "URL:", urlField);
-    addRow(form, 2, "User:", userField);
-    addRow(form, 3, "Password:", passField);
-    addFieldRow(form, 4, acceptSelfSignedBox);
+    // Name on top, then the connection details in a titled group — matching Oxygen's Connection
+    // dialog (Name + Data Source above a "Connection Details" group).
+    JPanel name = new JPanel(new GridBagLayout());
+    addRow(name, 0, "Name:", nameField);
+
+    JPanel details = new JPanel(new GridBagLayout());
+    details.setBorder(BorderFactory.createTitledBorder("Connection Details"));
+    addRow(details, 0, "URL:", urlField);
+    addRow(details, 1, "User:", userField);
+    addRow(details, 2, "Password:", passField);
+    addFieldRow(details, 3, acceptSelfSignedBox);
+
+    JPanel form = new JPanel(new BorderLayout(0, 8));
+    form.add(name, BorderLayout.NORTH);
+    form.add(details, BorderLayout.CENTER);
     return form;
   }
 
