@@ -217,7 +217,7 @@ public final class ExistdbPreferencesPanel {
     c.insets = new Insets(0, 8, 0, 0);
     headerRow.add(new JSeparator(), c);
 
-    content.setBorder(BorderFactory.createEmptyBorder(4, 18, 4, 0));
+    content.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
     JPanel group = new JPanel(new BorderLayout());
     group.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
     group.add(headerRow, BorderLayout.NORTH);
