@@ -36,8 +36,12 @@ import org.junit.jupiter.api.Test;
 /** Unit tests for {@link ProfileStore} list storage and legacy migration (in-memory options). */
 class ProfileStoreTest {
 
-  /** Map-backed options + a reversible "encryption" (prefix marker) for the tests. */
   private static ProfileStore store(Map<String, String> backing) {
+    return store(backing, new HashMap<>());
+  }
+
+  /** Map-backed options: {@code backing} for regular options, {@code secrets} for the secret store. */
+  private static ProfileStore store(Map<String, String> backing, Map<String, String> secrets) {
     ProfileStore.Options options = new ProfileStore.Options() {
       @Override
       public String get(String key, String defaultValue) {
@@ -48,10 +52,20 @@ class ProfileStoreTest {
       public void set(String key, String value) {
         backing.put(key, value);
       }
+
+      @Override
+      public String getSecret(String key, String defaultValue) {
+        return secrets.getOrDefault(key, defaultValue);
+      }
+
+      @Override
+      public void setSecret(String key, String value) {
+        secrets.put(key, value);
+      }
     };
-    UnaryOperator<String> encrypt = s -> "enc:" + s;
+    // Reversible "decryption" matching the legacy "enc:" prefix used by migration test fixtures.
     UnaryOperator<String> decrypt = s -> s.startsWith("enc:") ? s.substring(4) : s;
-    return new ProfileStore(options, encrypt, decrypt);
+    return new ProfileStore(options, decrypt);
   }
 
   @Test
@@ -87,15 +101,16 @@ class ProfileStoreTest {
     assertEquals("secret", p.getPassword());
     assertTrue(p.isAcceptSelfSigned());
     assertNotNull(p.getId());
-    // Migration persists the new list format.
-    assertFalse(backing.get("existdb.profiles.ids").isBlank());
+    // Migration persists the new connections format.
+    assertFalse(backing.get("existdb.connections.v2").isBlank());
     assertEquals(p.getId(), store.defaultProfileId());
   }
 
   @Test
   void saveAllRoundTripsMultipleProfilesAndPassword() {
     Map<String, String> backing = new HashMap<>();
-    ProfileStore store = store(backing);
+    Map<String, String> secrets = new HashMap<>();
+    ProfileStore store = store(backing, secrets);
 
     ConnectionProfile a = new ConnectionProfile("Local", "http://localhost:8080/x", "admin", "");
     ConnectionProfile b =
@@ -109,9 +124,27 @@ class ProfileStoreTest {
     assertEquals("Stg", all.get(1).getName());
     assertEquals("pw", all.get(1).getPassword());
     assertTrue(all.get(1).isAcceptSelfSigned());
-    // Password is not stored in clear text.
-    assertFalse(backing.get("existdb.profile." + all.get(1).getId() + ".password").contains("pw")
-        && !backing.get("existdb.profile." + all.get(1).getId() + ".password").startsWith("enc:"));
+    // The password lives in the per-user secret store, never the regular (project-scopable) options.
+    assertEquals("pw", secrets.get("existdb.secret." + all.get(1).getId()));
+    assertFalse(backing.values().stream().anyMatch(v -> v.contains("pw")));
+  }
+
+  @Test
+  void connectionsKeyExcludesUsernameAndPassword() {
+    Map<String, String> backing = new HashMap<>();
+    ProfileStore store = store(backing, new HashMap<>());
+    store.saveAll(new java.util.ArrayList<>(List.of(
+        new ConnectionProfile("Stg", "https://stg/x", "dev", "pw", true))));
+
+    // The project-scopable connections key holds only definitions — never username or password.
+    String json = backing.get("existdb.connections.v2");
+    assertNotNull(json);
+    assertFalse(json.contains("pw"), "password must not be in the project-scopable connections key");
+    assertFalse(json.contains("dev"), "username must not be in the project-scopable connections key");
+    for (String key : ProfileStore.projectLevelKeys()) {
+      assertFalse(key.startsWith("existdb.secret."));
+      assertFalse(key.endsWith(".user"));
+    }
   }
 
   @Test

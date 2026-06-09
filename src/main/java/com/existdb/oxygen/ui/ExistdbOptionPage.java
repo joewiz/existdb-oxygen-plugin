@@ -77,4 +77,11 @@ public final class ExistdbOptionPage extends OptionPagePluginExtension {
   public String getKey() {
     return KEY;
   }
+
+  @Override
+  public String[] getProjectLevelOptionKeys() {
+    // Lights up the Global / Project Options radio. Connection definitions + display defaults can go
+    // in the .xpr; usernames (per-user) and passwords (secret store) are deliberately excluded.
+    return ProfileStore.projectLevelKeys();
+  }
 }
