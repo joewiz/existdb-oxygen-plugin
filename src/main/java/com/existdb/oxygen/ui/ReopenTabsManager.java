@@ -35,6 +35,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import javax.swing.SwingWorker;
 import javax.swing.Timer;
 
 /**
@@ -137,13 +138,27 @@ public final class ReopenTabsManager {
     // eXist-db pane hasn't been shown yet (it rebuilds the same registry when first opened).
     ExistContext.setProfiles(profileStore.loadAll(), profileStore.defaultProfileId());
     Set<String> alreadyOpen = existTabLocations();
+    List<String> toOpen = new ArrayList<>();
     for (String url : urls) {
       if (!alreadyOpen.contains(url)) {
-        reopenOne(url);
+        toOpen.add(url);
       }
     }
+    if (toOpen.isEmpty()) {
+      return;
+    }
+    // Oxygen rejects open() on the AWT/EDT thread (deadlock guard) — open from a separate thread.
     // Note: no persist here. Successful opens fire editorOpened (which persists); a failed open
     // leaves the saved list untouched so the tab can be retried on the next start.
+    new SwingWorker<Void, Void>() {
+      @Override
+      protected Void doInBackground() {
+        for (String url : toOpen) {
+          reopenOne(url);
+        }
+        return null;
+      }
+    }.execute();
   }
 
   private void reopenOne(String url) {
