@@ -2007,6 +2007,12 @@ public final class ExistdbBrowserPanel extends JPanel {
     if (toMove == null || toMove.isEmpty()) {
       return;
     }
+    String duplicate = firstDuplicateName(toMove);
+    if (duplicate != null) {
+      workspace.showErrorMessage("The selection has more than one item named \"" + duplicate
+          + "\" — a collection can't hold two with the same name. Move them separately.");
+      return;
+    }
     boolean copy = dropAction == TransferHandler.COPY;
     long collections = toMove.stream().filter(ExistNodeRef::collection).count();
     if (collections > 0 && !confirmMany(toMove.size(), collections, copy)) {
@@ -2018,6 +2024,17 @@ public final class ExistdbBrowserPanel extends JPanel {
       return;
     }
     resolveCollisionsThenMove(client, toMove, target, targetNode, copy);
+  }
+
+  /** The first name shared by two refs (a collection can't hold two same-named children), or null. */
+  private static String firstDuplicateName(List<ExistNodeRef> refs) {
+    Set<String> seen = new HashSet<>();
+    for (ExistNodeRef r : refs) {
+      if (!seen.add(r.name())) {
+        return r.name();
+      }
+    }
+    return null;
   }
 
   private static boolean sameServerAll(List<ExistNodeRef> sources, ExistNode target) {
