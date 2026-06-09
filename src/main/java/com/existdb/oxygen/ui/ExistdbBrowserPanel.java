@@ -39,10 +39,17 @@ import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Frame;
+import java.awt.Graphics2D;
+import java.awt.Image;
 import java.awt.KeyboardFocusManager;
+import java.awt.Point;
+import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.awt.datatransfer.DataFlavor;
@@ -114,10 +121,10 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private static final String DB_ROOT = "/db";
 
-  /** Flavor for an {@link ExistNodeRef} dragged within the JVM (pane → pane). */
-  private static final DataFlavor NODE_FLAVOR = new DataFlavor(
-      DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ExistNodeRef.class.getName(),
-      "eXist tree node");
+  /** Flavor for a list of {@link ExistNodeRef}s dragged within the JVM (pane → pane). */
+  private static final DataFlavor NODES_FLAVOR = new DataFlavor(
+      DataFlavor.javaJVMLocalObjectMimeType + ";class=" + NodeRefList.class.getName(),
+      "eXist tree nodes");
 
   /** eXist's "X" logo for the top-level server nodes (falls back to Oxygen's DB-connection icon). */
   private static final ImageIcon SERVER_ICON =
@@ -1662,6 +1669,13 @@ public final class ExistdbBrowserPanel extends JPanel {
   private record ExistNodeRef(String serverId, String path, String name, boolean collection) {
   }
 
+  /** A list of dragged node refs (the {@link #NODES_FLAVOR} payload; one entry for a single drag). */
+  private record NodeRefList(List<ExistNodeRef> refs) {
+  }
+
+  /** What to do with dragged items whose name already exists in the drop target. */
+  private enum CollisionPolicy { NONE, OVERWRITE, SKIP, CANCEL }
+
   /**
    * Drag from the tree (a resource or sub-collection) and drop OS files / other nodes onto a
    * collection. Same-server drops relocate via the API (move, or copy with ⌥); dropping files from
@@ -1675,21 +1689,30 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     @Override
     protected Transferable createTransferable(JComponent c) {
-      // Only resources and sub-collections are draggable — not the server / db root.
-      if (tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
-          && node.getUserObject() instanceof ExistNode existNode
-          && !DB_ROOT.equals(existNode.path)) {
-        return new NodeTransferable(new ExistNodeRef(
-            existNode.serverId, existNode.path, existNode.name, existNode.collection));
+      // Every selected resource/sub-collection is draggable — not a server / db root.
+      List<ExistNodeRef> refs = new ArrayList<>();
+      for (DefaultMutableTreeNode node : selectedNodes()) {
+        ExistNode en = asExist(node);
+        if (!DB_ROOT.equals(en.path)) {
+          refs.add(new ExistNodeRef(en.serverId, en.path, en.name, en.collection));
+        }
       }
-      return null;
+      if (refs.isEmpty()) {
+        return null;
+      }
+      if (refs.size() > 1) {
+        // A Finder-style badge with the count follows the pointer (fixed at drag start).
+        setDragImage(dragBadge(refs.size()));
+        setDragImageOffset(new Point(10, 10));
+      }
+      return new NodeTransferable(refs);
     }
 
     @Override
     public boolean canImport(TransferSupport support) {
       return dropCollection(support) != null
           && (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
-              || support.isDataFlavorSupported(NODE_FLAVOR));
+              || support.isDataFlavorSupported(NODES_FLAVOR));
     }
 
     @Override
@@ -1700,9 +1723,14 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
       Transferable transferable = support.getTransferable();
       try {
-        if (transferable.isDataFlavorSupported(NODE_FLAVOR)) {
-          relocateInternal((ExistNodeRef) transferable.getTransferData(NODE_FLAVOR),
-              target, targetNode, support.getDropAction());
+        if (transferable.isDataFlavorSupported(NODES_FLAVOR)) {
+          List<ExistNodeRef> refs =
+              ((NodeRefList) transferable.getTransferData(NODES_FLAVOR)).refs();
+          if (refs.size() == 1) {
+            relocateInternal(refs.get(0), target, targetNode, support.getDropAction());
+          } else {
+            relocateMany(refs, target, targetNode, support.getDropAction());
+          }
           return true;
         }
         if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
@@ -1734,53 +1762,58 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   /**
-   * A {@link Transferable} for a dragged node: {@link #NODE_FLAVOR} for an internal pane→pane move/
-   * copy, and {@code javaFileListFlavor} for export to Finder/desktop — the latter materializes the
-   * resource (or, recursively, the collection) to temp files on demand so the OS receives real files.
+   * A {@link Transferable} for one or more dragged nodes: {@link #NODES_FLAVOR} for an internal
+   * pane→pane move/copy, and {@code javaFileListFlavor} for export to Finder/desktop — the latter
+   * materializes each resource (or, recursively, each collection) to temp files so the OS gets real
+   * files.
    */
   private final class NodeTransferable implements Transferable {
-    private final ExistNodeRef ref;
+    private final List<ExistNodeRef> refs;
 
-    NodeTransferable(ExistNodeRef ref) {
-      this.ref = ref;
+    NodeTransferable(List<ExistNodeRef> refs) {
+      this.refs = refs;
     }
 
     @Override
     public DataFlavor[] getTransferDataFlavors() {
-      return new DataFlavor[] {NODE_FLAVOR, DataFlavor.javaFileListFlavor};
+      return new DataFlavor[] {NODES_FLAVOR, DataFlavor.javaFileListFlavor};
     }
 
     @Override
     public boolean isDataFlavorSupported(DataFlavor flavor) {
-      return NODE_FLAVOR.equals(flavor) || DataFlavor.javaFileListFlavor.equals(flavor);
+      return NODES_FLAVOR.equals(flavor) || DataFlavor.javaFileListFlavor.equals(flavor);
     }
 
     @Override
     public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException {
-      if (NODE_FLAVOR.equals(flavor)) {
-        return ref;
+      if (NODES_FLAVOR.equals(flavor)) {
+        return new NodeRefList(refs);
       }
       if (DataFlavor.javaFileListFlavor.equals(flavor)) {
         try {
-          return exportToFiles(ref);
+          return exportToFiles(refs);
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
-          throw new IOException("Interrupted while exporting " + ref.path(), e);
+          throw new IOException("Interrupted while exporting dragged items", e);
         }
       }
       throw new UnsupportedFlavorException(flavor);
     }
   }
 
-  /** Materializes a dragged node to temp files (for an export to Finder), returning the top entry. */
-  private List<File> exportToFiles(ExistNodeRef ref) throws IOException, InterruptedException {
-    ExistClient client = ExistContext.clientById(ref.serverId());
-    if (client == null) {
-      throw new IOException("Not connected to " + ref.serverId());
-    }
+  /** Materializes every dragged node to temp files (for an export to Finder), into one temp dir. */
+  private List<File> exportToFiles(List<ExistNodeRef> refs) throws IOException, InterruptedException {
     Path tempDir = Files.createTempDirectory("existdb-export-");
     tempDir.toFile().deleteOnExit();
-    return List.of(materialize(client, ref.path(), ref.name(), ref.collection(), tempDir));
+    List<File> files = new ArrayList<>();
+    for (ExistNodeRef ref : refs) {
+      ExistClient client = ExistContext.clientById(ref.serverId());
+      if (client == null) {
+        throw new IOException("Not connected to " + ref.serverId());
+      }
+      files.add(materialize(client, ref.path(), ref.name(), ref.collection(), tempDir));
+    }
+    return files;
   }
 
   /** Writes a resource (binary-safe), or recreates a collection's tree, under {@code parentDir}. */
@@ -1942,6 +1975,13 @@ public final class ExistdbBrowserPanel extends JPanel {
       DefaultMutableTreeNode targetNode, boolean copy) {
     workspace.showStatusMessage((copy ? "Copied " : "Moved ")
         + source.path() + " to " + target.path);
+    applyRelocation(source, target, targetNode, copy);
+  }
+
+  /** Surgical tree update for one relocated item (no status message): drop the moved node, add it
+   *  under the target. Shared by the single-item and batch relocate flows. */
+  private void applyRelocation(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy) {
     if (!copy) {
       DefaultMutableTreeNode moved = findNode(source.serverId(), source.path());
       if (moved != null && moved.getParent() != null) {
@@ -1949,6 +1989,222 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
     }
     addRelocatedChild(source, target, targetNode);
+  }
+
+  /**
+   * Moves/copies a multi-item selection into {@code target} (same server only in v1). Prunes items
+   * already covered by a selected ancestor collection, rejects dropping into self/a dragged
+   * collection, skips items already in the target, resolves name collisions with one combined
+   * decision, and reports per-item failures — never losing a source (move deletes only after copy).
+   */
+  private void relocateMany(List<ExistNodeRef> sources, ExistNode target,
+      DefaultMutableTreeNode targetNode, int dropAction) {
+    if (!sameServerAll(sources, target)) {
+      workspace.showInformationMessage("Moving multiple items between servers isn't supported yet.");
+      return;
+    }
+    List<ExistNodeRef> toMove = movableInto(pruneCoveredRefs(sources), target);
+    if (toMove == null || toMove.isEmpty()) {
+      return;
+    }
+    boolean copy = dropAction == TransferHandler.COPY;
+    long collections = toMove.stream().filter(ExistNodeRef::collection).count();
+    if (collections > 0 && !confirmMany(toMove.size(), collections, copy)) {
+      return;
+    }
+    ExistClient client = ExistContext.clientById(target.serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    resolveCollisionsThenMove(client, toMove, target, targetNode, copy);
+  }
+
+  private static boolean sameServerAll(List<ExistNodeRef> sources, ExistNode target) {
+    for (ExistNodeRef s : sources) {
+      if (!s.serverId().equals(target.serverId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Drops any ref already covered by a selected ancestor collection (it moves with the ancestor). */
+  private static List<ExistNodeRef> pruneCoveredRefs(List<ExistNodeRef> sources) {
+    List<String> collectionPaths = new ArrayList<>();
+    for (ExistNodeRef s : sources) {
+      if (s.collection()) {
+        collectionPaths.add(s.path());
+      }
+    }
+    List<ExistNodeRef> kept = new ArrayList<>();
+    for (ExistNodeRef s : sources) {
+      if (!coveredByAncestor(s.path(), collectionPaths)) {
+        kept.add(s);
+      }
+    }
+    return kept;
+  }
+
+  /**
+   * The refs that should actually move into {@code target}: rejects (returns {@code null}) if any is
+   * the target itself or an ancestor of it; otherwise drops items already directly in the target.
+   */
+  private List<ExistNodeRef> movableInto(List<ExistNodeRef> sources, ExistNode target) {
+    List<ExistNodeRef> result = new ArrayList<>();
+    for (ExistNodeRef s : sources) {
+      if (target.path.equals(s.path()) || target.path.startsWith(s.path() + "/")) {
+        workspace.showErrorMessage("Can't move a collection into itself or its contents.");
+        return null;
+      }
+      if (!target.path.equals(parentPath(s.path()))) {
+        result.add(s);
+      }
+    }
+    return result;
+  }
+
+  private boolean confirmMany(int total, long collections, boolean copy) {
+    String verb = copy ? "Copy" : "Move";
+    String msg = verb + " " + total + " items, including " + collections + " collection"
+        + (collections == 1 ? "" : "s") + " transferred recursively. Continue?";
+    return workspace.showConfirmDialog(verb + " items", msg,
+        new String[] {verb, "Cancel"}, new int[] {0, 1}) == 0;
+  }
+
+  /** Lists the target's children off the EDT, asks a single collision decision, then runs the moves. */
+  private void resolveCollisionsThenMove(ExistClient client, List<ExistNodeRef> toMove,
+      ExistNode target, DefaultMutableTreeNode targetNode, boolean copy) {
+    new SwingWorker<Set<String>, Void>() {
+      @Override
+      protected Set<String> doInBackground() throws Exception {
+        Set<String> names = new HashSet<>();
+        for (ExistClient.ChildEntry child : client.listChildren(target.path)) {
+          names.add(child.name());
+        }
+        return names;
+      }
+
+      @Override
+      protected void done() {
+        Set<String> existing;
+        try {
+          existing = get();
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        long collisions = toMove.stream().filter(s -> existing.contains(s.name())).count();
+        CollisionPolicy policy = CollisionPolicy.NONE;
+        if (collisions > 0) {
+          policy = askCollisionPolicy((int) collisions, target.path);
+          if (policy == CollisionPolicy.CANCEL) {
+            return;
+          }
+        }
+        runMoves(client, toMove, target, targetNode, copy, existing, policy);
+      }
+    }.execute();
+  }
+
+  private CollisionPolicy askCollisionPolicy(int count, String targetPath) {
+    int choice = workspace.showConfirmDialog("Name conflict",
+        count + " of the dragged items already exist in " + targetPath + ".",
+        new String[] {"Overwrite all", "Skip existing", "Cancel"}, new int[] {0, 1, 2});
+    return switch (choice) {
+      case 0 -> CollisionPolicy.OVERWRITE;
+      case 1 -> CollisionPolicy.SKIP;
+      default -> CollisionPolicy.CANCEL;
+    };
+  }
+
+  /** Runs the per-item moves off the EDT, then updates the tree and reports the outcome. */
+  private void runMoves(ExistClient client, List<ExistNodeRef> toMove, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy, Set<String> existing, CollisionPolicy policy) {
+    new SwingWorker<List<ExistNodeRef>, Void>() {
+      private final List<String> failures = new ArrayList<>();
+
+      @Override
+      protected List<ExistNodeRef> doInBackground() {
+        List<ExistNodeRef> moved = new ArrayList<>();
+        for (ExistNodeRef s : toMove) {
+          String result = moveOne(client, s, target.path, copy, existing.contains(s.name()), policy);
+          if (result == null) {
+            moved.add(s);
+          } else if (!result.isEmpty()) {
+            failures.add(result);
+          }
+        }
+        return moved;
+      }
+
+      @Override
+      protected void done() {
+        List<ExistNodeRef> moved;
+        try {
+          moved = get();
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        for (ExistNodeRef s : moved) {
+          applyRelocation(s, target, targetNode, copy);
+        }
+        reportBatch(copy ? "Copied" : "Moved", moved.size(), failures);
+      }
+    }.execute();
+  }
+
+  /**
+   * Moves/copies one item; returns {@code null} on success, {@code ""} if skipped per the collision
+   * policy, or a failure description otherwise. Same-server only (the batch path).
+   */
+  private String moveOne(ExistClient client, ExistNodeRef s, String targetPath, boolean copy,
+      boolean collides, CollisionPolicy policy) {
+    String dest = targetPath + "/" + s.name();
+    try {
+      if (collides) {
+        if (policy == CollisionPolicy.SKIP) {
+          return "";
+        }
+        deleteFrom(client, dest, s.collection());
+      }
+      relocate(client, client, s, dest, targetPath, copy, true);
+      return null;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      return s.path() + " (interrupted)";
+    } catch (Exception ex) {
+      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+      return s.path() + " (" + cause.getMessage() + ")";
+    }
+  }
+
+  /** A Finder-style drag image: a small stacked-pages glyph with a red count badge. */
+  private static Image dragBadge(int count) {
+    int w = 46;
+    int h = 30;
+    BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+    Graphics2D g = img.createGraphics();
+    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    g.setColor(new Color(0x9A, 0xA7, 0xB8));
+    g.fillRoundRect(9, 9, 16, 18, 4, 4);
+    g.setColor(new Color(0x42, 0x6A, 0xB3));
+    g.fillRoundRect(5, 5, 16, 18, 4, 4);
+    g.setColor(Color.WHITE);
+    g.fillRoundRect(8, 9, 10, 10, 2, 2);
+    String label = Integer.toString(count);
+    int badge = 18;
+    int bx = w - badge - 1;
+    g.setColor(new Color(0xD0, 0x39, 0x2B));
+    g.fillOval(bx, 0, badge, badge);
+    g.setColor(Color.WHITE);
+    g.setFont(g.getFont().deriveFont(Font.BOLD, 11f));
+    FontMetrics fm = g.getFontMetrics();
+    g.drawString(label, bx + (badge - fm.stringWidth(label)) / 2,
+        (badge - fm.getHeight()) / 2 + fm.getAscent());
+    g.dispose();
+    return img;
   }
 
   /**
