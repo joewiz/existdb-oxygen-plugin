@@ -1105,18 +1105,42 @@ public final class ExistdbBrowserPanel extends JPanel {
     return target;
   }
 
-  /** Opens every selected resource (collections are skipped) in its own editor tab. */
+  /** Opens every selected resource (collections are skipped) in its own editor tab, off the EDT. */
   private void batchOpen(List<DefaultMutableTreeNode> nodes) {
-    int opened = 0;
+    List<ExistNode> resources = new ArrayList<>();
     for (DefaultMutableTreeNode node : nodes) {
       ExistNode en = asExist(node);
-      if (!en.collection && openOne(en)) {
-        opened++;
+      if (!en.collection) {
+        resources.add(en);
       }
     }
-    if (opened > 0) {
-      workspace.showStatusMessage("Opened " + opened + " " + plural(opened, "resource"));
+    if (resources.isEmpty()) {
+      return;
     }
+    // Oxygen's open() deadlock-guards on the AWT thread, so open the batch from a separate thread.
+    new SwingWorker<List<String>, Void>() {
+      @Override
+      protected List<String> doInBackground() {
+        List<String> failures = new ArrayList<>();
+        for (ExistNode en : resources) {
+          String failure = openOne(en);
+          if (failure != null) {
+            failures.add(failure);
+          }
+        }
+        return failures;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          List<String> failures = get();
+          reportBatch("Opened", resources.size() - failures.size(), failures);
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }.execute();
   }
 
   /** Copies the selected resources'/collections' DB paths to the clipboard, one per line. */
@@ -1643,21 +1667,37 @@ public final class ExistdbBrowserPanel extends JPanel {
       tree.expandPath(new TreePath(node.getPath()));
       return;
     }
-    openOne(existNode);
+    // Open off the EDT: Oxygen's open() deadlock-guards when called on the AWT thread.
+    new SwingWorker<String, Void>() {
+      @Override
+      protected String doInBackground() {
+        return openOne(existNode);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          String failure = get();
+          if (failure != null) {
+            workspace.showErrorMessage(failure);
+          }
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }.execute();
   }
 
-  /** Opens one stored resource in an editor; returns {@code true} if Oxygen opened it. */
-  private boolean openOne(ExistNode existNode) {
+  /**
+   * Opens one stored resource in an editor; returns {@code null} on success or a failure line.
+   * Must run off the EDT — Oxygen's {@code open()} rejects calls on the AWT thread (deadlock guard).
+   */
+  private String openOne(ExistNode existNode) {
     try {
       URL url = ExistURLStreamHandler.toUrl(existNode.serverId, existNode.path);
-      if (workspace.open(url)) {
-        return true;
-      }
-      workspace.showErrorMessage("Oxygen declined to open " + existNode.path);
-      return false;
+      return workspace.open(url) ? null : "Oxygen declined to open " + existNode.path;
     } catch (Exception ex) {
-      workspace.showErrorMessage("Failed to open " + existNode.path + ": " + ex.getMessage());
-      return false;
+      return "Failed to open " + existNode.path + ": " + ex.getMessage();
     }
   }
 
