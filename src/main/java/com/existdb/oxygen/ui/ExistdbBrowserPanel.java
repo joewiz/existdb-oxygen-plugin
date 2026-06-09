@@ -658,7 +658,7 @@ public final class ExistdbBrowserPanel extends JPanel {
           "/images/Save16.png", null, () -> batchDownload(nodes)));
     }
     menu.add(menuItem("Copy " + nodes.size() + " Locations", () -> copyLocations(nodes)));
-    long deletable = nodes.stream().filter(n -> !DB_ROOT.equals(asExist(n).path)).count();
+    int deletable = deletableNodes(nodes).size();
     if (deletable > 0) {
       menu.addSeparator();
       menu.add(menuItem("Delete " + deletable + " " + plural(deletable, "item") + "…",
@@ -926,15 +926,37 @@ public final class ExistdbBrowserPanel extends JPanel {
     }.execute();
   }
 
-  /** The subset of {@code nodes} that may be deleted — everything but a server's {@code /db} root. */
+  /**
+   * The subset of {@code nodes} that may be deleted — everything but a server's {@code /db} root, and
+   * with any node already covered by a selected ancestor collection pruned out (deleting the ancestor
+   * removes it server-side, so deleting it again would spuriously fail).
+   */
   private List<DefaultMutableTreeNode> deletableNodes(List<DefaultMutableTreeNode> nodes) {
+    List<String> collectionPaths = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      ExistNode en = asExist(node);
+      if (en.collection) {
+        collectionPaths.add(en.path);
+      }
+    }
     List<DefaultMutableTreeNode> targets = new ArrayList<>();
     for (DefaultMutableTreeNode node : nodes) {
-      if (!DB_ROOT.equals(asExist(node).path)) {
+      String path = asExist(node).path;
+      if (!DB_ROOT.equals(path) && !coveredByAncestor(path, collectionPaths)) {
         targets.add(node);
       }
     }
     return targets;
+  }
+
+  /** True if {@code path} sits under one of {@code collectionPaths} (other than itself). */
+  private static boolean coveredByAncestor(String path, List<String> collectionPaths) {
+    for (String coll : collectionPaths) {
+      if (!coll.equals(path) && path.startsWith(coll + "/")) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private boolean confirmBatchDelete(int count) {
@@ -1043,7 +1065,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     }
     try {
       ExistClient.ResourceBytes resource = client.readResource(en.path);
-      Files.write(dir.resolve(en.name), resource.bytes());
+      Files.write(uniqueTarget(dir, en.name), resource.bytes());
       return null;
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
@@ -1052,6 +1074,28 @@ public final class ExistdbBrowserPanel extends JPanel {
       Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
       return en.path + " (" + cause.getMessage() + ")";
     }
+  }
+
+  /**
+   * A path in {@code dir} for {@code name}, appending " (2)", " (3)", … before the extension if a
+   * file is already there — so downloading same-named resources from different collections (or
+   * re-downloading) never silently overwrites an existing file. Finder-style.
+   */
+  private static Path uniqueTarget(Path dir, String name) {
+    Path target = dir.resolve(name);
+    if (!Files.exists(target)) {
+      return target;
+    }
+    int dot = name.lastIndexOf('.');
+    String base = dot > 0 ? name.substring(0, dot) : name;
+    String ext = dot > 0 ? name.substring(dot) : "";
+    for (int i = 2; i < 10_000; i++) {
+      Path candidate = dir.resolve(base + " (" + i + ")" + ext);
+      if (!Files.exists(candidate)) {
+        return candidate;
+      }
+    }
+    return target;
   }
 
   /** Opens every selected resource (collections are skipped) in its own editor tab. */
