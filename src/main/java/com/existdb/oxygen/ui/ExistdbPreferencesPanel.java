@@ -27,11 +27,15 @@ import com.existdb.oxygen.model.ProfileStore;
 import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
+import ro.sync.exml.workspace.api.standalone.ui.Table;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.Color;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -56,13 +60,14 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import javax.swing.JSeparator;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
-import javax.swing.border.TitledBorder;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.TableModel;
 import javax.swing.table.TableCellRenderer;
 
 /**
@@ -81,8 +86,9 @@ public final class ExistdbPreferencesPanel {
   private final transient ProfileStore store;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
-  // Oxygen's table paints the alternating row stripes and selection used across the workbench.
-  private final JTable table = OxygenUIComponentsFactory.createTable(model);
+  // Oxygen's table for native selection/look; subclassed to force stripes and extend them into the
+  // empty area below the last row (matching the Data Sources tables).
+  private final JTable table = new StripedTable(model);
   private final JComboBox<String> methodPref =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(METHOD_LABELS));
   private final JComboBox<Integer> pageSizePref =
@@ -169,10 +175,10 @@ public final class ExistdbPreferencesPanel {
     // Fixed ~10-row height, like the Data Sources Connections table (not stretched to fill the page).
     int header = table.getTableHeader().getPreferredSize().height;
     connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 10 + header + 4));
-    JPanel connections = new JPanel(new BorderLayout());
-    connections.setBorder(boldTitledBorder("Connections"));
-    connections.add(connectionsScroll, BorderLayout.CENTER);
-    connections.add(actions, BorderLayout.SOUTH);
+    JPanel connectionsContent = new JPanel(new BorderLayout());
+    connectionsContent.add(connectionsScroll, BorderLayout.CENTER);
+    connectionsContent.add(actions, BorderLayout.SOUTH);
+    JComponent connections = section("Connections", connectionsContent);
 
     table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
     updateMoveEnabled();
@@ -194,15 +200,73 @@ public final class ExistdbPreferencesPanel {
     return content;
   }
 
-  /** A titled border with a bold title, matching Oxygen's bold section headings. */
-  private static TitledBorder boldTitledBorder(String title) {
-    TitledBorder border = BorderFactory.createTitledBorder(title);
-    Font base = border.getTitleFont();
-    if (base == null) {
-      base = new JLabel().getFont();
+  /**
+   * A group with Oxygen's Preferences section style: a bold title with a horizontal rule extending to
+   * the right (no enclosing box), and {@code content} below it, indented under the header.
+   */
+  private static JComponent section(String title, JComponent content) {
+    JLabel label = new JLabel(title);
+    label.setFont(label.getFont().deriveFont(Font.BOLD));
+    JPanel headerRow = new JPanel(new GridBagLayout());
+    GridBagConstraints c = new GridBagConstraints();
+    c.anchor = GridBagConstraints.WEST;
+    headerRow.add(label, c);
+    c.gridx = 1;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    c.insets = new Insets(0, 8, 0, 0);
+    headerRow.add(new JSeparator(), c);
+
+    content.setBorder(BorderFactory.createEmptyBorder(4, 18, 4, 0));
+    JPanel group = new JPanel(new BorderLayout());
+    group.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+    group.add(headerRow, BorderLayout.NORTH);
+    group.add(content, BorderLayout.CENTER);
+    return group;
+  }
+
+  /**
+   * The Oxygen connections table, custom-striped: data rows are striped via {@code prepareRenderer}
+   * and the empty area below the last row is striped in {@code paintComponent}, so the whole table
+   * matches the Data Sources tables (the factory table stripes only data rows, if at all).
+   */
+  private static final class StripedTable extends Table {
+    StripedTable(TableModel tableModel) {
+      super(tableModel);
     }
-    border.setTitleFont(base.deriveFont(Font.BOLD));
-    return border;
+
+    @Override
+    public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+      Component comp = super.prepareRenderer(renderer, row, column);
+      if (!isRowSelected(row)) {
+        comp.setBackground(stripeColor(row));
+      }
+      return comp;
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+      super.paintComponent(g);
+      int rowHeight = getRowHeight();
+      if (rowHeight <= 0) {
+        return;
+      }
+      int firstEmpty = getRowCount();
+      int y = firstEmpty * rowHeight;
+      for (int row = firstEmpty; y < getHeight(); row++, y += rowHeight) {
+        g.setColor(stripeColor(row));
+        g.fillRect(0, y, getWidth(), rowHeight);
+      }
+    }
+
+    private Color stripeColor(int row) {
+      Color bg = getBackground();
+      if (row % 2 == 0) {
+        return bg;
+      }
+      boolean dark = bg.getRed() + bg.getGreen() + bg.getBlue() < 384;
+      return dark ? bg.brighter() : new Color(0xED, 0xF2, 0xFB);
+    }
   }
 
   /** Pane preferences: hidden-file handling, and restoring the open collections on startup. */
@@ -211,27 +275,33 @@ public final class ExistdbPreferencesPanel {
     uploadHiddenPref.setSelected(store.uploadHidden());
     restorePanePref.setSelected(store.restorePane());
 
-    GridBagConstraints c = new GridBagConstraints();
-    c.insets = new Insets(2, 4, 2, 4);
-    c.anchor = GridBagConstraints.LINE_START;
-    c.gridx = 0;
-
-    JPanel hidden = new JPanel(new GridBagLayout());
-    hidden.setBorder(boldTitledBorder("Hidden files"));
-    c.gridy = 0;
-    hidden.add(showHiddenPref, c);
-    c.gridy = 1;
-    hidden.add(uploadHiddenPref, c);
-
-    JPanel pane = new JPanel(new GridBagLayout());
-    pane.setBorder(boldTitledBorder("eXist-db pane"));
-    c.gridy = 0;
-    pane.add(restorePanePref, c);
+    JComponent hidden = section("Hidden files", leftAlignedColumn(showHiddenPref, uploadHiddenPref));
+    JComponent pane = section("eXist-db pane", leftAlignedColumn(restorePanePref));
 
     JPanel prefs = new JPanel(new BorderLayout());
     prefs.add(hidden, BorderLayout.NORTH);
     prefs.add(pane, BorderLayout.SOUTH);
     return prefs;
+  }
+
+  /** A left-aligned vertical column of the given components (e.g. checkboxes flush to the left). */
+  private static JComponent leftAlignedColumn(JComponent... items) {
+    JPanel column = new JPanel(new GridBagLayout());
+    GridBagConstraints c = new GridBagConstraints();
+    c.gridx = 0;
+    c.anchor = GridBagConstraints.LINE_START;
+    c.insets = new Insets(1, 0, 1, 0);
+    for (int i = 0; i < items.length; i++) {
+      c.gridy = i;
+      column.add(items[i], c);
+    }
+    // A glue cell to the right absorbs the extra width so the items stay flush left (not centered).
+    c.gridx = 1;
+    c.gridy = 0;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    column.add(new JPanel(), c);
+    return column;
   }
 
   /**
@@ -255,7 +325,6 @@ public final class ExistdbPreferencesPanel {
     constrainWidth(pageSizePref, 90);
 
     JPanel prefs = new JPanel(new GridBagLayout());
-    prefs.setBorder(boldTitledBorder("Query & result defaults"));
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.BASELINE_LEADING;
@@ -281,7 +350,12 @@ public final class ExistdbPreferencesPanel {
     prefs.add(new JLabel("Results per page:"), c);
     c.gridx = 4;
     prefs.add(pageSizePref, c);
-    return prefs;
+    // A glue cell keeps the grid flush left instead of centered in the page width.
+    c.gridx = 5;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    prefs.add(new JPanel(), c);
+    return section("Query & result defaults", prefs);
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */

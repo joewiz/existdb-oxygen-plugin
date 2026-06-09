@@ -25,6 +25,7 @@ import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.model.ConnectionProfile;
 
 import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
+import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -155,15 +156,17 @@ public final class ConnectionDialog {
   private void testConnection() {
     ConnectionProfile candidate = toProfile();
     ExistClient client = new ExistClient(candidate);
+    String message;
     try {
       client.systemInfo();
       String who = client.whoamiUser();
-      PluginWorkspaceProvider.getPluginWorkspace().showInformationMessage(
-          "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".");
+      message = "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".";
     } catch (Exception ex) {
-      PluginWorkspaceProvider.getPluginWorkspace().showErrorMessage(
-          "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage());
+      message = "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage();
     }
+    // showConfirmDialog (unlike showInformationMessage) lets us title it "Test Connection Result".
+    ((StandalonePluginWorkspace) PluginWorkspaceProvider.getPluginWorkspace()).showConfirmDialog(
+        "Test Connection Result", message, new String[] {"OK"}, new int[] {0});
   }
 
   private ConnectionProfile toProfile() {
