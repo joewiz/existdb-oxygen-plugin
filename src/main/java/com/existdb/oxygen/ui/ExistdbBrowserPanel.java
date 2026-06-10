@@ -39,10 +39,17 @@ import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Frame;
+import java.awt.Graphics2D;
+import java.awt.Image;
 import java.awt.KeyboardFocusManager;
+import java.awt.Point;
+import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.awt.datatransfer.DataFlavor;
@@ -114,10 +121,10 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private static final String DB_ROOT = "/db";
 
-  /** Flavor for an {@link ExistNodeRef} dragged within the JVM (pane → pane). */
-  private static final DataFlavor NODE_FLAVOR = new DataFlavor(
-      DataFlavor.javaJVMLocalObjectMimeType + ";class=" + ExistNodeRef.class.getName(),
-      "eXist tree node");
+  /** Flavor for a list of {@link ExistNodeRef}s dragged within the JVM (pane → pane). */
+  private static final DataFlavor NODES_FLAVOR = new DataFlavor(
+      DataFlavor.javaJVMLocalObjectMimeType + ";class=" + NodeRefList.class.getName(),
+      "eXist tree nodes");
 
   /** eXist's "X" logo for the top-level server nodes (falls back to Oxygen's DB-connection icon). */
   private static final ImageIcon SERVER_ICON =
@@ -384,7 +391,17 @@ public final class ExistdbBrowserPanel extends JPanel {
   private void configureTree() {
     tree.setRootVisible(false);
     tree.setShowsRootHandles(true);
-    tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
+    // Discontiguous selection enables shift-click spans and ⌘/Ctrl-click toggles across the tree.
+    tree.getSelectionModel().setSelectionMode(TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION);
+    // ⌦ (forward delete) removes the selected resource(s)/collection(s), matching the Delete menu.
+    tree.getInputMap(WHEN_FOCUSED)
+        .put(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), "existDelete");
+    tree.getActionMap().put("existDelete", new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        deleteSelected();
+      }
+    });
     ExistTreeCellRenderer renderer = new ExistTreeCellRenderer();
     tree.setCellRenderer(renderer);
     // Inline rename (Finder/Project style): click an already-selected resource to edit its name.
@@ -605,12 +622,64 @@ public final class ExistdbBrowserPanel extends JPanel {
     if (path == null) {
       return;
     }
-    tree.setSelectionPath(path);
+    // Preserve a multi-selection when right-clicking inside it; otherwise select just the clicked row.
+    if (!tree.isPathSelected(path)) {
+      tree.setSelectionPath(path);
+    }
+    List<DefaultMutableTreeNode> selected = selectedNodes();
+    if (selected.size() > 1) {
+      multiSelectionMenu(selected).show(tree, e.getX(), e.getY());
+      return;
+    }
     if (!(path.getLastPathComponent() instanceof DefaultMutableTreeNode node)
         || !(node.getUserObject() instanceof ExistNode existNode)) {
       return;
     }
     contextMenu(node, existNode).show(tree, e.getX(), e.getY());
+  }
+
+  /** The selected tree nodes that carry an {@link ExistNode} (empty if none/placeholder rows). */
+  private List<DefaultMutableTreeNode> selectedNodes() {
+    TreePath[] paths = tree.getSelectionPaths();
+    List<DefaultMutableTreeNode> nodes = new ArrayList<>();
+    if (paths == null) {
+      return nodes;
+    }
+    for (TreePath p : paths) {
+      if (p.getLastPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode) {
+        nodes.add(node);
+      }
+    }
+    return nodes;
+  }
+
+  /** The reduced contextual menu shown when several rows are selected: batch open/download/delete. */
+  private JPopupMenu multiSelectionMenu(List<DefaultMutableTreeNode> nodes) {
+    JPopupMenu menu = new JPopupMenu();
+    long resources = nodes.stream().filter(n -> !asExist(n).collection).count();
+    if (resources > 0) {
+      menu.add(menuItem("Open " + resources + " " + plural(resources, "resource"),
+          "/images/Open16.png", null, () -> batchOpen(nodes)));
+      menu.add(menuItem("Download " + resources + " " + plural(resources, "resource") + "…",
+          "/images/Save16.png", null, () -> batchDownload(nodes)));
+    }
+    menu.add(menuItem("Copy " + nodes.size() + " Locations", () -> copyLocations(nodes)));
+    int deletable = deletableNodes(nodes).size();
+    if (deletable > 0) {
+      menu.addSeparator();
+      menu.add(menuItem("Delete " + deletable + " " + plural(deletable, "item") + "…",
+          "/images/Remove16.png", null, () -> batchDelete(nodes)));
+    }
+    return menu;
+  }
+
+  private static ExistNode asExist(DefaultMutableTreeNode node) {
+    return (ExistNode) node.getUserObject();
+  }
+
+  private static String plural(long count, String noun) {
+    return count == 1 ? noun : noun + "s";
   }
 
   private JPopupMenu contextMenu(DefaultMutableTreeNode node, ExistNode existNode) {
@@ -824,6 +893,275 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
+  }
+
+  /** Deletes the current selection: a single node via the single-node flow, several via a batch. */
+  private void deleteSelected() {
+    List<DefaultMutableTreeNode> nodes = selectedNodes();
+    if (nodes.size() == 1) {
+      ExistNode en = asExist(nodes.get(0));
+      if (!DB_ROOT.equals(en.path)) {
+        deleteNode(nodes.get(0), en);
+      }
+    } else if (nodes.size() > 1) {
+      batchDelete(nodes);
+    }
+  }
+
+  /** Deletes every selected resource/collection (skipping server roots) after one combined confirm. */
+  private void batchDelete(List<DefaultMutableTreeNode> nodes) {
+    List<DefaultMutableTreeNode> targets = deletableNodes(nodes);
+    if (targets.isEmpty() || !confirmBatchDelete(targets.size())) {
+      return;
+    }
+    new SwingWorker<List<DefaultMutableTreeNode>, Void>() {
+      private final List<String> failures = new ArrayList<>();
+
+      @Override
+      protected List<DefaultMutableTreeNode> doInBackground() {
+        return runDeletions(targets, failures);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          applyDeletions(get(), failures);
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }.execute();
+  }
+
+  /**
+   * The subset of {@code nodes} that may be deleted — everything but a server's {@code /db} root, and
+   * with any node already covered by a selected ancestor collection pruned out (deleting the ancestor
+   * removes it server-side, so deleting it again would spuriously fail).
+   */
+  private List<DefaultMutableTreeNode> deletableNodes(List<DefaultMutableTreeNode> nodes) {
+    List<String> collectionPaths = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      ExistNode en = asExist(node);
+      if (en.collection) {
+        collectionPaths.add(en.path);
+      }
+    }
+    List<DefaultMutableTreeNode> targets = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      String path = asExist(node).path;
+      if (!DB_ROOT.equals(path) && !coveredByAncestor(path, collectionPaths)) {
+        targets.add(node);
+      }
+    }
+    return targets;
+  }
+
+  /** True if {@code path} sits under one of {@code collectionPaths} (other than itself). */
+  private static boolean coveredByAncestor(String path, List<String> collectionPaths) {
+    for (String coll : collectionPaths) {
+      if (!coll.equals(path) && path.startsWith(coll + "/")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean confirmBatchDelete(int count) {
+    return workspace.showConfirmDialog("Confirm delete",
+        "Delete these " + count + " items from eXist-db? Collections are removed with all their "
+            + "contents. This cannot be undone.",
+        new String[] {"Delete", "Cancel"}, new int[] {0, 1}) == 0;
+  }
+
+  /** Deletes each target off the EDT, collecting failures; returns the nodes actually removed. */
+  private List<DefaultMutableTreeNode> runDeletions(List<DefaultMutableTreeNode> targets,
+      List<String> failures) {
+    List<DefaultMutableTreeNode> deleted = new ArrayList<>();
+    for (DefaultMutableTreeNode node : targets) {
+      String failure = deleteOne(node);
+      if (failure == null) {
+        deleted.add(node);
+      } else {
+        failures.add(failure);
+      }
+    }
+    return deleted;
+  }
+
+  /** Removes the deleted nodes from the tree, closes their editors, and reports the outcome. */
+  private void applyDeletions(List<DefaultMutableTreeNode> deleted, List<String> failures) {
+    for (DefaultMutableTreeNode node : deleted) {
+      if (node.getParent() != null) {
+        treeModel.removeNodeFromParent(node);
+      }
+      offerToCloseDeletedEditors(asExist(node));
+    }
+    reportBatch("Deleted", deleted.size(), failures);
+  }
+
+  /** Deletes one node's resource/collection; returns {@code null} on success or a failure line. */
+  private String deleteOne(DefaultMutableTreeNode node) {
+    ExistNode en = asExist(node);
+    ExistClient client = ExistContext.clientById(en.serverId);
+    if (client == null) {
+      return en.path + " (not connected)";
+    }
+    try {
+      if (en.collection) {
+        client.deleteCollection(en.path);
+      } else {
+        client.deleteResource(en.path);
+      }
+      return null;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      return en.path + " (interrupted)";
+    } catch (Exception ex) {
+      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+      return en.path + " (" + cause.getMessage() + ")";
+    }
+  }
+
+  /** Downloads every selected resource (collections are skipped) into the user's Downloads folder. */
+  private void batchDownload(List<DefaultMutableTreeNode> nodes) {
+    List<ExistNode> resources = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      ExistNode en = asExist(node);
+      if (!en.collection) {
+        resources.add(en);
+      }
+    }
+    if (resources.isEmpty()) {
+      workspace.showInformationMessage(
+          "Select one or more resources to download (collections can't be downloaded).");
+      return;
+    }
+    final Path dir = Path.of(System.getProperty("user.home"), "Downloads");
+    new SwingWorker<List<String>, Void>() {
+      @Override
+      protected List<String> doInBackground() {
+        List<String> failures = new ArrayList<>();
+        for (ExistNode en : resources) {
+          String failure = downloadOne(en, dir);
+          if (failure != null) {
+            failures.add(failure);
+          }
+        }
+        return failures;
+      }
+
+      @Override
+      protected void done() {
+        List<String> failures;
+        try {
+          failures = get();
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        reportBatch("Downloaded", resources.size() - failures.size(), failures);
+      }
+    }.execute();
+  }
+
+  /** Downloads one resource into {@code dir}; returns {@code null} on success or a failure line. */
+  private String downloadOne(ExistNode en, Path dir) {
+    ExistClient client = ExistContext.clientById(en.serverId);
+    if (client == null) {
+      return en.path + " (not connected)";
+    }
+    try {
+      ExistClient.ResourceBytes resource = client.readResource(en.path);
+      Files.write(uniqueTarget(dir, en.name), resource.bytes());
+      return null;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      return en.path + " (interrupted)";
+    } catch (Exception ex) {
+      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+      return en.path + " (" + cause.getMessage() + ")";
+    }
+  }
+
+  /**
+   * A path in {@code dir} for {@code name}, appending " (2)", " (3)", … before the extension if a
+   * file is already there — so downloading same-named resources from different collections (or
+   * re-downloading) never silently overwrites an existing file. Finder-style.
+   */
+  private static Path uniqueTarget(Path dir, String name) {
+    Path target = dir.resolve(name);
+    if (!Files.exists(target)) {
+      return target;
+    }
+    int dot = name.lastIndexOf('.');
+    String base = dot > 0 ? name.substring(0, dot) : name;
+    String ext = dot > 0 ? name.substring(dot) : "";
+    for (int i = 2; i < 10_000; i++) {
+      Path candidate = dir.resolve(base + " (" + i + ")" + ext);
+      if (!Files.exists(candidate)) {
+        return candidate;
+      }
+    }
+    return target;
+  }
+
+  /** Opens every selected resource (collections are skipped) in its own editor tab, off the EDT. */
+  private void batchOpen(List<DefaultMutableTreeNode> nodes) {
+    List<ExistNode> resources = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      ExistNode en = asExist(node);
+      if (!en.collection) {
+        resources.add(en);
+      }
+    }
+    if (resources.isEmpty()) {
+      return;
+    }
+    // Oxygen's open() deadlock-guards on the AWT thread, so open the batch from a separate thread.
+    new SwingWorker<List<String>, Void>() {
+      @Override
+      protected List<String> doInBackground() {
+        List<String> failures = new ArrayList<>();
+        for (ExistNode en : resources) {
+          String failure = openOne(en);
+          if (failure != null) {
+            failures.add(failure);
+          }
+        }
+        return failures;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          List<String> failures = get();
+          reportBatch("Opened", resources.size() - failures.size(), failures);
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }.execute();
+  }
+
+  /** Copies the selected resources'/collections' DB paths to the clipboard, one per line. */
+  private void copyLocations(List<DefaultMutableTreeNode> nodes) {
+    List<String> paths = new ArrayList<>();
+    for (DefaultMutableTreeNode node : nodes) {
+      paths.add(asExist(node).path);
+    }
+    Toolkit.getDefaultToolkit().getSystemClipboard()
+        .setContents(new StringSelection(String.join("\n", paths)), null);
+    workspace.showStatusMessage("Copied " + paths.size() + " locations");
+  }
+
+  /** Status (all succeeded) or error (with the failure lines) summary for a batch operation. */
+  private void reportBatch(String verb, int succeeded, List<String> failures) {
+    if (failures.isEmpty()) {
+      workspace.showStatusMessage(verb + " " + succeeded + " " + plural(succeeded, "item"));
+    } else {
+      workspace.showErrorMessage(verb + " " + succeeded + ", failed " + failures.size() + ":\n"
+          + String.join("\n", failures));
+    }
   }
 
   private void newResource(DefaultMutableTreeNode node, ExistNode coll) {
@@ -1329,13 +1667,37 @@ public final class ExistdbBrowserPanel extends JPanel {
       tree.expandPath(new TreePath(node.getPath()));
       return;
     }
+    // Open off the EDT: Oxygen's open() deadlock-guards when called on the AWT thread.
+    new SwingWorker<String, Void>() {
+      @Override
+      protected String doInBackground() {
+        return openOne(existNode);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          String failure = get();
+          if (failure != null) {
+            workspace.showErrorMessage(failure);
+          }
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }.execute();
+  }
+
+  /**
+   * Opens one stored resource in an editor; returns {@code null} on success or a failure line.
+   * Must run off the EDT — Oxygen's {@code open()} rejects calls on the AWT thread (deadlock guard).
+   */
+  private String openOne(ExistNode existNode) {
     try {
       URL url = ExistURLStreamHandler.toUrl(existNode.serverId, existNode.path);
-      if (!workspace.open(url)) {
-        workspace.showErrorMessage("Oxygen declined to open " + existNode.path);
-      }
+      return workspace.open(url) ? null : "Oxygen declined to open " + existNode.path;
     } catch (Exception ex) {
-      workspace.showErrorMessage("Failed to open " + existNode.path + ": " + ex.getMessage());
+      return "Failed to open " + existNode.path + ": " + ex.getMessage();
     }
   }
 
@@ -1346,6 +1708,13 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** A dragged tree node, carried in-JVM for pane-to-pane drops. */
   private record ExistNodeRef(String serverId, String path, String name, boolean collection) {
   }
+
+  /** A list of dragged node refs (the {@link #NODES_FLAVOR} payload; one entry for a single drag). */
+  private record NodeRefList(List<ExistNodeRef> refs) {
+  }
+
+  /** What to do with dragged items whose name already exists in the drop target. */
+  private enum CollisionPolicy { NONE, OVERWRITE, SKIP, CANCEL }
 
   /**
    * Drag from the tree (a resource or sub-collection) and drop OS files / other nodes onto a
@@ -1360,21 +1729,30 @@ public final class ExistdbBrowserPanel extends JPanel {
 
     @Override
     protected Transferable createTransferable(JComponent c) {
-      // Only resources and sub-collections are draggable — not the server / db root.
-      if (tree.getLastSelectedPathComponent() instanceof DefaultMutableTreeNode node
-          && node.getUserObject() instanceof ExistNode existNode
-          && !DB_ROOT.equals(existNode.path)) {
-        return new NodeTransferable(new ExistNodeRef(
-            existNode.serverId, existNode.path, existNode.name, existNode.collection));
+      // Every selected resource/sub-collection is draggable — not a server / db root.
+      List<ExistNodeRef> refs = new ArrayList<>();
+      for (DefaultMutableTreeNode node : selectedNodes()) {
+        ExistNode en = asExist(node);
+        if (!DB_ROOT.equals(en.path)) {
+          refs.add(new ExistNodeRef(en.serverId, en.path, en.name, en.collection));
+        }
       }
-      return null;
+      if (refs.isEmpty()) {
+        return null;
+      }
+      if (refs.size() > 1) {
+        // A Finder-style badge with the count follows the pointer (fixed at drag start).
+        setDragImage(dragBadge(refs.size()));
+        setDragImageOffset(new Point(10, 10));
+      }
+      return new NodeTransferable(refs);
     }
 
     @Override
     public boolean canImport(TransferSupport support) {
       return dropCollection(support) != null
           && (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
-              || support.isDataFlavorSupported(NODE_FLAVOR));
+              || support.isDataFlavorSupported(NODES_FLAVOR));
     }
 
     @Override
@@ -1385,9 +1763,14 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
       Transferable transferable = support.getTransferable();
       try {
-        if (transferable.isDataFlavorSupported(NODE_FLAVOR)) {
-          relocateInternal((ExistNodeRef) transferable.getTransferData(NODE_FLAVOR),
-              target, targetNode, support.getDropAction());
+        if (transferable.isDataFlavorSupported(NODES_FLAVOR)) {
+          List<ExistNodeRef> refs =
+              ((NodeRefList) transferable.getTransferData(NODES_FLAVOR)).refs();
+          if (refs.size() == 1) {
+            relocateInternal(refs.get(0), target, targetNode, support.getDropAction());
+          } else {
+            relocateMany(refs, target, targetNode, support.getDropAction());
+          }
           return true;
         }
         if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
@@ -1419,53 +1802,58 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   /**
-   * A {@link Transferable} for a dragged node: {@link #NODE_FLAVOR} for an internal pane→pane move/
-   * copy, and {@code javaFileListFlavor} for export to Finder/desktop — the latter materializes the
-   * resource (or, recursively, the collection) to temp files on demand so the OS receives real files.
+   * A {@link Transferable} for one or more dragged nodes: {@link #NODES_FLAVOR} for an internal
+   * pane→pane move/copy, and {@code javaFileListFlavor} for export to Finder/desktop — the latter
+   * materializes each resource (or, recursively, each collection) to temp files so the OS gets real
+   * files.
    */
   private final class NodeTransferable implements Transferable {
-    private final ExistNodeRef ref;
+    private final List<ExistNodeRef> refs;
 
-    NodeTransferable(ExistNodeRef ref) {
-      this.ref = ref;
+    NodeTransferable(List<ExistNodeRef> refs) {
+      this.refs = refs;
     }
 
     @Override
     public DataFlavor[] getTransferDataFlavors() {
-      return new DataFlavor[] {NODE_FLAVOR, DataFlavor.javaFileListFlavor};
+      return new DataFlavor[] {NODES_FLAVOR, DataFlavor.javaFileListFlavor};
     }
 
     @Override
     public boolean isDataFlavorSupported(DataFlavor flavor) {
-      return NODE_FLAVOR.equals(flavor) || DataFlavor.javaFileListFlavor.equals(flavor);
+      return NODES_FLAVOR.equals(flavor) || DataFlavor.javaFileListFlavor.equals(flavor);
     }
 
     @Override
     public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException {
-      if (NODE_FLAVOR.equals(flavor)) {
-        return ref;
+      if (NODES_FLAVOR.equals(flavor)) {
+        return new NodeRefList(refs);
       }
       if (DataFlavor.javaFileListFlavor.equals(flavor)) {
         try {
-          return exportToFiles(ref);
+          return exportToFiles(refs);
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
-          throw new IOException("Interrupted while exporting " + ref.path(), e);
+          throw new IOException("Interrupted while exporting dragged items", e);
         }
       }
       throw new UnsupportedFlavorException(flavor);
     }
   }
 
-  /** Materializes a dragged node to temp files (for an export to Finder), returning the top entry. */
-  private List<File> exportToFiles(ExistNodeRef ref) throws IOException, InterruptedException {
-    ExistClient client = ExistContext.clientById(ref.serverId());
-    if (client == null) {
-      throw new IOException("Not connected to " + ref.serverId());
-    }
+  /** Materializes every dragged node to temp files (for an export to Finder), into one temp dir. */
+  private List<File> exportToFiles(List<ExistNodeRef> refs) throws IOException, InterruptedException {
     Path tempDir = Files.createTempDirectory("existdb-export-");
     tempDir.toFile().deleteOnExit();
-    return List.of(materialize(client, ref.path(), ref.name(), ref.collection(), tempDir));
+    List<File> files = new ArrayList<>();
+    for (ExistNodeRef ref : refs) {
+      ExistClient client = ExistContext.clientById(ref.serverId());
+      if (client == null) {
+        throw new IOException("Not connected to " + ref.serverId());
+      }
+      files.add(materialize(client, ref.path(), ref.name(), ref.collection(), tempDir));
+    }
+    return files;
   }
 
   /** Writes a resource (binary-safe), or recreates a collection's tree, under {@code parentDir}. */
@@ -1627,6 +2015,13 @@ public final class ExistdbBrowserPanel extends JPanel {
       DefaultMutableTreeNode targetNode, boolean copy) {
     workspace.showStatusMessage((copy ? "Copied " : "Moved ")
         + source.path() + " to " + target.path);
+    applyRelocation(source, target, targetNode, copy);
+  }
+
+  /** Surgical tree update for one relocated item (no status message): drop the moved node, add it
+   *  under the target. Shared by the single-item and batch relocate flows. */
+  private void applyRelocation(ExistNodeRef source, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy) {
     if (!copy) {
       DefaultMutableTreeNode moved = findNode(source.serverId(), source.path());
       if (moved != null && moved.getParent() != null) {
@@ -1634,6 +2029,239 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
     }
     addRelocatedChild(source, target, targetNode);
+  }
+
+  /**
+   * Moves/copies a multi-item selection into {@code target} (same server only in v1). Prunes items
+   * already covered by a selected ancestor collection, rejects dropping into self/a dragged
+   * collection, skips items already in the target, resolves name collisions with one combined
+   * decision, and reports per-item failures — never losing a source (move deletes only after copy).
+   */
+  private void relocateMany(List<ExistNodeRef> sources, ExistNode target,
+      DefaultMutableTreeNode targetNode, int dropAction) {
+    if (!sameServerAll(sources, target)) {
+      workspace.showInformationMessage("Moving multiple items between servers isn't supported yet.");
+      return;
+    }
+    List<ExistNodeRef> toMove = movableInto(pruneCoveredRefs(sources), target);
+    if (toMove == null || toMove.isEmpty()) {
+      return;
+    }
+    String duplicate = firstDuplicateName(toMove);
+    if (duplicate != null) {
+      workspace.showErrorMessage("The selection has more than one item named \"" + duplicate
+          + "\" — a collection can't hold two with the same name. Move them separately.");
+      return;
+    }
+    boolean copy = dropAction == TransferHandler.COPY;
+    long collections = toMove.stream().filter(ExistNodeRef::collection).count();
+    if (collections > 0 && !confirmMany(toMove.size(), collections, copy)) {
+      return;
+    }
+    ExistClient client = ExistContext.clientById(target.serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    resolveCollisionsThenMove(client, toMove, target, targetNode, copy);
+  }
+
+  /** The first name shared by two refs (a collection can't hold two same-named children), or null. */
+  private static String firstDuplicateName(List<ExistNodeRef> refs) {
+    Set<String> seen = new HashSet<>();
+    for (ExistNodeRef r : refs) {
+      if (!seen.add(r.name())) {
+        return r.name();
+      }
+    }
+    return null;
+  }
+
+  private static boolean sameServerAll(List<ExistNodeRef> sources, ExistNode target) {
+    for (ExistNodeRef s : sources) {
+      if (!s.serverId().equals(target.serverId)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Drops any ref already covered by a selected ancestor collection (it moves with the ancestor). */
+  private static List<ExistNodeRef> pruneCoveredRefs(List<ExistNodeRef> sources) {
+    List<String> collectionPaths = new ArrayList<>();
+    for (ExistNodeRef s : sources) {
+      if (s.collection()) {
+        collectionPaths.add(s.path());
+      }
+    }
+    List<ExistNodeRef> kept = new ArrayList<>();
+    for (ExistNodeRef s : sources) {
+      if (!coveredByAncestor(s.path(), collectionPaths)) {
+        kept.add(s);
+      }
+    }
+    return kept;
+  }
+
+  /**
+   * The refs that should actually move into {@code target}: rejects (returns {@code null}) if any is
+   * the target itself or an ancestor of it; otherwise drops items already directly in the target.
+   */
+  private List<ExistNodeRef> movableInto(List<ExistNodeRef> sources, ExistNode target) {
+    List<ExistNodeRef> result = new ArrayList<>();
+    for (ExistNodeRef s : sources) {
+      if (target.path.equals(s.path()) || target.path.startsWith(s.path() + "/")) {
+        workspace.showErrorMessage("Can't move a collection into itself or its contents.");
+        return null;
+      }
+      if (!target.path.equals(parentPath(s.path()))) {
+        result.add(s);
+      }
+    }
+    return result;
+  }
+
+  private boolean confirmMany(int total, long collections, boolean copy) {
+    String verb = copy ? "Copy" : "Move";
+    String msg = verb + " " + total + " items, including " + collections + " collection"
+        + (collections == 1 ? "" : "s") + " transferred recursively. Continue?";
+    return workspace.showConfirmDialog(verb + " items", msg,
+        new String[] {verb, "Cancel"}, new int[] {0, 1}) == 0;
+  }
+
+  /** Lists the target's children off the EDT, asks a single collision decision, then runs the moves. */
+  private void resolveCollisionsThenMove(ExistClient client, List<ExistNodeRef> toMove,
+      ExistNode target, DefaultMutableTreeNode targetNode, boolean copy) {
+    new SwingWorker<Set<String>, Void>() {
+      @Override
+      protected Set<String> doInBackground() throws Exception {
+        Set<String> names = new HashSet<>();
+        for (ExistClient.ChildEntry child : client.listChildren(target.path)) {
+          names.add(child.name());
+        }
+        return names;
+      }
+
+      @Override
+      protected void done() {
+        Set<String> existing;
+        try {
+          existing = get();
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        long collisions = toMove.stream().filter(s -> existing.contains(s.name())).count();
+        CollisionPolicy policy = CollisionPolicy.NONE;
+        if (collisions > 0) {
+          policy = askCollisionPolicy((int) collisions, target.path);
+          if (policy == CollisionPolicy.CANCEL) {
+            return;
+          }
+        }
+        runMoves(client, toMove, target, targetNode, copy, existing, policy);
+      }
+    }.execute();
+  }
+
+  private CollisionPolicy askCollisionPolicy(int count, String targetPath) {
+    int choice = workspace.showConfirmDialog("Name conflict",
+        count + " of the dragged items already exist in " + targetPath + ".",
+        new String[] {"Overwrite all", "Skip existing", "Cancel"}, new int[] {0, 1, 2});
+    return switch (choice) {
+      case 0 -> CollisionPolicy.OVERWRITE;
+      case 1 -> CollisionPolicy.SKIP;
+      default -> CollisionPolicy.CANCEL;
+    };
+  }
+
+  /** Runs the per-item moves off the EDT, then updates the tree and reports the outcome. */
+  private void runMoves(ExistClient client, List<ExistNodeRef> toMove, ExistNode target,
+      DefaultMutableTreeNode targetNode, boolean copy, Set<String> existing, CollisionPolicy policy) {
+    new SwingWorker<List<ExistNodeRef>, Void>() {
+      private final List<String> failures = new ArrayList<>();
+
+      @Override
+      protected List<ExistNodeRef> doInBackground() {
+        List<ExistNodeRef> moved = new ArrayList<>();
+        for (ExistNodeRef s : toMove) {
+          String result = moveOne(client, s, target.path, copy, existing.contains(s.name()), policy);
+          if (result == null) {
+            moved.add(s);
+          } else if (!result.isEmpty()) {
+            failures.add(result);
+          }
+        }
+        return moved;
+      }
+
+      @Override
+      protected void done() {
+        List<ExistNodeRef> moved;
+        try {
+          moved = get();
+        } catch (Exception ex) {
+          Thread.currentThread().interrupt();
+          return;
+        }
+        for (ExistNodeRef s : moved) {
+          applyRelocation(s, target, targetNode, copy);
+        }
+        reportBatch(copy ? "Copied" : "Moved", moved.size(), failures);
+      }
+    }.execute();
+  }
+
+  /**
+   * Moves/copies one item; returns {@code null} on success, {@code ""} if skipped per the collision
+   * policy, or a failure description otherwise. Same-server only (the batch path).
+   */
+  private String moveOne(ExistClient client, ExistNodeRef s, String targetPath, boolean copy,
+      boolean collides, CollisionPolicy policy) {
+    String dest = targetPath + "/" + s.name();
+    try {
+      if (collides) {
+        if (policy == CollisionPolicy.SKIP) {
+          return "";
+        }
+        deleteFrom(client, dest, s.collection());
+      }
+      relocate(client, client, s, dest, targetPath, copy, true);
+      return null;
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      return s.path() + " (interrupted)";
+    } catch (Exception ex) {
+      Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+      return s.path() + " (" + cause.getMessage() + ")";
+    }
+  }
+
+  /** A Finder-style drag image: a small stacked-pages glyph with a red count badge. */
+  private static Image dragBadge(int count) {
+    int w = 46;
+    int h = 30;
+    BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+    Graphics2D g = img.createGraphics();
+    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+    g.setColor(new Color(0x9A, 0xA7, 0xB8));
+    g.fillRoundRect(9, 9, 16, 18, 4, 4);
+    g.setColor(new Color(0x42, 0x6A, 0xB3));
+    g.fillRoundRect(5, 5, 16, 18, 4, 4);
+    g.setColor(Color.WHITE);
+    g.fillRoundRect(8, 9, 10, 10, 2, 2);
+    String label = Integer.toString(count);
+    int badge = 18;
+    int bx = w - badge - 1;
+    g.setColor(new Color(0xD0, 0x39, 0x2B));
+    g.fillOval(bx, 0, badge, badge);
+    g.setColor(Color.WHITE);
+    g.setFont(g.getFont().deriveFont(Font.BOLD, 11f));
+    FontMetrics fm = g.getFontMetrics();
+    g.drawString(label, bx + (badge - fm.stringWidth(label)) / 2,
+        (badge - fm.getHeight()) / 2 + fm.getAscent());
+    g.dispose();
+    return img;
   }
 
   /**
