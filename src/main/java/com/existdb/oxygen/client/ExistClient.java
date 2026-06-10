@@ -749,6 +749,81 @@ public final class ExistClient {
     return new SearchResults(o.optInt("total", hits.size()), hits);
   }
 
+  /**
+   * One searchable field or facet from {@code /api/search/fields}. {@code kind} is
+   * {@code "field"} | {@code "facet"} | {@code "vector"}; {@code elements} are the element names the
+   * field is built from. {@code type}/{@code analyzers}/{@code returnable} apply to {@code field}
+   * kinds (facets/vectors leave {@code type} null and {@code analyzers} empty). The server reports
+   * {@code analyzer} as either a single string or an array; it is normalized to a list here.
+   */
+  public record SearchFieldInfo(String field, String kind, List<String> elements, String type,
+      List<String> analyzers, boolean returnable) {
+
+    /** Whether this is a plain Lucene field (as opposed to a {@code facet} or {@code vector}). */
+    public boolean isField() {
+      return "field".equals(kind);
+    }
+  }
+
+  /**
+   * The {@code /api/search/fields} response: the resolved {@code scope}, the {@code user} the server
+   * resolved the request as, and the fields/facets visible to that user (field-level security filters
+   * the list, so two users can see different sets).
+   */
+  public record SearchFields(List<String> scope, String user, int total,
+      List<SearchFieldInfo> fields) {
+  }
+
+  /**
+   * GET {@code /api/search/fields?scope=…} — the searchable fields, facets, and vectors visible to the
+   * caller under {@code scope} (e.g. {@code /db} or {@code /db/apps}). Field-level security filters the
+   * result to what the caller may see.
+   */
+  public SearchFields searchFields(String scope) throws IOException, InterruptedException {
+    HttpResponse<String> r =
+        send(request("/search/fields?scope=" + enc(scope)).GET().build());
+    JSONObject o = new JSONObject(r.body());
+    List<SearchFieldInfo> fields = new ArrayList<>();
+    JSONArray arr = o.optJSONArray("fields");
+    if (arr != null) {
+      for (int i = 0; i < arr.length(); i++) {
+        JSONObject f = arr.getJSONObject(i);
+        fields.add(new SearchFieldInfo(
+            f.optString("field", ""),
+            f.optString("kind", "field"),
+            stringList(f.optJSONArray("elements")),
+            f.has("type") ? f.optString("type", null) : null,
+            analyzerList(f.opt("analyzer")),
+            f.optBoolean("returnable", false)));
+      }
+    }
+    return new SearchFields(stringList(o.optJSONArray("scope")), o.optString("user", ""),
+        o.optInt("total", fields.size()), fields);
+  }
+
+  /** The string elements of {@code arr} (empty when {@code arr} is {@code null}). */
+  private static List<String> stringList(JSONArray arr) {
+    List<String> out = new ArrayList<>();
+    if (arr != null) {
+      for (int i = 0; i < arr.length(); i++) {
+        out.add(arr.getString(i));
+      }
+    }
+    return out;
+  }
+
+  /** Normalizes {@code analyzer}, which the server reports as a single string or an array, to a list. */
+  private static List<String> analyzerList(Object value) {
+    if (value instanceof JSONArray arr) {
+      return stringList(arr);
+    }
+    List<String> out = new ArrayList<>();
+    if (value instanceof String s && !s.isBlank()) {
+      out.add(s);
+    }
+    return out;
+  }
+
   // ---------------------------------------------------------------------------
   // Language services (existdb-openapi /api/langservice/*, LSP-isomorphic shapes)
   // ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
+import java.util.Comparator;
 import java.util.List;
 
 import javax.swing.AbstractAction;
@@ -70,6 +71,8 @@ import javax.swing.SwingWorker;
 public final class SearchDialog extends JDialog {
 
   private static final int LIMIT = 50;
+  /** The scope the field picker discovers searchable fields under (the whole database). */
+  private static final String FIELD_SCOPE = "/db";
   private static final String INTRO_TEXT = "Searches across data that apps on the selected eXist-db "
       + "server contribute to a Lucene full-text field called \"site-content\"; eXist 7's stock apps "
       + "contribute their data to this.";
@@ -78,6 +81,10 @@ public final class SearchDialog extends JDialog {
   private final transient List<ConnectionProfile> profiles;
   private final JComboBox<String> serverCombo;
   private final JTextField queryField = OxygenUIComponentsFactory.createTextField();
+  /** "Search in" picker: a {@code null} item is "All fields"; others are discovered fields/facets. */
+  private final JComboBox<ExistClient.SearchFieldInfo> fieldCombo =
+      OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>());
+  private final JLabel fieldHint = new JLabel(" ");
   private final DefaultListModel<ExistClient.SearchHit> model = new DefaultListModel<>();
   private final JList<ExistClient.SearchHit> list = new JList<>(model);
   private final JLabel status = new JLabel(" ");
@@ -127,6 +134,17 @@ public final class SearchDialog extends JDialog {
     top.add(queryField, BorderLayout.CENTER);
     top.add(searchButton, BorderLayout.EAST);
     queryField.addActionListener(e -> doSearch()); // Enter runs the search
+
+    // "Search in" picker, populated from /api/search/fields for the selected server (FLS-filtered).
+    fieldCombo.setRenderer(fieldRenderer());
+    fieldCombo.setToolTipText("The searchable fields/facets this server exposes (only those you may "
+        + "see). Per-field search needs eXist #6455; for now the query runs across the default field.");
+    fieldHint.setForeground(Color.GRAY);
+    JPanel fieldRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+    fieldRow.add(new JLabel("Search in:"));
+    fieldRow.add(fieldCombo);
+    fieldRow.add(fieldHint);
+    serverCombo.addActionListener(e -> fetchFields()); // re-discover when the server changes
 
     list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     list.setCellRenderer(hitRenderer());
@@ -183,9 +201,13 @@ public final class SearchDialog extends JDialog {
         updateIntro();
       }
     });
+    JPanel controls = new JPanel(new BorderLayout(0, 2));
+    controls.add(top, BorderLayout.NORTH);
+    controls.add(fieldRow, BorderLayout.CENTER);
     JPanel north = new JPanel(new BorderLayout(0, 4));
     north.add(intro, BorderLayout.NORTH);
-    north.add(top, BorderLayout.CENTER);
+    north.add(controls, BorderLayout.CENTER);
+    fetchFields(); // discover fields for the initially-selected server
 
     setLayout(new BorderLayout(8, 8));
     ((JPanel) getContentPane()).setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
@@ -259,6 +281,90 @@ public final class SearchDialog extends JDialog {
         }
       }
     }.execute();
+  }
+
+  /** Discovers the searchable fields for the selected server and repopulates the "Search in" combo. */
+  private void fetchFields() {
+    fieldCombo.removeAllItems();
+    fieldCombo.addItem(null); // "All fields"
+    fieldHint.setText(" ");
+    ExistClient client = ExistContext.clientById(selectedServerId());
+    if (client == null) {
+      return;
+    }
+    new SwingWorker<ExistClient.SearchFields, Void>() {
+      @Override
+      protected ExistClient.SearchFields doInBackground() throws Exception {
+        return client.searchFields(FIELD_SCOPE);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          ExistClient.SearchFields fields = get();
+          fields.fields().stream()
+              .sorted(Comparator
+                  .comparingInt((ExistClient.SearchFieldInfo f) -> kindOrder(f.kind()))
+                  .thenComparing(ExistClient.SearchFieldInfo::field, String.CASE_INSENSITIVE_ORDER))
+              .forEach(fieldCombo::addItem);
+          fieldHint.setText(fields.total() + " visible to " + fields.user());
+        } catch (Exception e) {
+          // An older server (no /api/search/fields) just leaves "All fields"; nothing to surface.
+          fieldHint.setText(" ");
+        }
+      }
+    }.execute();
+  }
+
+  /** Sort order for the picker: plain fields first, then facets, then vectors. */
+  private static int kindOrder(String kind) {
+    return switch (kind == null ? "" : kind) {
+      case "field" -> 0;
+      case "facet" -> 1;
+      case "vector" -> 2;
+      default -> 3;
+    };
+  }
+
+  /** Renders a "Search in" item: {@code null} = "All fields"; others show the name + grey kind, with
+   *  the element/type/analyzer contract as a tooltip. */
+  private static DefaultListCellRenderer fieldRenderer() {
+    return new DefaultListCellRenderer() {
+      @Override
+      public Component getListCellRendererComponent(JList<?> jlist, Object value, int index,
+          boolean selected, boolean focus) {
+        ExistClient.SearchFieldInfo f = (ExistClient.SearchFieldInfo) value;
+        if (f == null) {
+          Component c =
+              super.getListCellRendererComponent(jlist, "All fields (default)", index, selected, focus);
+          setToolTipText(null);
+          return c;
+        }
+        Color secondary = selected ? jlist.getSelectionForeground() : Color.GRAY;
+        String hex = String.format("#%02x%02x%02x",
+            secondary.getRed(), secondary.getGreen(), secondary.getBlue());
+        String text = "<html>" + escape(f.field()) + " <font color='" + hex + "'>— "
+            + escape(f.kind()) + "</font></html>";
+        Component c = super.getListCellRendererComponent(jlist, text, index, selected, focus);
+        setToolTipText(fieldTooltip(f));
+        return c;
+      }
+    };
+  }
+
+  private static String fieldTooltip(ExistClient.SearchFieldInfo f) {
+    StringBuilder sb = new StringBuilder("<html><b>").append(escape(f.field())).append("</b> (")
+        .append(escape(f.kind())).append(")");
+    if (f.type() != null) {
+      sb.append("<br>type: ").append(escape(f.type()));
+    }
+    if (!f.elements().isEmpty()) {
+      sb.append("<br>elements: ").append(escape(String.join(", ", f.elements())));
+    }
+    if (!f.analyzers().isEmpty()) {
+      sb.append("<br>analyzer: ").append(escape(String.join(", ", f.analyzers())));
+    }
+    return sb.append("</html>").toString();
   }
 
   private void openSelected() {

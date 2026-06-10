@@ -23,6 +23,7 @@ package com.existdb.oxygen.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -171,6 +172,36 @@ class ExistClientTest {
     assertEquals(2, results.hits().size());
     assertEquals("/db/apps/doc/indexing.xml", results.hits().get(0).path());
     assertEquals("range index", results.hits().get(1).snippet());
+  }
+
+  @Test
+  void searchFieldsParsesKindsAndStringOrArrayAnalyzer() throws Exception {
+    ExistClient.SearchFields fields = client.searchFields("/db");
+    assertEquals("admin", fields.user());
+    assertEquals(List.of("/db"), fields.scope());
+    assertEquals(4, fields.fields().size());
+
+    // facet: no type, empty analyzer list, not a plain field
+    ExistClient.SearchFieldInfo facet = fields.fields().get(0);
+    assertEquals("facet", facet.kind());
+    assertEquals("site-app", facet.field());
+    assertNull(facet.type());
+    assertTrue(facet.analyzers().isEmpty());
+    assertFalse(facet.isField());
+
+    // field with analyzer reported as a single string → one-element list
+    ExistClient.SearchFieldInfo category = fields.fields().get(1);
+    assertTrue(category.isField());
+    assertEquals("xs:string", category.type());
+    assertTrue(category.returnable());
+    assertEquals(1, category.analyzers().size());
+
+    // field with analyzer reported as an array → multi-element list
+    ExistClient.SearchFieldInfo content = fields.fields().get(2);
+    assertEquals(2, content.analyzers().size());
+
+    // vector kind is preserved
+    assertEquals("vector", fields.fields().get(3).kind());
   }
 
   @Test
