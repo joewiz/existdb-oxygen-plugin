@@ -186,7 +186,10 @@ public final class SearchDialog extends JDialog {
     JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
     buttons.add(cancel);
     buttons.add(open);
-    south.add(status, BorderLayout.WEST);
+    // Status goes in CENTER, not WEST: a WEST label takes its full preferred width, so a long error
+    // string (e.g. a 500's raw JSON body) overflows and overlaps the buttons. CENTER gets only the
+    // space left after the buttons and clips the text instead of colliding with them.
+    south.add(status, BorderLayout.CENTER);
     south.add(buttons, BorderLayout.EAST);
 
     // Intro line (like Oxygen's "Install new add-ons" dialog) explaining what /api/search covers.
@@ -252,6 +255,7 @@ public final class SearchDialog extends JDialog {
       return;
     }
     status.setText("Searching…");
+    status.setToolTipText(null);
     model.clear();
     new SwingWorker<ExistClient.SearchResults, Void>() {
       @Override
@@ -277,7 +281,9 @@ public final class SearchDialog extends JDialog {
           }
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
-          status.setText("Search failed: " + cause.getMessage());
+          String message = "Search failed: " + cause.getMessage();
+          status.setText(message);
+          status.setToolTipText(message); // CENTER clips a long error; keep the full text on hover.
         }
       }
     }.execute();
