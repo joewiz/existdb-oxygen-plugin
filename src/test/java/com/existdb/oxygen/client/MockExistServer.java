@@ -116,6 +116,19 @@ public final class MockExistServer implements AutoCloseable {
       }
     });
 
+    // Registered before "/search" so the longest-prefix match routes /search/fields here.
+    handle(prefix + "/search/fields", ex -> respond(ex, 200,
+        "{\"scope\":[\"/db\"],\"user\":\"admin\",\"total\":3,\"fields\":["
+            + "{\"kind\":\"facet\",\"field\":\"site-app\",\"elements\":[\"post\",\"topic\"]},"
+            + "{\"kind\":\"field\",\"field\":\"category\",\"type\":\"xs:string\","
+            + "\"elements\":[\"entry\"],\"returnable\":true,"
+            + "\"analyzer\":\"org.apache.lucene.analysis.standard.StandardAnalyzer\"},"
+            + "{\"kind\":\"field\",\"field\":\"site-content\",\"type\":\"xs:string\","
+            + "\"elements\":[\"post\"],\"returnable\":true,"
+            + "\"analyzer\":[\"org.apache.lucene.analysis.standard.StandardAnalyzer\","
+            + "\"org.apache.lucene.analysis.core.SimpleAnalyzer\"]},"
+            + "{\"kind\":\"vector\",\"field\":\"test-embedding\",\"elements\":[\"doc\"]}]}"));
+
     handle(prefix + "/search", ex -> respond(ex, 200,
         "{\"total\":7,\"query\":\"index\",\"results\":["
             + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
