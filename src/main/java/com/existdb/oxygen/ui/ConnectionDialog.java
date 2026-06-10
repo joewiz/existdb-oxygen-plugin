@@ -25,6 +25,7 @@ import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.model.ConnectionProfile;
 
 import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
+import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -40,6 +41,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.BorderFactory;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
@@ -107,12 +109,21 @@ public final class ConnectionDialog {
   }
 
   private JPanel buildForm() {
-    JPanel form = new JPanel(new GridBagLayout());
-    addRow(form, 0, "Name:", nameField);
-    addRow(form, 1, "URL:", urlField);
-    addRow(form, 2, "User:", userField);
-    addRow(form, 3, "Password:", passField);
-    addFieldRow(form, 4, acceptSelfSignedBox);
+    // Name on top, then the connection details in a titled group — matching Oxygen's Connection
+    // dialog (Name + Data Source above a "Connection Details" group).
+    JPanel name = new JPanel(new GridBagLayout());
+    addRow(name, 0, "Name:", nameField);
+
+    JPanel details = new JPanel(new GridBagLayout());
+    details.setBorder(BorderFactory.createTitledBorder("Connection Details"));
+    addRow(details, 0, "URL:", urlField);
+    addRow(details, 1, "User:", userField);
+    addRow(details, 2, "Password:", passField);
+    addFieldRow(details, 3, acceptSelfSignedBox);
+
+    JPanel form = new JPanel(new BorderLayout(0, 8));
+    form.add(name, BorderLayout.NORTH);
+    form.add(details, BorderLayout.CENTER);
     return form;
   }
 
@@ -145,15 +156,17 @@ public final class ConnectionDialog {
   private void testConnection() {
     ConnectionProfile candidate = toProfile();
     ExistClient client = new ExistClient(candidate);
+    String message;
     try {
       client.systemInfo();
       String who = client.whoamiUser();
-      PluginWorkspaceProvider.getPluginWorkspace().showInformationMessage(
-          "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".");
+      message = "Connected to \"" + candidate.getName() + "\". Authenticated as \"" + who + "\".";
     } catch (Exception ex) {
-      PluginWorkspaceProvider.getPluginWorkspace().showErrorMessage(
-          "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage());
+      message = "Connection to \"" + candidate.getName() + "\" failed: " + ex.getMessage();
     }
+    // showConfirmDialog (unlike showInformationMessage) lets us title it "Test Connection Result".
+    ((StandalonePluginWorkspace) PluginWorkspaceProvider.getPluginWorkspace()).showConfirmDialog(
+        "Test Connection Result", message, new String[] {"OK"}, new int[] {0});
   }
 
   private ConnectionProfile toProfile() {

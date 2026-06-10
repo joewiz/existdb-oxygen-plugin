@@ -25,12 +25,17 @@ import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 
 import ro.sync.exml.workspace.api.PluginWorkspaceProvider;
-import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
+import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
+import ro.sync.exml.workspace.api.standalone.ui.Table;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -55,33 +60,35 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRadioButton;
+import javax.swing.JSeparator;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.table.AbstractTableModel;
+import javax.swing.table.TableModel;
 import javax.swing.table.TableCellRenderer;
 
 /**
- * A single window for managing saved eXist servers — a Data Source Explorer-style "Connections"
- * table (Name, URL, Default) with a flat icon toolbar for Add / Edit / Duplicate / Remove and
- * reordering (Move Up/Down, Sort A–Z), plus choosing the default server and testing a connection.
- * Hosted in Oxygen's {@link OKCancelDialog}; edits are made on a working copy and persisted only on
- * <b>OK</b>; <b>Cancel</b> (or Escape) discards them.
+ * The content of the <b>Preferences → Plugins → eXist-db</b> option page — a Data Source
+ * Explorer-style "Connections" table (Name, URL, Default) with a flat icon toolbar for Add / Edit /
+ * Duplicate / Remove and reordering (Move Up/Down, Sort A–Z), plus the query/result and browsing
+ * defaults. Edits are made on a working copy and persisted by {@link #save()} (called from the option
+ * page's Apply/OK); {@link #buildContent()} builds the component and {@link #restoreDefaults()} resets
+ * the display defaults. Driven by {@link ExistdbOptionPage}.
  */
-public final class ManageServersDialog {
+public final class ExistdbPreferencesPanel {
 
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
-
-  private final transient Frame owner;
   private final transient ProfileStore store;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
-  // Oxygen's table paints the alternating row stripes and selection used across the workbench.
-  private final JTable table = OxygenUIComponentsFactory.createTable(model);
+  // Oxygen's table for native selection/look; subclassed to force stripes and extend them into the
+  // empty area below the last row (matching the Data Sources tables).
+  private final JTable table = new StripedTable(model);
   private final JComboBox<String> methodPref =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(METHOD_LABELS));
   private final JComboBox<Integer> pageSizePref =
@@ -98,8 +105,7 @@ public final class ManageServersDialog {
   private transient Action moveUpAction;
   private transient Action moveDownAction;
 
-  private ManageServersDialog(Frame owner, ProfileStore store) {
-    this.owner = owner;
+  ExistdbPreferencesPanel(ProfileStore store) {
     this.store = store;
     profiles.addAll(store.loadAll());
     String defaultId = store.defaultProfileId();
@@ -110,34 +116,15 @@ public final class ManageServersDialog {
     }
   }
 
-  /**
-   * Opens the modal dialog. Returns {@code true} if the user clicked OK (changes persisted), so the
-   * caller can refresh; {@code false} on Cancel/Escape.
-   */
-  public static boolean open(Frame owner, ProfileStore store) {
-    ManageServersDialog controller = new ManageServersDialog(owner, store);
-    return controller.show();
+  /** The Oxygen main window — the parent for the Add/Edit sub-dialogs (a Preferences page is in a
+   *  JDialog, not a Frame, so the OK/Cancel dialog factory can't use it). */
+  private static Frame mainFrame() {
+    return (Frame) ((StandalonePluginWorkspace) PluginWorkspaceProvider.getPluginWorkspace())
+        .getParentFrame();
   }
 
-  private boolean show() {
-    OKCancelDialog host =
-        OxygenUIComponentsFactory.createOkCancelDialog(owner, "Configure eXist-db Connections", true);
-    host.getContentPane().add(buildContent(), BorderLayout.CENTER);
-    if (!profiles.isEmpty()) {
-      table.setRowSelectionInterval(0, 0);
-    }
-    host.setResizable(true);
-    host.pack();
-    host.setLocationRelativeTo(owner);
-    host.setVisible(true);
-    if (host.getResult() == OKCancelDialog.RESULT_OK) {
-      commit();
-      return true;
-    }
-    return false;
-  }
-
-  private JComponent buildContent() {
+  /** Builds the option-page component (connections table + the query/result and browsing defaults). */
+  JComponent buildContent() {
     table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     table.addMouseListener(new MouseAdapter() {
       @Override
@@ -185,12 +172,13 @@ public final class ManageServersDialog {
     JComponent connectionsScroll = OxygenUIComponentsFactory.createScrollPane(table,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    // Floor the table height so the prefs groups below can't squeeze it to nothing.
-    connectionsScroll.setPreferredSize(new Dimension(680, 160));
-    JPanel connections = new JPanel(new BorderLayout());
-    connections.setBorder(BorderFactory.createTitledBorder("Connections"));
-    connections.add(connectionsScroll, BorderLayout.CENTER);
-    connections.add(actions, BorderLayout.SOUTH);
+    // Fixed ~10-row height, like the Data Sources Connections table (not stretched to fill the page).
+    int header = table.getTableHeader().getPreferredSize().height;
+    connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 10 + header + 4));
+    JPanel connectionsContent = new JPanel(new BorderLayout());
+    connectionsContent.add(connectionsScroll, BorderLayout.CENTER);
+    connectionsContent.add(actions, BorderLayout.SOUTH);
+    JComponent connections = section("Connections", connectionsContent);
 
     table.getSelectionModel().addListSelectionListener(e -> updateMoveEnabled());
     updateMoveEnabled();
@@ -199,10 +187,86 @@ public final class ManageServersDialog {
     bottom.add(buildResultPrefs(), BorderLayout.CENTER);
     bottom.add(buildBrowsingPrefs(), BorderLayout.SOUTH);
 
+    // Stack connections over the defaults at the top; extra page height falls below (not into the
+    // table) — so the Connections table keeps its fixed height like Oxygen's Data Sources page.
+    JPanel stacked = new JPanel(new BorderLayout());
+    stacked.add(connections, BorderLayout.NORTH);
+    stacked.add(bottom, BorderLayout.CENTER);
     JPanel content = new JPanel(new BorderLayout());
-    content.add(connections, BorderLayout.CENTER);
-    content.add(bottom, BorderLayout.SOUTH);
+    content.add(stacked, BorderLayout.NORTH);
+    if (!profiles.isEmpty()) {
+      table.setRowSelectionInterval(0, 0);
+    }
     return content;
+  }
+
+  /**
+   * A group with Oxygen's Preferences section style: a bold title with a horizontal rule extending to
+   * the right (no enclosing box), and {@code content} below it, indented under the header.
+   */
+  private static JComponent section(String title, JComponent content) {
+    JLabel label = new JLabel(title);
+    label.setFont(label.getFont().deriveFont(Font.BOLD));
+    JPanel headerRow = new JPanel(new GridBagLayout());
+    GridBagConstraints c = new GridBagConstraints();
+    c.anchor = GridBagConstraints.WEST;
+    headerRow.add(label, c);
+    c.gridx = 1;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    c.insets = new Insets(0, 8, 0, 0);
+    headerRow.add(new JSeparator(), c);
+
+    content.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+    JPanel group = new JPanel(new BorderLayout());
+    group.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
+    group.add(headerRow, BorderLayout.NORTH);
+    group.add(content, BorderLayout.CENTER);
+    return group;
+  }
+
+  /**
+   * The Oxygen connections table, custom-striped: data rows are striped via {@code prepareRenderer}
+   * and the empty area below the last row is striped in {@code paintComponent}, so the whole table
+   * matches the Data Sources tables (the factory table stripes only data rows, if at all).
+   */
+  private static final class StripedTable extends Table {
+    StripedTable(TableModel tableModel) {
+      super(tableModel);
+    }
+
+    @Override
+    public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
+      Component comp = super.prepareRenderer(renderer, row, column);
+      if (!isRowSelected(row)) {
+        comp.setBackground(stripeColor(row));
+      }
+      return comp;
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+      super.paintComponent(g);
+      int rowHeight = getRowHeight();
+      if (rowHeight <= 0) {
+        return;
+      }
+      int firstEmpty = getRowCount();
+      int y = firstEmpty * rowHeight;
+      for (int row = firstEmpty; y < getHeight(); row++, y += rowHeight) {
+        g.setColor(stripeColor(row));
+        g.fillRect(0, y, getWidth(), rowHeight);
+      }
+    }
+
+    private Color stripeColor(int row) {
+      Color bg = getBackground();
+      if (row % 2 == 0) {
+        return bg;
+      }
+      boolean dark = bg.getRed() + bg.getGreen() + bg.getBlue() < 384;
+      return dark ? bg.brighter() : new Color(0xED, 0xF2, 0xFB);
+    }
   }
 
   /** Pane preferences: hidden-file handling, and restoring the open collections on startup. */
@@ -211,27 +275,33 @@ public final class ManageServersDialog {
     uploadHiddenPref.setSelected(store.uploadHidden());
     restorePanePref.setSelected(store.restorePane());
 
-    GridBagConstraints c = new GridBagConstraints();
-    c.insets = new Insets(2, 4, 2, 4);
-    c.anchor = GridBagConstraints.LINE_START;
-    c.gridx = 0;
-
-    JPanel hidden = new JPanel(new GridBagLayout());
-    hidden.setBorder(BorderFactory.createTitledBorder("Hidden files"));
-    c.gridy = 0;
-    hidden.add(showHiddenPref, c);
-    c.gridy = 1;
-    hidden.add(uploadHiddenPref, c);
-
-    JPanel pane = new JPanel(new GridBagLayout());
-    pane.setBorder(BorderFactory.createTitledBorder("eXist-db pane"));
-    c.gridy = 0;
-    pane.add(restorePanePref, c);
+    JComponent hidden = section("Hidden files", leftAlignedColumn(showHiddenPref, uploadHiddenPref));
+    JComponent pane = section("eXist-db pane", leftAlignedColumn(restorePanePref));
 
     JPanel prefs = new JPanel(new BorderLayout());
     prefs.add(hidden, BorderLayout.NORTH);
     prefs.add(pane, BorderLayout.SOUTH);
     return prefs;
+  }
+
+  /** A left-aligned vertical column of the given components (e.g. checkboxes flush to the left). */
+  private static JComponent leftAlignedColumn(JComponent... items) {
+    JPanel column = new JPanel(new GridBagLayout());
+    GridBagConstraints c = new GridBagConstraints();
+    c.gridx = 0;
+    c.anchor = GridBagConstraints.LINE_START;
+    c.insets = new Insets(1, 0, 1, 0);
+    for (int i = 0; i < items.length; i++) {
+      c.gridy = i;
+      column.add(items[i], c);
+    }
+    // A glue cell to the right absorbs the extra width so the items stay flush left (not centered).
+    c.gridx = 1;
+    c.gridy = 0;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    column.add(new JPanel(), c);
+    return column;
   }
 
   /**
@@ -255,7 +325,6 @@ public final class ManageServersDialog {
     constrainWidth(pageSizePref, 90);
 
     JPanel prefs = new JPanel(new GridBagLayout());
-    prefs.setBorder(BorderFactory.createTitledBorder("Query & result defaults"));
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.BASELINE_LEADING;
@@ -281,7 +350,12 @@ public final class ManageServersDialog {
     prefs.add(new JLabel("Results per page:"), c);
     c.gridx = 4;
     prefs.add(pageSizePref, c);
-    return prefs;
+    // A glue cell keeps the grid flush left instead of centered in the page width.
+    c.gridx = 5;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    prefs.add(new JPanel(), c);
+    return section("Query & result defaults", prefs);
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
@@ -331,7 +405,7 @@ public final class ManageServersDialog {
   }
 
   private static Action iconAction(String resource, String tooltip, Runnable action) {
-    URL url = ManageServersDialog.class.getResource(resource);
+    URL url = ExistdbPreferencesPanel.class.getResource(resource);
     return new AbstractAction() {
       {
         if (url != null) {
@@ -350,14 +424,14 @@ public final class ManageServersDialog {
   }
 
   private static void setDisabledIcon(JButton button, String resource) {
-    URL url = ManageServersDialog.class.getResource(resource);
+    URL url = ExistdbPreferencesPanel.class.getResource(resource);
     if (url != null) {
       button.setDisabledIcon(new ImageIcon(url));
     }
   }
 
-  /** Persists the working copy, the chosen default, and the result-display defaults. */
-  private void commit() {
+  /** Persists the working copy, the chosen default, and the display defaults (option-page Apply/OK). */
+  void save() {
     store.saveAll(profiles);
     store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
@@ -367,8 +441,20 @@ public final class ManageServersDialog {
     store.setShowHidden(showHiddenPref.isSelected());
     store.setUploadHidden(uploadHiddenPref.isSelected());
     store.setRestorePane(restorePanePref.isSelected());
-    // Apply the new defaults to an already-open results view immediately, not just next restart.
+    // Apply the new defaults live: results view re-applies display prefs; the pane rebuilds servers.
     store.notifyResultsPrefsChanged();
+    store.notifyConnectionsChanged();
+  }
+
+  /** Resets the display/browsing defaults to their factory values (connections are left untouched). */
+  void restoreDefaults() {
+    methodPref.setSelectedIndex(methodIndex("adaptive"));
+    indentPref.setSelected(true);
+    pageSizePref.setSelectedItem(10);
+    destBrowse.setSelected(true);
+    showHiddenPref.setSelected(false);
+    uploadHiddenPref.setSelected(false);
+    restorePanePref.setSelected(true);
   }
 
   private ConnectionProfile selected() {
@@ -386,7 +472,7 @@ public final class ManageServersDialog {
   }
 
   private void add() {
-    ConnectionProfile created = ConnectionDialog.edit(owner, new ConnectionProfile());
+    ConnectionProfile created = ConnectionDialog.edit(mainFrame(), new ConnectionProfile());
     if (created != null) {
       profiles.add(created);
       model.fireTableDataChanged();
@@ -400,7 +486,7 @@ public final class ManageServersDialog {
       return;
     }
     int row = table.getSelectedRow();
-    ConnectionProfile edited = ConnectionDialog.edit(owner, current);
+    ConnectionProfile edited = ConnectionDialog.edit(mainFrame(), current);
     if (edited != null) {
       edited.setId(current.getId());
       profiles.set(row, edited);

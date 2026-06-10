@@ -24,6 +24,7 @@ package com.existdb.oxygen;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.model.ConnectionProfile;
+import com.existdb.oxygen.model.ProfileStore;
 
 import java.net.URL;
 import java.util.List;
@@ -48,8 +49,21 @@ public final class ExistContext {
   private static final List<BiConsumer<String, String>> COLLECTION_LISTENERS =
       new CopyOnWriteArrayList<>();
   private static volatile String defaultId;
+  /** The one shared {@link ProfileStore} (set at startup) so the Preferences page and the pane act
+   *  on the same instance — its change listeners only reach subscribers of that instance. */
+  private static volatile ProfileStore profileStore;
 
   private ExistContext() {
+  }
+
+  /** Publishes the shared {@link ProfileStore} so the Preferences option page can reuse it. */
+  public static void setProfileStore(ProfileStore store) {
+    profileStore = store;
+  }
+
+  /** The shared {@link ProfileStore}, or {@code null} before the plugin has started. */
+  public static ProfileStore profileStore() {
+    return profileStore;
   }
 
   /** Rebuilds the registry from the saved profiles and the default-server id. */

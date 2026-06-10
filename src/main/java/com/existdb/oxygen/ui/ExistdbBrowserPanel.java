@@ -186,6 +186,8 @@ public final class ExistdbBrowserPanel extends JPanel {
     configureTree();
     loadServers();
     restorePaneState();
+    // Rebuild the server nodes when connections are saved in Preferences → Plugins → eXist-db.
+    profileStore.addConnectionsListener(this::loadServers);
 
     // Link with Editor: when enabled, follow editor focus by revealing the matching tree node.
     // Also: when an exist: editor opens, watch for saves so a newly-created resource appears in the
@@ -603,11 +605,11 @@ public final class ExistdbBrowserPanel extends JPanel {
   // Settings gear
   // ---------------------------------------------------------------------------
 
-  /** Opens the unified server-management window, then rebuilds the tree if the user saved changes. */
+  /** Deep-links to Preferences → Plugins → eXist-db (connections + defaults). The page's Apply/OK
+   *  fires the connections listener, which rebuilds the tree. */
   private void manageServers() {
-    if (ManageServersDialog.open(ownerFrame(), profileStore)) {
-      loadServers();
-    }
+    workspace.showPreferencesPages(
+        new String[] {ExistdbOptionPage.KEY}, ExistdbOptionPage.KEY, true);
   }
 
   // ---------------------------------------------------------------------------

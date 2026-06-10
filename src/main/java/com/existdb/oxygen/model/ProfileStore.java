@@ -25,11 +25,16 @@ import ro.sync.exml.workspace.api.PluginWorkspace;
 import ro.sync.exml.workspace.api.options.WSOptionsStorage;
 import ro.sync.exml.workspace.api.util.UtilAccess;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.UnaryOperator;
 
@@ -46,6 +51,11 @@ public final class ProfileStore {
   private static final String KEY_IDS = "existdb.profiles.ids";
   private static final String KEY_DEFAULT = "existdb.profiles.defaultId";
   private static final String PROFILE_PREFIX = "existdb.profile.";
+  /** Project-scopable key: a JSON array of connection *definitions* (id/name/URL/trust/aliases) —
+   *  no username or password, so a shared {@code .xpr} never carries credentials. */
+  private static final String KEY_CONNECTIONS = "existdb.connections.v2";
+  /** Per-user secret store prefix for a connection's password (never project-scoped). */
+  private static final String SECRET_PREFIX = "existdb.secret.";
 
   /** The default package registry (eXist-db's public-repo), always present if the list is empty. */
   public static final String DEFAULT_REGISTRY = "https://exist-db.org/exist/apps/public-repo";
@@ -58,26 +68,33 @@ public final class ProfileStore {
   private static final String LEGACY_ACCEPT = "existdb.profile.acceptSelfSigned";
 
   private final Options options;
-  private final UnaryOperator<String> encrypt;
+  /** Decrypts legacy (pre-secret-store) passwords during migration; new passwords use the secret
+   *  store, which does its own encryption. */
   private final UnaryOperator<String> decrypt;
   /** Notified when the result-display defaults change, so an open results view can re-apply them. */
   private final List<Runnable> resultsPrefsListeners = new ArrayList<>();
+  /** Notified when the saved connections change, so the eXist-db pane can rebuild its server nodes. */
+  private final List<Runnable> connectionsListeners = new ArrayList<>();
 
   /** Minimal string options backend, so the storage logic is testable without Oxygen. */
   public interface Options {
     String get(String key, String defaultValue);
 
     void set(String key, String value);
+
+    /** Reads from the per-user secret store (Oxygen's {@code getSecretOption}). */
+    String getSecret(String key, String defaultValue);
+
+    /** Writes to the per-user secret store (Oxygen's {@code setSecretOption}); never project-scoped. */
+    void setSecret(String key, String value);
   }
 
   public ProfileStore(PluginWorkspace workspace) {
-    this(adapt(workspace.getOptionsStorage()),
-        workspace.getUtilAccess()::encrypt, workspace.getUtilAccess()::decrypt);
+    this(adapt(workspace.getOptionsStorage()), workspace.getUtilAccess()::decrypt);
   }
 
-  ProfileStore(Options options, UnaryOperator<String> encrypt, UnaryOperator<String> decrypt) {
+  ProfileStore(Options options, UnaryOperator<String> decrypt) {
     this.options = options;
-    this.encrypt = encrypt;
     this.decrypt = decrypt;
   }
 
@@ -91,15 +108,14 @@ public final class ProfileStore {
    * list (persisted, so the generated id is stable across loads).
    */
   public List<ConnectionProfile> loadAll() {
-    String ids = options.get(KEY_IDS, "");
-    if (ids.isBlank()) {
+    String json = options.get(KEY_CONNECTIONS, "");
+    if (json.isBlank()) {
       return migrate();
     }
     List<ConnectionProfile> profiles = new ArrayList<>();
-    for (String id : ids.split(",")) {
-      if (!id.isBlank()) {
-        profiles.add(readProfile(id.trim()));
-      }
+    JSONArray array = new JSONArray(json);
+    for (int i = 0; i < array.length(); i++) {
+      profiles.add(fromJson(array.getJSONObject(i)));
     }
     return profiles.isEmpty() ? migrate() : profiles;
   }
@@ -107,21 +123,79 @@ public final class ProfileStore {
   /**
    * Persists the given profiles, assigning each a name-derived slug id (unique across the set) and,
    * on a rename, keeping the old slug as an alias so open {@code exist://} editors still resolve.
-   * Keeps the default id valid.
+   * The connection <em>definitions</em> go to one project-scopable key; the username (per-user) and
+   * password (per-user secret store) are kept out of it, so a shared {@code .xpr} never has creds.
    */
   public void saveAll(List<ConnectionProfile> profiles) {
+    saveAllWith(profiles, currentNamesById());
+  }
+
+  private void saveAllWith(List<ConnectionProfile> profiles, Map<String, String> priorNames) {
     Set<String> taken = new HashSet<>();
     List<String> ids = new ArrayList<>(profiles.size());
+    JSONArray definitions = new JSONArray();
     for (ConnectionProfile profile : profiles) {
-      assignId(profile, taken);
+      assignId(profile, taken, priorNames);
       taken.add(profile.getId());
-      writeProfile(profile);
+      // Credentials are per-user: username stays global, password goes to the secret store.
+      options.set(PROFILE_PREFIX + profile.getId() + ".user",
+          profile.getUser() == null ? "" : profile.getUser());
+      String pass = profile.getPassword();
+      options.setSecret(SECRET_PREFIX + profile.getId(), pass == null ? "" : pass);
+      definitions.put(toJson(profile));
       ids.add(profile.getId());
     }
-    options.set(KEY_IDS, String.join(",", ids));
-    if (!ids.contains(defaultProfileId())) {
+    options.set(KEY_CONNECTIONS, definitions.toString());
+    String currentDefault = options.get(KEY_DEFAULT, "");
+    if (currentDefault.isBlank() || !ids.contains(currentDefault)) {
       options.set(KEY_DEFAULT, ids.isEmpty() ? "" : ids.get(0));
     }
+  }
+
+  /** id → name for the currently saved connections, so {@link #assignId} can detect a rename. */
+  private Map<String, String> currentNamesById() {
+    Map<String, String> names = new HashMap<>();
+    String json = options.get(KEY_CONNECTIONS, "");
+    if (!json.isBlank()) {
+      JSONArray array = new JSONArray(json);
+      for (int i = 0; i < array.length(); i++) {
+        JSONObject o = array.getJSONObject(i);
+        names.put(o.optString("id", ""), o.optString("name", ""));
+      }
+    }
+    return names;
+  }
+
+  /** A connection definition (no credentials) as JSON for the project-scopable connections key. */
+  private static JSONObject toJson(ConnectionProfile profile) {
+    JSONObject o = new JSONObject();
+    o.put("id", profile.getId());
+    o.put("name", profile.getName());
+    o.put("baseUrl", profile.getBaseUrl());
+    o.put("acceptSelfSigned", profile.isAcceptSelfSigned());
+    o.put("aliases", new JSONArray(profile.getAliases()));
+    return o;
+  }
+
+  /** Rebuilds a profile from its definition plus the per-user username and secret password. */
+  private ConnectionProfile fromJson(JSONObject o) {
+    String id = o.optString("id", "");
+    ConnectionProfile profile = new ConnectionProfile(
+        o.optString("name", ""),
+        o.optString("baseUrl", ""),
+        options.get(PROFILE_PREFIX + id + ".user", ""),
+        options.getSecret(SECRET_PREFIX + id, ""),
+        o.optBoolean("acceptSelfSigned", false));
+    profile.setId(id);
+    JSONArray aliases = o.optJSONArray("aliases");
+    if (aliases != null && !aliases.isEmpty()) {
+      List<String> list = new ArrayList<>(aliases.length());
+      for (int i = 0; i < aliases.length(); i++) {
+        list.add(aliases.getString(i));
+      }
+      profile.setAliases(list);
+    }
+    return profile;
   }
 
   /**
@@ -129,11 +203,11 @@ public final class ProfileStore {
    * (so a cosmetic edit or reorder doesn't churn ids); otherwise mints a fresh unique slug and
    * records the old id as an alias.
    */
-  private void assignId(ConnectionProfile profile, Set<String> taken) {
+  private void assignId(ConnectionProfile profile, Set<String> taken, Map<String, String> priorNames) {
     String base = slugify(profile.getName());
     String current = profile.getId();
     if (current != null && !taken.contains(current)) {
-      String priorName = options.get(PROFILE_PREFIX + current + ".name", null);
+      String priorName = priorNames.get(current);
       if (priorName != null && slugify(priorName).equals(base)) {
         return; // name unchanged — keep the existing (possibly suffixed) id
       }
@@ -167,18 +241,39 @@ public final class ProfileStore {
     }
   }
 
-  /** The default server's id (for unsaved/local queries); falls back to the first profile. */
+  /** The default server's id (for unsaved/local queries); falls back to the first saved connection. */
   public String defaultProfileId() {
     String stored = options.get(KEY_DEFAULT, "");
     if (!stored.isBlank()) {
       return stored;
     }
-    String ids = options.get(KEY_IDS, "");
-    return ids.isBlank() ? "" : ids.split(",")[0].trim();
+    String json = options.get(KEY_CONNECTIONS, "");
+    if (!json.isBlank()) {
+      JSONArray array = new JSONArray(json);
+      if (!array.isEmpty()) {
+        return array.getJSONObject(0).optString("id", "");
+      }
+    }
+    return "";
   }
 
   public void setDefaultProfileId(String id) {
     options.set(KEY_DEFAULT, id == null ? "" : id);
+  }
+
+  /**
+   * The option keys that an option page may store at <b>project</b> level (in the {@code .xpr}): the
+   * connection <em>definitions</em> and the display/browsing defaults. Deliberately excludes the
+   * per-user username keys and the secret-store passwords, so credentials never reach a shared
+   * {@code .xpr}.
+   */
+  public static String[] projectLevelKeys() {
+    return new String[] {
+      KEY_CONNECTIONS, KEY_DEFAULT,
+      "existdb.results.method", "existdb.results.indent", "existdb.results.pageSize",
+      "existdb.results.destination", "existdb.showHidden", "existdb.uploadHidden",
+      "existdb.restorePane",
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -361,6 +456,17 @@ public final class ProfileStore {
     resultsPrefsListeners.forEach(Runnable::run);
   }
 
+  /** Registers a callback run whenever {@link #notifyConnectionsChanged()} is invoked. */
+  public void addConnectionsListener(Runnable listener) {
+    connectionsListeners.add(listener);
+  }
+
+  /** Signals that the saved connections changed (e.g. from the Preferences page) so the eXist-db
+   *  pane can rebuild its server nodes. */
+  public void notifyConnectionsChanged() {
+    connectionsListeners.forEach(Runnable::run);
+  }
+
   // ---------------------------------------------------------------------------
   // Back-compat single-profile API (used until the pane is reworked for multi-server)
   // ---------------------------------------------------------------------------
@@ -393,6 +499,38 @@ public final class ProfileStore {
   // ---------------------------------------------------------------------------
 
   private List<ConnectionProfile> migrate() {
+    Map<String, String> oldNames = new HashMap<>();
+    List<ConnectionProfile> all = readOldFormat(oldNames);
+    // Rewrite in the v2 format, preserving the existing ids (names unchanged) so open exist://
+    // editors keep resolving, and moving passwords into the per-user secret store.
+    saveAllWith(all, oldNames);
+    if (defaultProfileId().isBlank() && !all.isEmpty()) {
+      setDefaultProfileId(all.get(0).getId());
+    }
+    return all;
+  }
+
+  /**
+   * Reads whatever pre-v2 storage exists: the per-id multi-profile keys, the legacy single profile,
+   * or (fresh install) a single default localhost profile. Fills {@code namesById} (id → name) so the
+   * subsequent save keeps each id stable.
+   */
+  private List<ConnectionProfile> readOldFormat(Map<String, String> namesById) {
+    String ids = options.get(KEY_IDS, "");
+    if (!ids.isBlank()) {
+      List<ConnectionProfile> list = new ArrayList<>();
+      for (String id : ids.split(",")) {
+        String trimmed = id.trim();
+        if (!trimmed.isBlank()) {
+          ConnectionProfile p = readProfile(trimmed);
+          namesById.put(trimmed, p.getName());
+          list.add(p);
+        }
+      }
+      if (!list.isEmpty()) {
+        return list;
+      }
+    }
     ConnectionProfile profile;
     if (!options.get(LEGACY_NAME, "").isBlank()) {
       String enc = options.get(LEGACY_PASS, "");
@@ -404,11 +542,8 @@ public final class ProfileStore {
     } else {
       profile = new ConnectionProfile();
     }
-    // id left null so saveAll assigns the name-derived slug.
-    List<ConnectionProfile> all = new ArrayList<>(List.of(profile));
-    saveAll(all);
-    setDefaultProfileId(profile.getId());
-    return all;
+    // id left null so the save assigns the name-derived slug.
+    return new ArrayList<>(List.of(profile));
   }
 
   private ConnectionProfile readProfile(String id) {
@@ -430,17 +565,6 @@ public final class ProfileStore {
     return profile;
   }
 
-  private void writeProfile(ConnectionProfile profile) {
-    String prefix = PROFILE_PREFIX + profile.getId() + ".";
-    options.set(prefix + "name", profile.getName());
-    options.set(prefix + "baseUrl", profile.getBaseUrl());
-    options.set(prefix + "user", profile.getUser());
-    String pass = profile.getPassword();
-    options.set(prefix + "password", pass == null || pass.isEmpty() ? "" : encrypt.apply(pass));
-    options.set(prefix + "acceptSelfSigned", Boolean.toString(profile.isAcceptSelfSigned()));
-    options.set(prefix + "aliases", String.join(",", profile.getAliases()));
-  }
-
   private static Options adapt(WSOptionsStorage storage) {
     return new Options() {
       @Override
@@ -451,6 +575,16 @@ public final class ProfileStore {
       @Override
       public void set(String key, String value) {
         storage.setOption(key, value);
+      }
+
+      @Override
+      public String getSecret(String key, String defaultValue) {
+        return storage.getSecretOption(key, defaultValue);
+      }
+
+      @Override
+      public void setSecret(String key, String value) {
+        storage.setSecretOption(key, value);
       }
     };
   }
