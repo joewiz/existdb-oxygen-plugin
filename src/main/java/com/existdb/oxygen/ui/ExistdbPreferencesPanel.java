@@ -31,6 +31,7 @@ import ro.sync.exml.workspace.api.standalone.ui.Table;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.Color;
@@ -40,6 +41,9 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
@@ -66,6 +70,7 @@ import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.TableModel;
 import javax.swing.table.TableCellRenderer;
@@ -83,6 +88,14 @@ public final class ExistdbPreferencesPanel {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
+  /** The Connections-section description (HTML-escaped; {@code >} → {@code &gt;}). */
+  private static final String CONNECTIONS_DESCRIPTION = "This plugin requires at least one connection "
+      + "to a compatible eXist-db server. The plugin communicates with the server's API to provide "
+      + "all of its capabilities: browsing and editing database resources, assisting you with writing "
+      + "XQuery (function documentation lookup, code completion, parameter hints, and go-to-definition "
+      + "for functions), and validating and executing XQuery. To activate validation, navigate to "
+      + "Preferences &gt; XML &gt; XSLT-XQuery &gt; XQuery and in the \"Validation engine\" dropdown "
+      + "menu, select \"eXist-db (HTTP)\".";
   private final transient ProfileStore store;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
@@ -100,6 +113,8 @@ public final class ExistdbPreferencesPanel {
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
       new JCheckBox("Restore open collections on startup");
+  /** Connections-section description; its HTML wrap width tracks its actual width (auto-flow). */
+  private final JLabel connectionsNote = new JLabel();
 
   private transient ConnectionProfile defaultProfile;
   private transient Action moveUpAction;
@@ -177,6 +192,7 @@ public final class ExistdbPreferencesPanel {
     int header = table.getTableHeader().getPreferredSize().height;
     connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 10 + header + 4));
     JPanel connectionsContent = new JPanel(new BorderLayout());
+    connectionsContent.add(connectionsDescription(), BorderLayout.NORTH);
     connectionsContent.add(connectionsScroll, BorderLayout.CENTER);
     connectionsContent.add(actions, BorderLayout.SOUTH);
     JComponent connections = section("Connections", connectionsContent);
@@ -283,6 +299,52 @@ public final class ExistdbPreferencesPanel {
     prefs.add(hidden, BorderLayout.NORTH);
     prefs.add(pane, BorderLayout.SOUTH);
     return prefs;
+  }
+
+  /**
+   * The Connections-section description: what these connections are used for. Sits below the
+   * "Connections" heading and above the table (the section-description pattern Oxygen uses, e.g. the
+   * Batch Documents Converter's "Word styles mapping"). Mentions XQuery validation as one use, naming
+   * the built-in menu path since the SDK offers no way to deep-link to (or set) that control.
+   */
+  private JComponent connectionsDescription() {
+    connectionsNote.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+    reflowConnectionsNote();
+    // Re-wrap to the container's width whenever it changes, so the text auto-flows instead of
+    // wrapping at a hardcoded column. (Same approach as SearchDialog's intro line.)
+    connectionsNote.addComponentListener(new ComponentAdapter() {
+      @Override
+      public void componentResized(ComponentEvent e) {
+        reflowConnectionsNote();
+      }
+    });
+    // The componentResized pass above can run before the page settles at its final width, leaving the
+    // paragraph wrapped narrow until the user resizes. Re-flow once the page is actually shown (after
+    // layout has settled) so it fills the width on first display too.
+    connectionsNote.addHierarchyListener(e -> {
+      if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && connectionsNote.isShowing()) {
+        SwingUtilities.invokeLater(this::reflowConnectionsNote);
+      }
+    });
+    return connectionsNote;
+  }
+
+  /**
+   * Re-renders the connections description at a wrap width matching the label's current width. A
+   * table cell with an explicit {@code width} is the constraint Swing's {@code JLabel} HTML honors;
+   * binding it to the live width (rather than a fixed column) lets the paragraph reflow on resize.
+   */
+  private void reflowConnectionsNote() {
+    // Wrap to the *container's* width, not the label's own — binding to the label's width feeds back
+    // through the HTML table width into its preferred width and settles wide enough that the whole
+    // paragraph "fits" on one line, so NORTH allocates one line's height and clips the rest.
+    Container parent = connectionsNote.getParent();
+    int width = parent != null ? parent.getWidth() : 0;
+    if (width < 120) {
+      width = 560; // before the first layout pass, fall back to a sensible column
+    }
+    connectionsNote.setText("<html><table><tr><td width='" + (width - 8) + "'>"
+        + CONNECTIONS_DESCRIPTION + "</td></tr></table></html>");
   }
 
   /** A left-aligned vertical column of the given components (e.g. checkboxes flush to the left). */
