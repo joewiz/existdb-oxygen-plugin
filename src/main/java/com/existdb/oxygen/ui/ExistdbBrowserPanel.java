@@ -696,6 +696,8 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("Refresh", "/images/Refresh16.png", f5, () -> reloadNode(node)));
       if (DB_ROOT.equals(existNode.path)) {
         menu.addSeparator();
+        menu.add(menuItem("Search eXist-db", "/images/Search16.png", null,
+            () -> SearchDialog.open(ownerFrame(), profileStore, workspace, existNode.serverId)));
         menu.add(menuItem("Manage Packages…", () -> managePackages(existNode)));
       }
     } else {
