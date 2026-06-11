@@ -175,6 +175,30 @@ class ExistClientTest {
   }
 
   @Test
+  void plainSearchSendsNoFieldOrScopeParams() throws Exception {
+    client.search("index", 50);
+    String q = server.lastSearchQuery();
+    assertFalse(q.contains("field="));
+    assertFalse(q.contains("scope="));
+  }
+
+  @Test
+  void fieldScopedSearchSendsFieldAndScope() throws Exception {
+    ExistClient.SearchResults results = client.search("index", "site-content", "/db", 50);
+    assertEquals(2, results.hits().size()); // response shape is unchanged from the plain search
+    String q = server.lastSearchQuery();
+    assertTrue(q.contains("field=site-content"));
+    assertTrue(q.contains("scope=%2Fdb")); // the "/db" scope is URL-encoded
+  }
+
+  @Test
+  void searchForbiddenFieldRaises403() {
+    ExistHttpException ex = assertThrows(ExistHttpException.class,
+        () -> client.search("index", "secret", "/db", 50));
+    assertEquals(403, ex.getStatusCode());
+  }
+
+  @Test
   void searchFieldsParsesKindsAndStringOrArrayAnalyzer() throws Exception {
     ExistClient.SearchFields fields = client.searchFields("/db");
     assertEquals("admin", fields.user());

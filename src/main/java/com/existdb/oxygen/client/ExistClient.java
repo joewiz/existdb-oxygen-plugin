@@ -730,12 +730,30 @@ public final class ExistClient {
   }
 
   /**
-   * GET /api/search — sitewide full-text search. Returns up to {@code limit} hits (with snippets and
-   * DB paths) plus the total match count.
+   * GET /api/search — sitewide full-text search across the default field. Returns up to {@code limit}
+   * hits (with snippets and DB paths) plus the total match count.
    */
   public SearchResults search(String query, int limit) throws IOException, InterruptedException {
-    HttpResponse<String> r =
-        send(request("/search?q=" + enc(query) + "&limit=" + limit).GET().build());
+    return search(query, null, null, limit);
+  }
+
+  /**
+   * GET /api/search restricted to a single discovered {@code field} (from {@link #searchFields}) and,
+   * optionally, a collection {@code scope}. A blank {@code field}/{@code scope} is omitted, so passing
+   * both as {@code null} is the plain sitewide search. The response shape is identical either way. A
+   * field the connection's user may not see returns 403 (surfaced as an {@link ExistHttpException}).
+   */
+  public SearchResults search(String query, String field, String scope, int limit)
+      throws IOException, InterruptedException {
+    StringBuilder path = new StringBuilder("/search?q=").append(enc(query))
+        .append("&limit=").append(limit);
+    if (field != null && !field.isBlank()) {
+      path.append("&field=").append(enc(field));
+    }
+    if (scope != null && !scope.isBlank()) {
+      path.append("&scope=").append(enc(scope));
+    }
+    HttpResponse<String> r = send(request(path.toString()).GET().build());
     JSONObject o = new JSONObject(r.body());
     JSONArray arr = o.optJSONArray("results");
     List<SearchHit> hits = new ArrayList<>();

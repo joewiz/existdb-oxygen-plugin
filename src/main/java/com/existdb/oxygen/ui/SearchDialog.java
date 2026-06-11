@@ -23,6 +23,7 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.client.ExistHttpException;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
@@ -197,7 +198,7 @@ public final class SearchDialog extends JDialog {
     // "Search in" picker, populated from /api/search/fields for the selected server (FLS-filtered).
     fieldCombo.setRenderer(fieldRenderer());
     fieldCombo.setToolTipText("The searchable fields/facets this server exposes (only those you may "
-        + "see). Per-field search needs eXist #6455; for now the query runs across the default field.");
+        + "see). Choose one to search just that field, or \"All fields\" for the default search.");
     fieldHint.setForeground(Color.GRAY);
     JPanel fieldRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
     fieldRow.add(new JLabel("Search in:"));
@@ -313,6 +314,9 @@ public final class SearchDialog extends JDialog {
     if (query.isEmpty()) {
       return;
     }
+    // The selected field (null = "All fields"); a field restricts the query to it, scoped like the
+    // discovery call. "All fields" keeps the plain sitewide search unchanged.
+    ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
     rememberSelections(); // record what was actually searched, not just on close
     status.setText("Searching…");
     status.setToolTipText(null);
@@ -320,7 +324,9 @@ public final class SearchDialog extends JDialog {
     new SwingWorker<ExistClient.SearchResults, Void>() {
       @Override
       protected ExistClient.SearchResults doInBackground() throws Exception {
-        return client.search(query, LIMIT);
+        return field == null
+            ? client.search(query, LIMIT)
+            : client.search(query, field.field(), FIELD_SCOPE, LIMIT);
       }
 
       @Override
@@ -341,7 +347,10 @@ public final class SearchDialog extends JDialog {
           }
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
-          String message = "Search failed: " + cause.getMessage();
+          String message = cause instanceof ExistHttpException he && he.getStatusCode() == 403
+              ? "You don't have permission to search the \""
+                  + (field != null ? field.field() : "selected") + "\" field on this server."
+              : "Search failed: " + cause.getMessage();
           status.setText(message);
           status.setToolTipText(message); // CENTER clips a long error; keep the full text on hover.
         }
