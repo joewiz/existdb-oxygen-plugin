@@ -72,8 +72,8 @@ import javax.swing.table.TableCellRenderer;
 
 /**
  * The content of the <b>Preferences → Plugins → eXist-db</b> option page — a Data Source
- * Explorer-style "Connections" table (Name, URL, Default) with a flat icon toolbar for Add / Edit /
- * Duplicate / Remove and reordering (Move Up/Down, Sort A–Z), plus the query/result and browsing
+ * Explorer-style "Connections" table (Name, URL, User, Default) with a flat icon toolbar for Add /
+ * Edit / Duplicate / Remove and reordering (Move Up/Down, Sort A–Z), plus the query/result and browsing
  * defaults. Edits are made on a working copy and persisted by {@link #save()} (called from the option
  * page's Apply/OK); {@link #buildContent()} builds the component and {@link #restoreDefaults()} resets
  * the display defaults. Driven by {@link ExistdbOptionPage}.
@@ -132,18 +132,19 @@ public final class ExistdbPreferencesPanel {
         int row = table.rowAtPoint(e.getPoint());
         if (e.getClickCount() == 2 && row >= 0) {
           edit();
-        } else if (row >= 0 && table.columnAtPoint(e.getPoint()) == 2) {
+        } else if (row >= 0 && table.columnAtPoint(e.getPoint()) == 3) {
           setDefaultRow(row); // click the Default radio to choose the default server
         }
       }
     });
     table.setFillsViewportHeight(true);
-    // Name compact, URL gets the room, Default a fixed narrow radio column.
+    // Name compact, URL gets the room, User a narrow column, Default a fixed narrow radio column.
     table.getColumnModel().getColumn(0).setPreferredWidth(150);
-    table.getColumnModel().getColumn(1).setPreferredWidth(430);
-    table.getColumnModel().getColumn(2).setMaxWidth(60);
-    table.getColumnModel().getColumn(2).setPreferredWidth(60);
-    table.getColumnModel().getColumn(2).setCellRenderer(radioRenderer());
+    table.getColumnModel().getColumn(1).setPreferredWidth(330);
+    table.getColumnModel().getColumn(2).setPreferredWidth(100);
+    table.getColumnModel().getColumn(3).setMaxWidth(60);
+    table.getColumnModel().getColumn(3).setPreferredWidth(60);
+    table.getColumnModel().getColumn(3).setCellRenderer(radioRenderer());
 
     // Oxygen Data Sources-style flat icon toolbar on the right.
     JToolBar right = new JToolBar();
@@ -547,9 +548,9 @@ public final class ExistdbPreferencesPanel {
     }
   }
 
-  /** Table over the working profile list: Name, URL, and a check for the default server. */
+  /** Table over the working profile list: Name, URL, User, and a check for the default server. */
   private final class ServerTableModel extends AbstractTableModel {
-    private final String[] columns = {"Name", "URL", "Default"};
+    private final String[] columns = {"Name", "URL", "User", "Default"};
 
     @Override
     public int getRowCount() {
@@ -572,6 +573,7 @@ public final class ExistdbPreferencesPanel {
       return switch (column) {
         case 0 -> p.getName();
         case 1 -> p.getBaseUrl();
+        case 2 -> p.getUser();
         default -> p == defaultProfile; // Boolean: drives the Default-column radio
       };
     }
