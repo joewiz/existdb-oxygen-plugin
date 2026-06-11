@@ -199,6 +199,24 @@ class ExistClientTest {
   }
 
   @Test
+  void searchParsesFacetBuckets() throws Exception {
+    ExistClient.SearchResults results = client.search("index", 50);
+    assertEquals(2, results.facets().size());
+    assertEquals(5, results.facets().get("site-app").get("docs"));
+    assertEquals(2, results.facets().get("site-app").get("blog"));
+    assertEquals(4, results.facets().get("site-section").get("guide"));
+  }
+
+  @Test
+  void facetFiltersAreSentAsRepeatedParams() throws Exception {
+    client.search("index", null, "/db", List.of("site-app:docs", "site-section:guide"), 50);
+    String q = server.lastSearchQuery();
+    // Each "dim:value" filter is URL-encoded (colon → %3A) and sent as its own param.
+    assertTrue(q.contains("facet=site-app%3Adocs"));
+    assertTrue(q.contains("facet=site-section%3Aguide"));
+  }
+
+  @Test
   void searchFieldsParsesKindsAndStringOrArrayAnalyzer() throws Exception {
     ExistClient.SearchFields fields = client.searchFields("/db");
     assertEquals("admin", fields.user());

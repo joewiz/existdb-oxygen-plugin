@@ -44,7 +44,9 @@ import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import javax.net.ssl.SSLContext;
@@ -725,8 +727,13 @@ public final class ExistClient {
   public record SearchHit(String app, String title, String snippet, String path) {
   }
 
-  /** A page of search results plus the total match count reported by the server. */
-  public record SearchResults(int total, List<SearchHit> hits) {
+  /**
+   * A page of search results: the total match count, the hits, and the facet buckets the server
+   * aggregated over the matches ({@code dimension → value → count}, e.g.
+   * {@code {"site-app": {"docs": 8, "blog": 12}}}).
+   */
+  public record SearchResults(int total, List<SearchHit> hits,
+      Map<String, Map<String, Integer>> facets) {
   }
 
   /**
@@ -734,17 +741,30 @@ public final class ExistClient {
    * hits (with snippets and DB paths) plus the total match count.
    */
   public SearchResults search(String query, int limit) throws IOException, InterruptedException {
-    return search(query, null, null, limit);
+    return search(query, null, null, List.of(), limit);
   }
 
   /**
    * GET /api/search restricted to a single discovered {@code field} (from {@link #searchFields}) and,
-   * optionally, a collection {@code scope}. A blank {@code field}/{@code scope} is omitted, so passing
-   * both as {@code null} is the plain sitewide search. The response shape is identical either way. A
-   * field the connection's user may not see returns 403 (surfaced as an {@link ExistHttpException}).
+   * optionally, a collection {@code scope}. Equivalent to {@link #search(String, String, String,
+   * List, int)} with no facet filters.
    */
   public SearchResults search(String query, String field, String scope, int limit)
       throws IOException, InterruptedException {
+    return search(query, field, scope, List.of(), limit);
+  }
+
+  /**
+   * GET /api/search, optionally restricted to a single {@code field}, a collection {@code scope}, and
+   * zero or more facet filters. Each filter is a {@code "<dimension>:<value>"} string
+   * (existdb-openapi#58, ES {@code post_filter} semantics — the filter narrows the hits but the
+   * returned bucket counts stay stable; repeated, same dimension is OR, different dimensions AND).
+   * Blank {@code field}/{@code scope} and an empty filter list are omitted, so the no-extras call is
+   * the plain sitewide search. A field the connection's user may not see returns 403 (surfaced as an
+   * {@link ExistHttpException}).
+   */
+  public SearchResults search(String query, String field, String scope,
+      List<String> facetFilters, int limit) throws IOException, InterruptedException {
     StringBuilder path = new StringBuilder("/search?q=").append(enc(query))
         .append("&limit=").append(limit);
     if (field != null && !field.isBlank()) {
@@ -752,6 +772,13 @@ public final class ExistClient {
     }
     if (scope != null && !scope.isBlank()) {
       path.append("&scope=").append(enc(scope));
+    }
+    if (facetFilters != null) {
+      for (String filter : facetFilters) {
+        if (filter != null && !filter.isBlank()) {
+          path.append("&facet=").append(enc(filter));
+        }
+      }
     }
     HttpResponse<String> r = send(request(path.toString()).GET().build());
     JSONObject o = new JSONObject(r.body());
@@ -764,7 +791,26 @@ public final class ExistClient {
             h.optString("snippet", ""), h.optString("path", "")));
       }
     }
-    return new SearchResults(o.optInt("total", hits.size()), hits);
+    return new SearchResults(o.optInt("total", hits.size()), hits, parseFacets(o.optJSONObject("facets")));
+  }
+
+  /** Parses the {@code facets} object ({@code {dimension: {value: count}}}) into a nested map. */
+  private static Map<String, Map<String, Integer>> parseFacets(JSONObject facets) {
+    Map<String, Map<String, Integer>> out = new LinkedHashMap<>();
+    if (facets != null) {
+      for (String dimension : facets.keySet()) {
+        JSONObject buckets = facets.optJSONObject(dimension);
+        if (buckets == null) {
+          continue;
+        }
+        Map<String, Integer> values = new LinkedHashMap<>();
+        for (String value : buckets.keySet()) {
+          values.put(value, buckets.optInt(value, 0));
+        }
+        out.put(dimension, values);
+      }
+    }
+    return out;
   }
 
   /**
