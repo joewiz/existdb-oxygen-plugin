@@ -43,6 +43,7 @@ import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
@@ -69,6 +70,7 @@ import javax.swing.JToolBar;
 import javax.swing.ListSelectionModel;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.TableModel;
 import javax.swing.table.TableCellRenderer;
@@ -308,12 +310,20 @@ public final class ExistdbPreferencesPanel {
   private JComponent connectionsDescription() {
     connectionsNote.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
     reflowConnectionsNote();
-    // Re-wrap to the label's actual width whenever it changes, so the text auto-flows instead of
+    // Re-wrap to the container's width whenever it changes, so the text auto-flows instead of
     // wrapping at a hardcoded column. (Same approach as SearchDialog's intro line.)
     connectionsNote.addComponentListener(new ComponentAdapter() {
       @Override
       public void componentResized(ComponentEvent e) {
         reflowConnectionsNote();
+      }
+    });
+    // The componentResized pass above can run before the page settles at its final width, leaving the
+    // paragraph wrapped narrow until the user resizes. Re-flow once the page is actually shown (after
+    // layout has settled) so it fills the width on first display too.
+    connectionsNote.addHierarchyListener(e -> {
+      if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && connectionsNote.isShowing()) {
+        SwingUtilities.invokeLater(this::reflowConnectionsNote);
       }
     });
     return connectionsNote;
