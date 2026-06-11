@@ -177,6 +177,7 @@ public final class ExistdbPreferencesPanel {
     int header = table.getTableHeader().getPreferredSize().height;
     connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 10 + header + 4));
     JPanel connectionsContent = new JPanel(new BorderLayout());
+    connectionsContent.add(connectionsDescription(), BorderLayout.NORTH);
     connectionsContent.add(connectionsScroll, BorderLayout.CENTER);
     connectionsContent.add(actions, BorderLayout.SOUTH);
     JComponent connections = section("Connections", connectionsContent);
@@ -283,6 +284,24 @@ public final class ExistdbPreferencesPanel {
     prefs.add(hidden, BorderLayout.NORTH);
     prefs.add(pane, BorderLayout.SOUTH);
     return prefs;
+  }
+
+  /**
+   * The Connections-section description: what these connections are used for. Sits below the
+   * "Connections" heading and above the table (the section-description pattern Oxygen uses, e.g. the
+   * Batch Documents Converter's "Word styles mapping"). Mentions XQuery validation as one use, naming
+   * the built-in menu path since the SDK offers no way to deep-link to (or set) that control.
+   */
+  private JComponent connectionsDescription() {
+    // A table cell with an explicit width is the wrap constraint Swing's JLabel HTML honors.
+    JLabel note = new JLabel("<html><table><tr><td width='580'>These connections power most of the "
+        + "plugin: browsing and editing the database, query execution, full-text search, language "
+        + "assistance (completions, hover, go-to-definition), and documentation lookup. They also "
+        + "drive XQuery validation — to validate XQuery against the default connection, set the "
+        + "\"Validation engine\" to \"eXist-db (HTTP)\" in Preferences &gt; XML &gt; XSLT-XQuery "
+        + "&gt; XQuery.</td></tr></table></html>");
+    note.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+    return note;
   }
 
   /** A left-aligned vertical column of the given components (e.g. checkboxes flush to the left). */
