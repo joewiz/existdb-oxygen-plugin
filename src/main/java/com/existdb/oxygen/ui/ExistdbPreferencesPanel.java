@@ -40,6 +40,8 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
@@ -83,6 +85,14 @@ public final class ExistdbPreferencesPanel {
   private static final String[] METHOD_LABELS = {"Adaptive", "JSON", "Text", "XML", "HTML5"};
   private static final String[] METHOD_VALUES = {"adaptive", "json", "text", "xml", "html5"};
   private static final Integer[] PAGE_SIZES = {10, 25, 50, 100};
+  /** The Connections-section description (HTML-escaped; {@code >} → {@code &gt;}). */
+  private static final String CONNECTIONS_DESCRIPTION = "This plugin requires at least one connection "
+      + "to a compatible eXist-db server. The plugin communicates with the server's API to provide "
+      + "all of its capabilities: browsing and editing database resources, assisting you with writing "
+      + "XQuery (function documentation lookup, code completion, parameter hints, and go-to-definition "
+      + "for functions), and validating and executing XQuery. To activate validation, navigate to "
+      + "Preferences &gt; XML &gt; XSLT-XQuery &gt; XQuery and in the \"Validation engine\" dropdown "
+      + "menu, select \"eXist-db (HTTP)\".";
   private final transient ProfileStore store;
   private final transient List<ConnectionProfile> profiles = new ArrayList<>();
   private final ServerTableModel model = new ServerTableModel();
@@ -100,6 +110,8 @@ public final class ExistdbPreferencesPanel {
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
       new JCheckBox("Restore open collections on startup");
+  /** Connections-section description; its HTML wrap width tracks its actual width (auto-flow). */
+  private final JLabel connectionsNote = new JLabel();
 
   private transient ConnectionProfile defaultProfile;
   private transient Action moveUpAction;
@@ -293,15 +305,31 @@ public final class ExistdbPreferencesPanel {
    * the built-in menu path since the SDK offers no way to deep-link to (or set) that control.
    */
   private JComponent connectionsDescription() {
-    // A table cell with an explicit width is the wrap constraint Swing's JLabel HTML honors.
-    JLabel note = new JLabel("<html><table><tr><td width='580'>These connections power most of the "
-        + "plugin: browsing and editing the database, query execution, full-text search, language "
-        + "assistance (completions, hover, go-to-definition), and documentation lookup. They also "
-        + "drive XQuery validation — to validate XQuery against the default connection, set the "
-        + "\"Validation engine\" to \"eXist-db (HTTP)\" in Preferences &gt; XML &gt; XSLT-XQuery "
-        + "&gt; XQuery.</td></tr></table></html>");
-    note.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
-    return note;
+    connectionsNote.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
+    reflowConnectionsNote();
+    // Re-wrap to the label's actual width whenever it changes, so the text auto-flows instead of
+    // wrapping at a hardcoded column. (Same approach as SearchDialog's intro line.)
+    connectionsNote.addComponentListener(new ComponentAdapter() {
+      @Override
+      public void componentResized(ComponentEvent e) {
+        reflowConnectionsNote();
+      }
+    });
+    return connectionsNote;
+  }
+
+  /**
+   * Re-renders the connections description at a wrap width matching the label's current width. A
+   * table cell with an explicit {@code width} is the constraint Swing's {@code JLabel} HTML honors;
+   * binding it to the live width (rather than a fixed column) lets the paragraph reflow on resize.
+   */
+  private void reflowConnectionsNote() {
+    int width = connectionsNote.getWidth();
+    if (width < 120) {
+      width = 560; // before the first layout pass, fall back to a sensible column
+    }
+    connectionsNote.setText("<html><table><tr><td width='" + width + "'>" + CONNECTIONS_DESCRIPTION
+        + "</td></tr></table></html>");
   }
 
   /** A left-aligned vertical column of the given components (e.g. checkboxes flush to the left). */
