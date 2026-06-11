@@ -31,6 +31,7 @@ import ro.sync.exml.workspace.api.standalone.ui.Table;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.Color;
@@ -324,12 +325,16 @@ public final class ExistdbPreferencesPanel {
    * binding it to the live width (rather than a fixed column) lets the paragraph reflow on resize.
    */
   private void reflowConnectionsNote() {
-    int width = connectionsNote.getWidth();
+    // Wrap to the *container's* width, not the label's own — binding to the label's width feeds back
+    // through the HTML table width into its preferred width and settles wide enough that the whole
+    // paragraph "fits" on one line, so NORTH allocates one line's height and clips the rest.
+    Container parent = connectionsNote.getParent();
+    int width = parent != null ? parent.getWidth() : 0;
     if (width < 120) {
       width = 560; // before the first layout pass, fall back to a sensible column
     }
-    connectionsNote.setText("<html><table><tr><td width='" + width + "'>" + CONNECTIONS_DESCRIPTION
-        + "</td></tr></table></html>");
+    connectionsNote.setText("<html><table><tr><td width='" + (width - 8) + "'>"
+        + CONNECTIONS_DESCRIPTION + "</td></tr></table></html>");
   }
 
   /** A left-aligned vertical column of the given components (e.g. checkboxes flush to the left). */
