@@ -44,6 +44,7 @@ public final class MockExistServer implements AutoCloseable {
   private volatile String lastQueryBody;
   private volatile String lastLangBody;
   private volatile String lastPackageBody;
+  private volatile String lastSearchQuery;
 
   public MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -116,25 +117,7 @@ public final class MockExistServer implements AutoCloseable {
       }
     });
 
-    // Registered before "/search" so the longest-prefix match routes /search/fields here.
-    handle(prefix + "/search/fields", ex -> respond(ex, 200,
-        "{\"scope\":[\"/db\"],\"user\":\"admin\",\"total\":3,\"fields\":["
-            + "{\"kind\":\"facet\",\"field\":\"site-app\",\"elements\":[\"post\",\"topic\"]},"
-            + "{\"kind\":\"field\",\"field\":\"category\",\"type\":\"xs:string\","
-            + "\"elements\":[\"entry\"],\"returnable\":true,"
-            + "\"analyzer\":\"org.apache.lucene.analysis.standard.StandardAnalyzer\"},"
-            + "{\"kind\":\"field\",\"field\":\"site-content\",\"type\":\"xs:string\","
-            + "\"elements\":[\"post\"],\"returnable\":true,"
-            + "\"analyzer\":[\"org.apache.lucene.analysis.standard.StandardAnalyzer\","
-            + "\"org.apache.lucene.analysis.core.SimpleAnalyzer\"]},"
-            + "{\"kind\":\"vector\",\"field\":\"test-embedding\",\"elements\":[\"doc\"]}]}"));
-
-    handle(prefix + "/search", ex -> respond(ex, 200,
-        "{\"total\":7,\"query\":\"index\",\"results\":["
-            + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
-            + "\"path\":\"/db/apps/doc/indexing.xml\"},"
-            + "{\"app\":\"doc\",\"title\":\"Tuning\",\"snippet\":\"range index\","
-            + "\"path\":\"/db/apps/doc/tuning.xml\"}]}"));
+    registerSearchHandlers(prefix);
 
     handle(prefix + "/langservice/diagnostics", ex -> {
       lastLangBody = readBody(ex);
@@ -173,6 +156,39 @@ public final class MockExistServer implements AutoCloseable {
     registerPackageHandlers(prefix);
 
     server.start();
+  }
+
+  /**
+   * Registers the {@code /search*} endpoints. Extracted from the constructor so it stays under PMD's
+   * NPath threshold (the branchy 403 handler multiplies quickly). {@code /search/fields} is
+   * registered first so the longest-prefix match routes it there rather than to {@code /search}.
+   */
+  private void registerSearchHandlers(String prefix) {
+    handle(prefix + "/search/fields", ex -> respond(ex, 200,
+        "{\"scope\":[\"/db\"],\"user\":\"admin\",\"total\":3,\"fields\":["
+            + "{\"kind\":\"facet\",\"field\":\"site-app\",\"elements\":[\"post\",\"topic\"]},"
+            + "{\"kind\":\"field\",\"field\":\"category\",\"type\":\"xs:string\","
+            + "\"elements\":[\"entry\"],\"returnable\":true,"
+            + "\"analyzer\":\"org.apache.lucene.analysis.standard.StandardAnalyzer\"},"
+            + "{\"kind\":\"field\",\"field\":\"site-content\",\"type\":\"xs:string\","
+            + "\"elements\":[\"post\"],\"returnable\":true,"
+            + "\"analyzer\":[\"org.apache.lucene.analysis.standard.StandardAnalyzer\","
+            + "\"org.apache.lucene.analysis.core.SimpleAnalyzer\"]},"
+            + "{\"kind\":\"vector\",\"field\":\"test-embedding\",\"elements\":[\"doc\"]}]}"));
+
+    handle(prefix + "/search", ex -> {
+      lastSearchQuery = ex.getRequestURI().getRawQuery();
+      if (String.valueOf(lastSearchQuery).contains("field=secret")) {
+        // Field-level security: a field the caller may not see is refused (existdb-openapi #55).
+        respond(ex, 403, "{\"error\":\"forbidden\",\"field\":\"secret\"}");
+        return;
+      }
+      respond(ex, 200, "{\"total\":7,\"query\":\"index\",\"results\":["
+          + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
+          + "\"path\":\"/db/apps/doc/indexing.xml\"},"
+          + "{\"app\":\"doc\",\"title\":\"Tuning\",\"snippet\":\"range index\","
+          + "\"path\":\"/db/apps/doc/tuning.xml\"}]}");
+    });
   }
 
   /**
@@ -232,6 +248,10 @@ public final class MockExistServer implements AutoCloseable {
 
   String lastPutBody() {
     return lastPutBody;
+  }
+
+  String lastSearchQuery() {
+    return lastSearchQuery;
   }
 
   String lastQueryBody() {
