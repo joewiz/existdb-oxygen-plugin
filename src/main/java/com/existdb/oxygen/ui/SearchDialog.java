@@ -78,9 +78,8 @@ public final class SearchDialog extends JDialog {
   private static final String OPT_SERVER = "existdb.search.lastServerId";
   private static final String OPT_FIELD = "existdb.search.lastField";
   private static final String OPT_QUERY = "existdb.search.lastQuery";
-  private static final String INTRO_TEXT = "Searches across data that apps on the selected eXist-db "
-      + "server contribute to a Lucene full-text field called \"site-content\"; eXist 7's stock apps "
-      + "contribute their data to this.";
+  private static final String INTRO_TEXT = "Search named fields on the selected eXist-db server. The "
+      + "\"site-content\" field contains eXist-db documentation included in default eXist.";
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient List<ConnectionProfile> profiles;
