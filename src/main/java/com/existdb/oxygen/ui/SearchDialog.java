@@ -493,12 +493,16 @@ public final class SearchDialog extends JDialog {
   }
 
   /**
-   * Renders a snippet as HTML: collapse/truncate, escape, then turn the server's KWIC {@code <mark>}
-   * hit markers into a highlighted span (black on yellow, so it stays readable on selected rows too).
-   * Snippets without {@code <mark>} simply render as plain text.
+   * Renders a snippet as HTML. The server returns a KWIC fragment: each hit wrapped in {@code <mark>}
+   * inside a {@code <span>} envelope (e.g. {@code <span>… <mark>tuning</mark> …</span>}). Strip every
+   * tag except the {@code <mark>}s — otherwise the envelope renders as literal {@code <span>…</span>}
+   * text — then collapse/truncate, escape, and turn the marks into a highlighted span (black on
+   * yellow, so it stays readable on selected rows too). Snippets without {@code <mark>} render as
+   * plain text.
    */
   private static String highlightSnippet(String raw) {
-    return escape(snippet(raw))
+    String marksOnly = (raw == null ? "" : raw).replaceAll("(?i)<(?!/?mark\\b)[^>]*>", "");
+    return escape(snippet(marksOnly))
         .replace("&lt;mark&gt;", "<span style='background-color:#fff59d; color:#000000'>")
         .replace("&lt;/mark&gt;", "</span>");
   }
