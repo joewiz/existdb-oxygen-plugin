@@ -31,23 +31,57 @@ import org.junit.jupiter.api.Test;
 class ConnectionProfileTest {
 
   @Test
-  void apiRootAppendsApiToBaseUrl() {
+  void apiRootInfersOpenapiPathFromShortServerRoot() {
+    ConnectionProfile p = new ConnectionProfile("x", "http://localhost:8080/exist", "admin", "");
+    assertEquals("http://localhost:8080/exist/apps/existdb-openapi/api", p.getApiRoot());
+  }
+
+  @Test
+  void apiRootHonorsAFullStandardApplicationUrl() {
     ConnectionProfile p = new ConnectionProfile(
         "x", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "");
     assertEquals("http://localhost:8080/exist/apps/existdb-openapi/api", p.getApiRoot());
   }
 
   @Test
-  void apiRootStripsTrailingSlashes() {
+  void apiRootHonorsACustomApplicationPathOverride() {
     ConnectionProfile p = new ConnectionProfile(
-        "x", "http://localhost:8080/exist/apps/existdb-openapi///", "admin", "");
+        "x", "http://host/exist/apps/my-openapi", "admin", "");
+    assertEquals("http://host/exist/apps/my-openapi/api", p.getApiRoot());
+  }
+
+  @Test
+  void apiRootStripsTrailingSlashes() {
+    ConnectionProfile p = new ConnectionProfile("x", "http://localhost:8080/exist///", "admin", "");
     assertEquals("http://localhost:8080/exist/apps/existdb-openapi/api", p.getApiRoot());
   }
 
   @Test
   void apiRootTrimsWhitespace() {
-    ConnectionProfile p = new ConnectionProfile("x", "  http://h:8080/x  ", "admin", "");
-    assertEquals("http://h:8080/x/api", p.getApiRoot());
+    ConnectionProfile p = new ConnectionProfile("x", "  http://h:8080/exist  ", "admin", "");
+    assertEquals("http://h:8080/exist/apps/existdb-openapi/api", p.getApiRoot());
+  }
+
+  @Test
+  void serverRootStripsStandardAndCustomApplicationPaths() {
+    assertEquals("http://h/exist",
+        new ConnectionProfile("x", "http://h/exist", "admin", "").getServerRoot());
+    assertEquals("http://h/exist",
+        new ConnectionProfile("x", "http://h/exist/apps/existdb-openapi", "admin", "")
+            .getServerRoot());
+    assertEquals("http://h/exist",
+        new ConnectionProfile("x", "http://h/exist/apps/my-openapi", "admin", "").getServerRoot());
+  }
+
+  @Test
+  void normalizeBaseUrlCollapsesStandardPathButKeepsOverrides() {
+    assertEquals("http://h/exist", ConnectionProfile.normalizeBaseUrl("http://h/exist"));
+    assertEquals("http://h/exist",
+        ConnectionProfile.normalizeBaseUrl("http://h/exist/apps/existdb-openapi/"));
+    assertEquals("http://h/exist",
+        ConnectionProfile.normalizeBaseUrl("  http://h/exist/apps/existdb-openapi/api  "));
+    assertEquals("http://h/exist/apps/my-openapi",
+        ConnectionProfile.normalizeBaseUrl("http://h/exist/apps/my-openapi"));
   }
 
   @Test
