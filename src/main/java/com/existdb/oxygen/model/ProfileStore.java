@@ -182,7 +182,7 @@ public final class ProfileStore {
     String id = o.optString("id", "");
     ConnectionProfile profile = new ConnectionProfile(
         o.optString("name", ""),
-        o.optString("baseUrl", ""),
+        ConnectionProfile.normalizeBaseUrl(o.optString("baseUrl", "")),
         options.get(PROFILE_PREFIX + id + ".user", ""),
         options.getSecret(SECRET_PREFIX + id, ""),
         o.optBoolean("acceptSelfSigned", false));
@@ -553,7 +553,7 @@ public final class ProfileStore {
     String pass = enc.isEmpty() ? "" : decrypt.apply(enc);
     ConnectionProfile profile = new ConnectionProfile(
         options.get(prefix + "name", def.getName()),
-        options.get(prefix + "baseUrl", def.getBaseUrl()),
+        ConnectionProfile.normalizeBaseUrl(options.get(prefix + "baseUrl", def.getBaseUrl())),
         options.get(prefix + "user", def.getUser()),
         pass == null ? "" : pass,
         Boolean.parseBoolean(options.get(prefix + "acceptSelfSigned", "false")));

@@ -27,11 +27,19 @@ import java.util.List;
 /**
  * A single eXist-db connection: a base URL plus credentials.
  *
- * <p>The base URL points at the existdb-openapi application root, e.g.
- * {@code http://localhost:8080/exist/apps/existdb-openapi}. The {@code /api/*} endpoints
- * hang off that root.</p>
+ * <p>The base URL is the eXist <em>server root</em> (servlet context), e.g.
+ * {@code http://localhost:8080/exist}. The existdb-openapi application path
+ * ({@code /apps/existdb-openapi}) and its {@code /api/*} endpoints are inferred from there by
+ * {@link #getApiRoot()} — the package installs at a fixed path, so the API is always at
+ * {@code <root>/apps/existdb-openapi/api}. A non-standard install can be reached by entering the
+ * full application URL (e.g. {@code http://host/exist/apps/my-openapi}), which is honored verbatim
+ * as an override; {@link #normalizeBaseUrl} collapses only the standard path back to the short
+ * form.</p>
  */
 public final class ConnectionProfile {
+
+  /** The application path existdb-openapi installs at; inferred when the base URL omits it. */
+  private static final String STANDARD_APP_PATH = "/apps/existdb-openapi";
 
   /**
    * The profile's identifier — a URL-safe slug of its name (e.g. {@code localhost-8080}), assigned
@@ -50,7 +58,7 @@ public final class ConnectionProfile {
   private boolean acceptSelfSigned;
 
   public ConnectionProfile() {
-    this("localhost 8080", "http://localhost:8080/exist/apps/existdb-openapi", "admin", "", false);
+    this("localhost 8080", "http://localhost:8080/exist", "admin", "", false);
   }
 
   public ConnectionProfile(String name, String baseUrl, String user, String password) {
@@ -139,25 +147,62 @@ public final class ConnectionProfile {
     this.acceptSelfSigned = acceptSelfSigned;
   }
 
-  /** The {@code /api} root, with any trailing slash on the base URL normalized away. */
+  /**
+   * The existdb-openapi {@code /api} root the plugin talks to. The application path is inferred from
+   * a bare server root (e.g. {@code http://host/exist} → {@code http://host/exist/apps/existdb-openapi/api}),
+   * while a base URL that already carries an application path — the standard one or a custom override
+   * like {@code /apps/my-openapi} — is honored as-is. Trailing slashes are normalized away.
+   */
   public String getApiRoot() {
-    return normalizedBase() + "/api";
+    String base = normalizedBase();
+    if (base.endsWith("/api")) {
+      return base;
+    }
+    return base.contains("/apps/") ? base + "/api" : base + STANDARD_APP_PATH + "/api";
   }
 
   /**
    * The eXist server root (servlet context, e.g. {@code http://localhost:8080/exist}) — the base URL
-   * with the {@code /apps/existdb-openapi} application path removed. This is what {@code xst} /
+   * with any trailing application path ({@code /apps/<abbrev>}) removed. This is what {@code xst} /
    * node-exist connect to over REST/XML-RPC, as opposed to the openapi {@code /api} surface this
-   * plugin itself uses.
+   * plugin itself uses. With the short base-URL form this is just the base URL.
    */
   public String getServerRoot() {
     String base = normalizedBase();
-    String appPath = "/apps/existdb-openapi";
-    return base.endsWith(appPath) ? base.substring(0, base.length() - appPath.length()) : base;
+    int apps = base.lastIndexOf("/apps/");
+    if (apps >= 0 && base.indexOf('/', apps + "/apps/".length()) < 0) {
+      return base.substring(0, apps);
+    }
+    return base;
+  }
+
+  /**
+   * Normalizes a user-entered or stored base URL to the short eXist server-root form for display and
+   * storage: trims, drops trailing slashes and a trailing {@code /api}, and collapses the standard
+   * {@code /apps/existdb-openapi} application path away. A non-standard application path is preserved
+   * as an explicit override. The result yields the same {@link #getApiRoot()} either way, so the
+   * normalization is lossless with respect to where requests are sent.
+   */
+  public static String normalizeBaseUrl(String url) {
+    if (url == null) {
+      return null;
+    }
+    String base = stripTrailingSlashes(url.trim());
+    if (base.endsWith("/api")) {
+      base = stripTrailingSlashes(base.substring(0, base.length() - "/api".length()));
+    }
+    if (base.endsWith(STANDARD_APP_PATH)) {
+      base = base.substring(0, base.length() - STANDARD_APP_PATH.length());
+    }
+    return base;
   }
 
   private String normalizedBase() {
-    String base = baseUrl == null ? "" : baseUrl.trim();
+    return stripTrailingSlashes(baseUrl == null ? "" : baseUrl.trim());
+  }
+
+  private static String stripTrailingSlashes(String s) {
+    String base = s;
     while (base.endsWith("/")) {
       base = base.substring(0, base.length() - 1);
     }

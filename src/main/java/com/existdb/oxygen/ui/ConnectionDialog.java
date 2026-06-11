@@ -67,6 +67,10 @@ public final class ConnectionDialog {
     nameField.setText(profile.getName());
     urlField.setColumns(36);
     urlField.setText(profile.getBaseUrl());
+    urlField.setToolTipText(
+        "The eXist server root, e.g. http://localhost:8080/exist — the existdb-openapi /api path is "
+            + "added automatically. For a non-standard install, enter the full application URL "
+            + "(e.g. http://host/exist/apps/my-openapi) and it is used as-is.");
     userField.setColumns(36);
     userField.setText(profile.getUser());
     passField.setText(profile.getPassword());
@@ -172,7 +176,7 @@ public final class ConnectionDialog {
   private ConnectionProfile toProfile() {
     return new ConnectionProfile(
         nameField.getText().trim(),
-        urlField.getText().trim(),
+        ConnectionProfile.normalizeBaseUrl(urlField.getText()),
         userField.getText().trim(),
         new String(passField.getPassword()),
         acceptSelfSignedBox.isSelected());
