@@ -27,6 +27,7 @@ import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
+import ro.sync.exml.workspace.api.options.WSOptionsStorage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
 import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
@@ -73,6 +74,10 @@ public final class SearchDialog extends JDialog {
   private static final int LIMIT = 50;
   /** The scope the field picker discovers searchable fields under (the whole database). */
   private static final String FIELD_SCOPE = "/db";
+  // Persisted across invocations so the dialog reopens with the last server/field/query (#2).
+  private static final String OPT_SERVER = "existdb.search.lastServerId";
+  private static final String OPT_FIELD = "existdb.search.lastField";
+  private static final String OPT_QUERY = "existdb.search.lastQuery";
   private static final String INTRO_TEXT = "Searches across data that apps on the selected eXist-db "
       + "server contribute to a Lucene full-text field called \"site-content\"; eXist 7's stock apps "
       + "contribute their data to this.";
@@ -90,33 +95,88 @@ public final class SearchDialog extends JDialog {
   private final JLabel status = new JLabel(" ");
   /** Intro line; its HTML wrap-width is re-bound to the dialog width on resize (see updateIntro). */
   private final JLabel intro = new JLabel();
+  /** The remembered field name to re-select once discovery completes; applied once, then cleared. */
+  private transient String pendingFieldName;
 
-  private SearchDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
+  private SearchDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace,
+      String preselectServerId) {
     super(owner, "Search eXist-db", false);
     this.workspace = workspace;
     this.profiles = store.loadAll();
     String[] names = profiles.stream().map(ConnectionProfile::getName).toArray(String[]::new);
     serverCombo = OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(names));
-    selectDefaultServer(store.defaultProfileId());
+    // Server precedence: an explicit pre-selection (e.g. a server's right-click → Search) wins;
+    // otherwise the last-used server; otherwise the configured default.
+    String wantServer = preselectServerId != null && !preselectServerId.isBlank()
+        ? preselectServerId : option(OPT_SERVER, "");
+    if (!selectServerById(wantServer)) {
+      selectServerById(store.defaultProfileId());
+    }
+    pendingFieldName = option(OPT_FIELD, "");
     buildUi();
+    queryField.setText(option(OPT_QUERY, ""));
+    setDefaultCloseOperation(DISPOSE_ON_CLOSE); // so closing via the window button also persists
     setSize(640, 420);
     setLocationRelativeTo(owner);
   }
 
-  /** Opens (or focuses) a non-modal search window. */
+  /** Opens a non-modal search window with the default/last-used server selected. */
   public static void open(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace) {
-    SearchDialog dialog = new SearchDialog(owner, store, workspace);
+    open(owner, store, workspace, null);
+  }
+
+  /** Opens a non-modal search window with {@code preselectServerId} selected (server right-click). */
+  public static void open(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace,
+      String preselectServerId) {
+    SearchDialog dialog = new SearchDialog(owner, store, workspace, preselectServerId);
     dialog.setVisible(true);
     dialog.queryField.requestFocusInWindow();
   }
 
-  private void selectDefaultServer(String defaultId) {
+  private boolean selectServerById(String id) {
+    if (id == null || id.isBlank()) {
+      return false;
+    }
     for (int i = 0; i < profiles.size(); i++) {
-      if (profiles.get(i).getId() != null && profiles.get(i).getId().equals(defaultId)) {
+      if (id.equals(profiles.get(i).getId())) {
         serverCombo.setSelectedIndex(i);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private void selectFieldByName(String name) {
+    if (name == null || name.isBlank()) {
+      return;
+    }
+    for (int i = 0; i < fieldCombo.getItemCount(); i++) {
+      ExistClient.SearchFieldInfo f = fieldCombo.getItemAt(i);
+      if (f != null && name.equals(f.field())) {
+        fieldCombo.setSelectedIndex(i);
         return;
       }
     }
+  }
+
+  private String option(String key, String def) {
+    return workspace.getOptionsStorage().getOption(key, def);
+  }
+
+  /** Persists the current server/field/query so the next invocation restores them (#2). */
+  private void rememberSelections() {
+    WSOptionsStorage opts = workspace.getOptionsStorage();
+    String serverId = selectedServerId();
+    opts.setOption(OPT_SERVER, serverId == null ? "" : serverId);
+    ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
+    opts.setOption(OPT_FIELD, field == null ? "" : field.field());
+    opts.setOption(OPT_QUERY, queryField.getText());
+  }
+
+  @Override
+  public void dispose() {
+    rememberSelections();
+    super.dispose();
   }
 
   private void buildUi() {
@@ -254,6 +314,7 @@ public final class SearchDialog extends JDialog {
     if (query.isEmpty()) {
       return;
     }
+    rememberSelections(); // record what was actually searched, not just on close
     status.setText("Searching…");
     status.setToolTipText(null);
     model.clear();
@@ -314,6 +375,11 @@ public final class SearchDialog extends JDialog {
                   .thenComparing(ExistClient.SearchFieldInfo::field, String.CASE_INSENSITIVE_ORDER))
               .forEach(fieldCombo::addItem);
           fieldHint.setText(fields.total() + " visible to " + fields.user());
+          // Restore the remembered field on the first discovery only; later server switches reset it.
+          if (pendingFieldName != null && !pendingFieldName.isBlank()) {
+            selectFieldByName(pendingFieldName);
+          }
+          pendingFieldName = null;
         } catch (Exception e) {
           // An older server (no /api/search/fields) just leaves "All fields"; nothing to surface.
           fieldHint.setText(" ");
