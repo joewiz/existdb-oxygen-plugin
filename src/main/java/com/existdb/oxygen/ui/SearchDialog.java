@@ -488,22 +488,28 @@ public final class SearchDialog extends JDialog {
   }
 
   /** A representative eXist full-text query for a keyword/field search, with any active facet
-   *  drill-down folded in (approximates /api/search — scoring and KWIC differ). Selects document
-   *  roots, so the hit count matches the API; a comment shows how to highlight the matches. */
+   *  drill-down folded in (approximates /api/search). Selects document roots, so the hit count
+   *  matches the API, and ranks them by ft:score so the order matches too; a comment shows how to
+   *  highlight the matches. */
   private String keywordXQuery(ExistClient.SearchFieldInfo field, String query) {
     String lucene = field == null ? xqString(query) : field.field() + ":(" + xqString(query) + ")";
     String facets = facetDrillDown();
     String highlightField = field == null ? "site-content" : field.field();
-    // The site-content field matches (not inline text), so highlighting needs
+    // Rank by ft:score descending so the order matches /api/search (a bare path returns document
+    // order, not relevance). The site-content field matches (not inline text), so highlighting needs
     // ft:highlight-field-matches, not util:expand — and facet drill-down disables eXist's
     // match-tracking, so highlighting only works on the non-faceted query.
     String note = facets.isEmpty()
-        ? "(: approximates /api/search (scoring and KWIC differ). Append\n"
-            + "   ! ft:highlight-field-matches(., '" + highlightField + "')  to wrap matches in "
-            + "<exist:match>. :)\n"
-        : "(: approximates /api/search (scoring and KWIC differ). Facet drill-down disables eXist's\n"
+        ? "(: approximates /api/search, ranked by relevance. Append\n"
+            + "   ! ft:highlight-field-matches(., '" + highlightField + "')  to the return clause to "
+            + "wrap matches in <exist:match>. :)\n"
+        : "(: approximates /api/search, ranked by relevance. Facet drill-down disables eXist's\n"
             + "   match-tracking, so matches can't be highlighted from the faceted query. :)\n";
-    return note + "collection('" + FIELD_SCOPE + "')/*[ft:query(., '" + lucene + "'" + facets + ")]";
+    return note
+        + "for $hit in collection('" + FIELD_SCOPE + "')/*[ft:query(., '" + lucene + "'" + facets
+        + ")]\n"
+        + "order by ft:score($hit) descending\n"
+        + "return $hit";
   }
 
   /**
