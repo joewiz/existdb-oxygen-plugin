@@ -108,8 +108,8 @@ public final class ExistdbPreferencesPanel {
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
   private final JRadioButton destBrowse = new JRadioButton("eXist-db Results pane");
   private final JRadioButton destEditor = new JRadioButton("New editor window");
-  private final JCheckBox indentPref = new JCheckBox("Indent");
-  private final JCheckBox wrapPref = new JCheckBox("Wrap");
+  private final JCheckBox indentPref = new JCheckBox("Indent (pretty-print) results");
+  private final JCheckBox wrapPref = new JCheckBox("Wrap long result lines");
   private final JCheckBox showHiddenPref = new JCheckBox("Show hidden files and directories");
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
@@ -369,10 +369,9 @@ public final class ExistdbPreferencesPanel {
   }
 
   /**
-   * The persisted query/result defaults (destination, serialization method, indent, page size).
-   * Laid out with {@link GridBagLayout} anchored {@code BASELINE_LEADING} so each row's labels,
-   * combos, and the (taller) Indent checkbox align on their text baseline — FlowLayout/BoxLayout
-   * only center vertically, which drops the checkbox's baseline below the labels'.
+   * The persisted query/result defaults, laid out vertically (one field per row) like Oxygen's own
+   * preference pages: a {@code label: control} grid for the destination, serialization method, and
+   * page size, with the boolean Indent/Wrap toggles as their own flush-left checkbox rows.
    */
   private JComponent buildResultPrefs() {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
@@ -392,37 +391,46 @@ public final class ExistdbPreferencesPanel {
     JPanel prefs = new JPanel(new GridBagLayout());
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
-    c.anchor = GridBagConstraints.BASELINE_LEADING;
+    c.anchor = GridBagConstraints.LINE_START;
 
+    // "View results in:" — the label beside the first radio, the second radio stacked beneath it.
     c.gridy = 0;
     c.gridx = 0;
     prefs.add(new JLabel("View results in:"), c);
     c.gridx = 1;
     prefs.add(destBrowse, c);
-    c.gridx = 2;
-    c.gridwidth = 3;
-    prefs.add(destEditor, c);
-    c.gridwidth = 1;
-
     c.gridy = 1;
+    prefs.add(destEditor, c);
+
+    // "Serialization:" and "Results per page:" — label: combo rows.
+    c.gridy = 2;
     c.gridx = 0;
     prefs.add(new JLabel("Serialization:"), c);
     c.gridx = 1;
     prefs.add(methodPref, c);
-    c.gridx = 2;
-    prefs.add(indentPref, c);
-    c.gridx = 3;
-    prefs.add(wrapPref, c);
-    c.gridx = 4;
+
+    c.gridy = 3;
+    c.gridx = 0;
     prefs.add(new JLabel("Results per page:"), c);
-    c.gridx = 5;
+    c.gridx = 1;
     prefs.add(pageSizePref, c);
-    // A glue cell keeps the grid flush left instead of centered in the page width.
-    c.gridx = 6;
+
+    // The boolean toggles as their own flush-left rows, spanning both columns.
+    c.gridx = 0;
+    c.gridwidth = 2;
+    c.gridy = 4;
+    prefs.add(indentPref, c);
+    c.gridy = 5;
+    prefs.add(wrapPref, c);
+    c.gridwidth = 1;
+
+    // A glue cell to the right keeps the grid flush left instead of centered in the page width.
+    c.gridx = 2;
+    c.gridy = 0;
     c.weightx = 1.0;
     c.fill = GridBagConstraints.HORIZONTAL;
     prefs.add(new JPanel(), c);
-    return section("Query & result defaults", prefs);
+    return section("Query result defaults", prefs);
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
@@ -518,7 +526,7 @@ public final class ExistdbPreferencesPanel {
   void restoreDefaults() {
     methodPref.setSelectedIndex(methodIndex("adaptive"));
     indentPref.setSelected(true);
-    wrapPref.setSelected(false);
+    wrapPref.setSelected(true);
     pageSizePref.setSelectedItem(10);
     destBrowse.setSelected(true);
     showHiddenPref.setSelected(false);

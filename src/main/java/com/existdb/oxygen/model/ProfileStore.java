@@ -298,7 +298,7 @@ public final class ProfileStore {
   }
 
   public boolean resultsWrap() {
-    return Boolean.parseBoolean(options.get("existdb.results.wrap", "false"));
+    return Boolean.parseBoolean(options.get("existdb.results.wrap", "true"));
   }
 
   public void setResultsWrap(boolean wrap) {

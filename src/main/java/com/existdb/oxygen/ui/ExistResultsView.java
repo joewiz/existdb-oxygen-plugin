@@ -438,8 +438,8 @@ public final class ExistResultsView extends JPanel {
   private JComponent buildToolbar() {
     JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
     left.add(methodCombo);
-    left.add(indentButton);
     left.add(wrapButton);
+    left.add(indentButton);
 
     JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 2));
     nav.add(firstButton);
