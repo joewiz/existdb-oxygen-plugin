@@ -98,6 +98,10 @@ public final class ExistResultsView extends JPanel {
   private static final int DEFAULT_FONT_SIZE = 12;
   private static final int MIN_FONT_SIZE = 7;
   private static final int MAX_FONT_SIZE = 36;
+  // When wrapping, a row's pane is bounded to (viewport width - chrome): the number cell, the row's
+  // BorderLayout gap, and its left/right insets. Never wrap narrower than MIN_WRAP_WIDTH.
+  private static final int WRAP_CHROME = 66;
+  private static final int MIN_WRAP_WIDTH = 120;
   // Solid (non-alpha) colors: translucent backgrounds on opaque rows leave paint artifacts.
   private static final Color STRIPE = new Color(0xF2, 0xF4, 0xF7);
   private static final Color PLAIN = Color.WHITE;
@@ -111,6 +115,7 @@ public final class ExistResultsView extends JPanel {
   private final JComboBox<Integer> pageSizeCombo =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
   private final JButton indentButton;
+  private final JButton wrapButton;
   private final JButton firstButton;
   private final JButton prevButton;
   private final JButton prevItemButton;
@@ -142,12 +147,16 @@ public final class ExistResultsView extends JPanel {
   private int page = 1;
   private int pageSize = 10;
   private boolean indent = true;
+  /** When true, long result lines wrap to the viewport width instead of scrolling horizontally. */
+  private boolean wrap;
   private int selectedIndex;
   private int currentStart;
   /** Suppresses combo action-listener refreshes while {@link #applyPreferences()} sets values. */
   private transient boolean applyingPrefs;
   /** Monospaced point size of the result text, adjusted by the Cmd +/-/0 zoom shortcuts. */
   private int fontSize = DEFAULT_FONT_SIZE;
+  /** Last viewport width the rows were wrapped for; guards re-wrap on scroll vs. genuine resize. */
+  private int lastWrapWidth = -1;
 
   public ExistResultsView(StandalonePluginWorkspace workspace, ProfileStore profileStore) {
     super(new BorderLayout());
@@ -155,8 +164,10 @@ public final class ExistResultsView extends JPanel {
     this.profileStore = profileStore;
     // Start from the saved result-display preferences (persist across restarts).
     this.indent = profileStore.resultsIndent();
+    this.wrap = profileStore.resultsWrap();
     this.pageSize = profileStore.resultsPageSize();
     final boolean initialIndent = this.indent;
+    final boolean initialWrap = this.wrap;
 
     indentButton = OxygenUIComponentsFactory.createToolbarToggleButton(new AbstractAction() {
       {
@@ -169,6 +180,21 @@ public final class ExistResultsView extends JPanel {
       @Override
       public void actionPerformed(ActionEvent e) {
         indent = Boolean.TRUE.equals(getValue(SELECTED_KEY));
+        refreshPage();
+      }
+    }, false);
+
+    wrapButton = OxygenUIComponentsFactory.createToolbarToggleButton(new AbstractAction() {
+      {
+        putValue(SMALL_ICON, WrapIcon.INSTANCE);
+        putValue(NAME, "Wrap");
+        putValue(SHORT_DESCRIPTION, "Wrap long result lines to the view width");
+        putValue(SELECTED_KEY, initialWrap);
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        wrap = Boolean.TRUE.equals(getValue(SELECTED_KEY));
         refreshPage();
       }
     }, false);
@@ -207,11 +233,16 @@ public final class ExistResultsView extends JPanel {
       @Override
       public void componentResized(ComponentEvent e) {
         scrollPane.setBounds(0, 0, layered.getWidth(), layered.getHeight());
+        applyWrapWidths();
         positionFloatingCopies();
       }
     });
-    // Keep the per-row copy buttons glued to the viewport's right edge as the user scrolls.
-    scrollPane.getViewport().addChangeListener(e -> positionFloatingCopies());
+    // Keep the per-row copy buttons glued to the viewport's right edge as the user scrolls; re-wrap
+    // only when the viewport width actually changes (e.g. a vertical scrollbar appears), not on scroll.
+    scrollPane.getViewport().addChangeListener(e -> {
+      positionFloatingCopies();
+      maybeRewrap();
+    });
 
     add(buildToolbar(), BorderLayout.NORTH);
     add(layered, BorderLayout.CENTER);
@@ -279,8 +310,7 @@ public final class ExistResultsView extends JPanel {
     for (JTextPane pane : rowTextPanes) {
       pane.setFont(font);
     }
-    rows.revalidate();
-    rows.repaint();
+    applyWrapWidths();
     SwingUtilities.invokeLater(this::positionFloatingCopies);
   }
 
@@ -294,6 +324,8 @@ public final class ExistResultsView extends JPanel {
     try {
       indent = profileStore.resultsIndent();
       indentButton.getAction().putValue(Action.SELECTED_KEY, indent);
+      wrap = profileStore.resultsWrap();
+      wrapButton.getAction().putValue(Action.SELECTED_KEY, wrap);
       methodCombo.setSelectedIndex(methodIndex(profileStore.resultsMethod()));
       pageSize = profileStore.resultsPageSize();
       pageSizeCombo.setSelectedItem(pageSize);
@@ -406,6 +438,7 @@ public final class ExistResultsView extends JPanel {
   private JComponent buildToolbar() {
     JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
     left.add(methodCombo);
+    left.add(wrapButton);
     left.add(indentButton);
 
     JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 2));
@@ -600,9 +633,42 @@ public final class ExistResultsView extends JPanel {
       rowOpenButtons.add(openButton);
       layered.add(openButton, JLayeredPane.PALETTE_LAYER);
     }
+    applyWrapWidths();
+    applyHighlight();
+  }
+
+  /**
+   * Sizes each result row for the current wrap mode. When wrapping is on, every row's text pane is
+   * bounded to the viewport width (minus the number cell and insets) and measured for its wrapped
+   * height, so long lines wrap instead of scrolling horizontally; when off, panes keep their natural
+   * (longest-line) width and the view scrolls horizontally as before.
+   */
+  private void applyWrapWidths() {
+    int viewportWidth = scrollPane.getViewport().getWidth();
+    boolean doWrap = wrap && viewportWidth > 0;
+    for (int i = 0; i < rowPanels.size() && i < rowTextPanes.size(); i++) {
+      JPanel row = rowPanels.get(i);
+      JTextPane pane = rowTextPanes.get(i);
+      pane.setPreferredSize(null);
+      if (doWrap) {
+        int paneWidth = Math.max(MIN_WRAP_WIDTH, viewportWidth - WRAP_CHROME);
+        pane.setSize(paneWidth, Short.MAX_VALUE);
+        pane.setPreferredSize(new Dimension(paneWidth, pane.getPreferredSize().height));
+        row.setMaximumSize(new Dimension(viewportWidth, row.getPreferredSize().height));
+      } else {
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+      }
+    }
+    lastWrapWidth = viewportWidth;
     rows.revalidate();
     rows.repaint();
-    applyHighlight();
+  }
+
+  /** Re-wraps the rows only when the viewport width has changed since the last wrap. */
+  private void maybeRewrap() {
+    if (wrap && scrollPane.getViewport().getWidth() != lastWrapWidth) {
+      applyWrapWidths();
+    }
   }
 
   /** Steps the highlighted result by {@code delta}, crossing page boundaries as needed. */
@@ -736,6 +802,43 @@ public final class ExistResultsView extends JPanel {
     num.setVerticalAlignment(SwingConstants.TOP);
     num.setForeground(Color.GRAY);
     return num;
+  }
+
+  /**
+   * A vector "word-wrap" glyph — a line that runs right, hooks down, and returns left with an
+   * arrowhead — for the wrap toggle (the Oxygen SDK ships no wrap icon). Drawn like
+   * {@link ChevronIcon} so it stays crisp at any zoom level.
+   */
+  private static final class WrapIcon implements Icon {
+    static final Icon INSTANCE = new WrapIcon();
+    private static final int SIZE = 16;
+
+    @Override
+    public int getIconWidth() {
+      return SIZE;
+    }
+
+    @Override
+    public int getIconHeight() {
+      return SIZE;
+    }
+
+    @Override
+    public void paintIcon(Component c, Graphics g, int x, int y) {
+      Graphics2D g2 = (Graphics2D) g.create();
+      g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+      g2.setColor(c.isEnabled() ? new Color(0x55, 0x5F, 0x6D) : new Color(0xB8, 0xBE, 0xC6));
+      g2.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+      // Top full-width line.
+      g2.drawLine(x + 3, y + 4, x + 13, y + 4);
+      // Second line that wraps: run right, hook down, and return left.
+      g2.drawPolyline(
+          new int[] {x + 3, x + 12, x + 12, x + 6},
+          new int[] {y + 8, y + 8, y + 11, y + 11}, 4);
+      // Arrowhead at the returned (left) end, pointing left.
+      g2.drawPolyline(new int[] {x + 8, x + 6, x + 8}, new int[] {y + 9, y + 11, y + 13}, 3);
+      g2.dispose();
+    }
   }
 
   /**
