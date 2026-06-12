@@ -109,6 +109,7 @@ public final class ExistdbPreferencesPanel {
   private final JRadioButton destBrowse = new JRadioButton("eXist-db Results pane");
   private final JRadioButton destEditor = new JRadioButton("New editor window");
   private final JCheckBox indentPref = new JCheckBox("Indent");
+  private final JCheckBox wrapPref = new JCheckBox("Wrap");
   private final JCheckBox showHiddenPref = new JCheckBox("Show hidden files and directories");
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
@@ -376,6 +377,7 @@ public final class ExistdbPreferencesPanel {
   private JComponent buildResultPrefs() {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
     indentPref.setSelected(store.resultsIndent());
+    wrapPref.setSelected(store.resultsWrap());
     pageSizePref.setSelectedItem(store.resultsPageSize());
     boolean toEditor = "editor".equals(store.resultsDestination());
     destEditor.setSelected(toEditor);
@@ -410,11 +412,13 @@ public final class ExistdbPreferencesPanel {
     c.gridx = 2;
     prefs.add(indentPref, c);
     c.gridx = 3;
-    prefs.add(new JLabel("Results per page:"), c);
+    prefs.add(wrapPref, c);
     c.gridx = 4;
+    prefs.add(new JLabel("Results per page:"), c);
+    c.gridx = 5;
     prefs.add(pageSizePref, c);
     // A glue cell keeps the grid flush left instead of centered in the page width.
-    c.gridx = 5;
+    c.gridx = 6;
     c.weightx = 1.0;
     c.fill = GridBagConstraints.HORIZONTAL;
     prefs.add(new JPanel(), c);
@@ -499,6 +503,7 @@ public final class ExistdbPreferencesPanel {
     store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
     store.setResultsIndent(indentPref.isSelected());
+    store.setResultsWrap(wrapPref.isSelected());
     store.setResultsPageSize((Integer) pageSizePref.getSelectedItem());
     store.setResultsDestination(destEditor.isSelected() ? "editor" : "browse");
     store.setShowHidden(showHiddenPref.isSelected());
@@ -513,6 +518,7 @@ public final class ExistdbPreferencesPanel {
   void restoreDefaults() {
     methodPref.setSelectedIndex(methodIndex("adaptive"));
     indentPref.setSelected(true);
+    wrapPref.setSelected(false);
     pageSizePref.setSelectedItem(10);
     destBrowse.setSelected(true);
     showHiddenPref.setSelected(false);

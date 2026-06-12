@@ -270,7 +270,8 @@ public final class ProfileStore {
   public static String[] projectLevelKeys() {
     return new String[] {
       KEY_CONNECTIONS, KEY_DEFAULT,
-      "existdb.results.method", "existdb.results.indent", "existdb.results.pageSize",
+      "existdb.results.method", "existdb.results.indent", "existdb.results.wrap",
+      "existdb.results.pageSize",
       "existdb.results.destination", "existdb.showHidden", "existdb.uploadHidden",
       "existdb.restorePane",
     };
@@ -294,6 +295,14 @@ public final class ProfileStore {
 
   public void setResultsIndent(boolean indent) {
     options.set("existdb.results.indent", Boolean.toString(indent));
+  }
+
+  public boolean resultsWrap() {
+    return Boolean.parseBoolean(options.get("existdb.results.wrap", "false"));
+  }
+
+  public void setResultsWrap(boolean wrap) {
+    options.set("existdb.results.wrap", Boolean.toString(wrap));
   }
 
   public int resultsPageSize() {
