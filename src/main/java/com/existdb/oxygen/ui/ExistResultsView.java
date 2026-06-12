@@ -111,6 +111,7 @@ public final class ExistResultsView extends JPanel {
   private final JComboBox<Integer> pageSizeCombo =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
   private final JButton indentButton;
+  private final JButton highlightButton;
   private final JButton firstButton;
   private final JButton prevButton;
   private final JButton prevItemButton;
@@ -142,6 +143,8 @@ public final class ExistResultsView extends JPanel {
   private int page = 1;
   private int pageSize = 10;
   private boolean indent = true;
+  /** Whether to paint full-text hits (<exist:match>/<mark>) in results; session-only, default on. */
+  private boolean highlightMatches = true;
   private int selectedIndex;
   private int currentStart;
   /** Suppresses combo action-listener refreshes while {@link #applyPreferences()} sets values. */
@@ -169,6 +172,21 @@ public final class ExistResultsView extends JPanel {
       @Override
       public void actionPerformed(ActionEvent e) {
         indent = Boolean.TRUE.equals(getValue(SELECTED_KEY));
+        refreshPage();
+      }
+    }, false);
+
+    highlightButton = OxygenUIComponentsFactory.createToolbarToggleButton(new AbstractAction() {
+      {
+        putValue(SMALL_ICON, icon("/images/ContentHighlightActivated16.png"));
+        putValue(NAME, "Highlight");
+        putValue(SHORT_DESCRIPTION, "Highlight full-text hits (<exist:match>/<mark>) in results");
+        putValue(SELECTED_KEY, highlightMatches);
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        highlightMatches = Boolean.TRUE.equals(getValue(SELECTED_KEY));
         refreshPage();
       }
     }, false);
@@ -407,6 +425,7 @@ public final class ExistResultsView extends JPanel {
     JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
     left.add(methodCombo);
     left.add(indentButton);
+    left.add(highlightButton);
 
     JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 2));
     nav.add(firstButton);
@@ -666,7 +685,7 @@ public final class ExistResultsView extends JPanel {
     area.setOpaque(false);
     area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, fontSize));
     ResultHighlighter.apply(area.getStyledDocument(), value,
-        ResultHighlighter.languageFor(method, value));
+        ResultHighlighter.languageFor(method, value), highlightMatches);
     rowTextPanes.add(area);
     // Per-result copy is provided by the floating button at the viewport's right edge, so it stays
     // visible even when a result is wider than the view.

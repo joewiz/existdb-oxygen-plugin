@@ -22,7 +22,11 @@
 package com.existdb.oxygen.ui;
 
 import java.awt.Color;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.text.BadLocationException;
 import javax.swing.text.SimpleAttributeSet;
@@ -51,6 +55,11 @@ final class ResultHighlighter {
   private static final Color KEYWORD = new Color(0x0B, 0x36, 0xA8);
   private static final Color PUNCT = new Color(0x70, 0x70, 0x70);
   private static final Color PLAIN = Color.BLACK;
+  /** Background for full-text hit highlighting (matches the Search dialog's KWIC yellow). */
+  private static final Color MATCH_BG = new Color(0xFF, 0xF5, 0x9D);
+  /** Full-text match markers a result can carry: eXist's {@code <exist:match>} or KWIC {@code <mark>}. */
+  private static final Pattern MATCH_TAG =
+      Pattern.compile("(?is)<(exist:match|mark)\\b[^>]*>(.*?)</\\1>");
 
   private final transient StyledDocument doc;
   private final transient String text;
@@ -68,6 +77,37 @@ final class ResultHighlighter {
       case "adaptive" -> value.stripLeading().startsWith("<") ? Lang.XML : Lang.XQUERY;
       default -> Lang.NONE;
     };
+  }
+
+  /**
+   * As {@link #apply(StyledDocument, String, Lang)}, but when {@code highlightMatches} is true and the
+   * value carries full-text match markers, the {@code <exist:match>}/{@code <mark>} tags are hidden
+   * and their wrapped text is painted with the KWIC yellow (eXide-style). The syntax foreground is
+   * preserved.
+   */
+  static void apply(StyledDocument doc, String value, Lang lang, boolean highlightMatches) {
+    if (!highlightMatches || !MATCH_TAG.matcher(value).find()) {
+      apply(doc, value, lang);
+      return;
+    }
+    StringBuilder clean = new StringBuilder();
+    List<int[]> ranges = new ArrayList<>();
+    Matcher m = MATCH_TAG.matcher(value);
+    int last = 0;
+    while (m.find()) {
+      clean.append(value, last, m.start());
+      int start = clean.length();
+      clean.append(m.group(2)); // the wrapped text, tags dropped
+      ranges.add(new int[] {start, m.group(2).length()});
+      last = m.end();
+    }
+    clean.append(value.substring(last));
+    apply(doc, clean.toString(), lang); // syntax-highlight the tag-stripped text first
+    SimpleAttributeSet background = new SimpleAttributeSet();
+    StyleConstants.setBackground(background, MATCH_BG);
+    for (int[] range : ranges) {
+      doc.setCharacterAttributes(range[0], range[1], background, false); // merge: keep the syntax color
+    }
   }
 
   /** Replaces {@code doc}'s content with {@code value}, colorized for {@code lang}. */
