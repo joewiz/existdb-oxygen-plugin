@@ -393,39 +393,39 @@ public final class ExistdbPreferencesPanel {
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.LINE_START;
 
-    // "View results in:" — the label beside the first radio, the second radio stacked beneath it.
+    // "View results in:" — both radios side by side on one row (like the Global/Project toggle).
     c.gridy = 0;
     c.gridx = 0;
     prefs.add(new JLabel("View results in:"), c);
     c.gridx = 1;
     prefs.add(destBrowse, c);
-    c.gridy = 1;
+    c.gridx = 2;
     prefs.add(destEditor, c);
 
     // "Serialization:" and "Results per page:" — label: combo rows.
-    c.gridy = 2;
+    c.gridy = 1;
     c.gridx = 0;
     prefs.add(new JLabel("Serialization:"), c);
     c.gridx = 1;
     prefs.add(methodPref, c);
 
-    c.gridy = 3;
+    c.gridy = 2;
     c.gridx = 0;
     prefs.add(new JLabel("Results per page:"), c);
     c.gridx = 1;
     prefs.add(pageSizePref, c);
 
-    // The boolean toggles as their own flush-left rows, spanning both columns.
+    // The boolean toggles as their own flush-left rows, spanning the label + control columns.
     c.gridx = 0;
     c.gridwidth = 2;
-    c.gridy = 4;
+    c.gridy = 3;
     prefs.add(indentPref, c);
-    c.gridy = 5;
+    c.gridy = 4;
     prefs.add(wrapPref, c);
     c.gridwidth = 1;
 
     // A glue cell to the right keeps the grid flush left instead of centered in the page width.
-    c.gridx = 2;
+    c.gridx = 3;
     c.gridy = 0;
     c.weightx = 1.0;
     c.fill = GridBagConstraints.HORIZONTAL;
