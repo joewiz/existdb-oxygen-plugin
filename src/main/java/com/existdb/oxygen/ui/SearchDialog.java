@@ -498,9 +498,10 @@ public final class SearchDialog extends JDialog {
     String facets = facetDrillDown();
     // Field-qualified queries (field:term) self-restrict to documents where that field is indexed, so
     // the count matches /api/search; a generic ft:query(., 'term') would instead match every default
-    // full-text index across /db. {@code //*} (not {@code /*}) reaches fields indexed on non-root
-    // elements too. Rank by ft:score descending so the order matches the API. Facet drill-down
-    // disables eXist's match-tracking, so highlighting only works on the non-faceted query.
+    // full-text index across /db. Selecting document roots with /* (not the //* wildcard, which loses
+    // eXist's match-tracking) keeps ft:highlight-field-matches working on the result. Rank by ft:score
+    // descending so the order matches the API. Facet drill-down disables match-tracking, so
+    // highlighting only works on the non-faceted query.
     String note;
     if (!facets.isEmpty()) {
       note = "(: approximates /api/search, ranked by relevance. Facet drill-down disables eXist's\n"
@@ -514,7 +515,7 @@ public final class SearchDialog extends JDialog {
           + "   highlight per field with ft:highlight-field-matches(., '<field>')). :)\n";
     }
     return note
-        + "for $hit in collection('" + FIELD_SCOPE + "')//*[ft:query(., '" + lucene + "'" + facets
+        + "for $hit in collection('" + FIELD_SCOPE + "')/*[ft:query(., '" + lucene + "'" + facets
         + ")]\n"
         + "order by ft:score($hit) descending\n"
         + "return $hit";
