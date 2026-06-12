@@ -461,7 +461,7 @@ public final class SearchDialog extends JDialog {
     } else {
       url = client.searchUrl(query, field.field(), FIELD_SCOPE, List.copyOf(activeFacetFilters), LIMIT);
     }
-    toClipboard(url, "Copied search URL to the clipboard.");
+    toClipboard(url, "URL copied");
   }
 
   /** Copies an XQuery for the current query — exact for vectors, a representative query for keyword. */
@@ -471,7 +471,7 @@ public final class SearchDialog extends JDialog {
     String xquery = field != null && "vector".equals(field.kind())
         ? vectorXQuery(field.field(), query)
         : keywordXQuery(field, query);
-    toClipboard(xquery, "Copied XQuery to the clipboard.");
+    toClipboard(xquery, "XQuery copied");
   }
 
   /** The eXist vector pipeline behind a "Similar to…" search (model from the last vector response). */
