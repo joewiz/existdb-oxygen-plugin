@@ -37,6 +37,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
@@ -45,16 +46,21 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -97,6 +103,12 @@ public final class SearchDialog extends JDialog {
   private final JLabel intro = new JLabel();
   /** The remembered field name to re-select once discovery completes; applied once, then cleared. */
   private transient String pendingFieldName;
+  /** Active facet filters ("dimension:value") narrowing the current search; drives the &facet params. */
+  private final transient List<String> activeFacetFilters = new ArrayList<>();
+  /** The facet drill-down panel (one group of checkboxes per dimension), right of the results. */
+  private final JPanel facetBox = new JPanel();
+  /** Scroll wrapper around {@link #facetBox}; shown only when a search returns facet buckets. */
+  private transient JComponent facetScroll;
 
   private SearchDialog(Frame owner, ProfileStore store, StandalonePluginWorkspace workspace,
       String preselectServerId) {
@@ -204,7 +216,12 @@ public final class SearchDialog extends JDialog {
     fieldRow.add(new JLabel("Search in:"));
     fieldRow.add(fieldCombo);
     fieldRow.add(fieldHint);
-    serverCombo.addActionListener(e -> fetchFields()); // re-discover when the server changes
+    serverCombo.addActionListener(e -> {
+      // A different server has its own fields and facets — drop any active drill-down.
+      activeFacetFilters.clear();
+      rebuildFacetPanel(Map.of());
+      fetchFields();
+    });
 
     list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     list.setCellRenderer(hitRenderer());
@@ -272,12 +289,25 @@ public final class SearchDialog extends JDialog {
     north.add(controls, BorderLayout.CENTER);
     fetchFields(); // discover fields for the initially-selected server
 
+    // Results on the left, the facet drill-down panel on the right (hidden until a search returns
+    // facet buckets). The facet box is a vertical stack of dimension groups.
+    facetBox.setLayout(new BoxLayout(facetBox, BoxLayout.Y_AXIS));
+    facetScroll = OxygenUIComponentsFactory.createScrollPane(facetBox,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+    facetScroll.setPreferredSize(new Dimension(190, 0));
+    facetScroll.setVisible(false);
+    JComponent listScroll = OxygenUIComponentsFactory.createScrollPane(list,
+        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+    JPanel center = new JPanel(new BorderLayout(8, 0));
+    center.add(listScroll, BorderLayout.CENTER);
+    center.add(facetScroll, BorderLayout.EAST);
+
     setLayout(new BorderLayout(8, 8));
     ((JPanel) getContentPane()).setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
     add(north, BorderLayout.NORTH);
-    add(OxygenUIComponentsFactory.createScrollPane(list,
-        ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-        ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER), BorderLayout.CENTER);
+    add(center, BorderLayout.CENTER);
     add(south, BorderLayout.SOUTH);
     getRootPane().setDefaultButton(open);
     getRootPane().registerKeyboardAction(e -> dispose(),
@@ -321,12 +351,13 @@ public final class SearchDialog extends JDialog {
     status.setText("Searching…");
     status.setToolTipText(null);
     model.clear();
+    List<String> facetFilters = List.copyOf(activeFacetFilters);
     new SwingWorker<ExistClient.SearchResults, Void>() {
       @Override
       protected ExistClient.SearchResults doInBackground() throws Exception {
         return field == null
-            ? client.search(query, LIMIT)
-            : client.search(query, field.field(), FIELD_SCOPE, LIMIT);
+            ? client.search(query, null, null, facetFilters, LIMIT)
+            : client.search(query, field.field(), FIELD_SCOPE, facetFilters, LIMIT);
       }
 
       @Override
@@ -338,6 +369,7 @@ public final class SearchDialog extends JDialog {
           status.setText(results.total() > shown
               ? "Showing " + shown + " of " + results.total() + " matches"
               : shown + " match" + (shown == 1 ? "" : "es"));
+          rebuildFacetPanel(results.facets());
           if (!model.isEmpty()) {
             // Move focus to the results and select the first hit, so Up/Down navigate immediately
             // and Enter (the default Open button) opens the selection.
@@ -356,6 +388,77 @@ public final class SearchDialog extends JDialog {
         }
       }
     }.execute();
+  }
+
+  /**
+   * Rebuilds the facet drill-down panel from a search response's buckets ({@code dimension → value →
+   * count}). Dimensions are sorted by name; within each, values by count (descending) then name. A
+   * checkbox reflects/toggles whether that {@code "dimension:value"} filter is active. The panel is
+   * shown only when there are buckets or active filters, so a plain search keeps the full-width list.
+   */
+  private void rebuildFacetPanel(Map<String, Map<String, Integer>> facets) {
+    if (facetScroll == null) {
+      return;
+    }
+    facetBox.removeAll();
+    if (!activeFacetFilters.isEmpty()) {
+      JButton clear = OxygenUIComponentsFactory.createButton(new AbstractAction("Clear filters") {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          clearFacets();
+        }
+      });
+      clear.setAlignmentX(LEFT_ALIGNMENT);
+      facetBox.add(clear);
+    }
+    boolean hasFacets = facets != null && !facets.isEmpty();
+    if (hasFacets) {
+      facets.entrySet().stream()
+          .sorted(Map.Entry.comparingByKey())
+          .forEach(dim -> addFacetGroup(dim.getKey(), dim.getValue()));
+    }
+    facetScroll.setVisible(hasFacets || !activeFacetFilters.isEmpty());
+    facetBox.revalidate();
+    facetBox.repaint();
+    getContentPane().revalidate();
+  }
+
+  /** Adds one dimension's group: a bold header plus a checkbox per value (count). */
+  private void addFacetGroup(String dimension, Map<String, Integer> buckets) {
+    JLabel header = new JLabel(dimension);
+    header.setFont(header.getFont().deriveFont(Font.BOLD));
+    header.setAlignmentX(LEFT_ALIGNMENT);
+    header.setBorder(BorderFactory.createEmptyBorder(6, 0, 2, 0));
+    facetBox.add(header);
+    buckets.entrySet().stream()
+        .sorted(Map.Entry.<String, Integer>comparingByValue().reversed()
+            .thenComparing(Map.Entry.comparingByKey()))
+        .forEach(b -> {
+          String key = dimension + ":" + b.getKey();
+          JCheckBox box = new JCheckBox(b.getKey() + " (" + b.getValue() + ")",
+              activeFacetFilters.contains(key));
+          box.setAlignmentX(LEFT_ALIGNMENT);
+          box.addActionListener(e -> toggleFacet(key, box.isSelected()));
+          facetBox.add(box);
+        });
+  }
+
+  /** Adds/removes a {@code "dimension:value"} filter and re-runs the search to apply it. */
+  private void toggleFacet(String key, boolean on) {
+    if (on) {
+      if (!activeFacetFilters.contains(key)) {
+        activeFacetFilters.add(key);
+      }
+    } else {
+      activeFacetFilters.remove(key);
+    }
+    doSearch();
+  }
+
+  /** Drops all active facet filters and re-runs the search. */
+  private void clearFacets() {
+    activeFacetFilters.clear();
+    doSearch();
   }
 
   /** Discovers the searchable fields for the selected server and repopulates the "Search in" combo. */

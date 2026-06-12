@@ -187,7 +187,8 @@ public final class MockExistServer implements AutoCloseable {
           + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
           + "\"path\":\"/db/apps/doc/indexing.xml\"},"
           + "{\"app\":\"doc\",\"title\":\"Tuning\",\"snippet\":\"range index\","
-          + "\"path\":\"/db/apps/doc/tuning.xml\"}]}");
+          + "\"path\":\"/db/apps/doc/tuning.xml\"}],"
+          + "\"facets\":{\"site-app\":{\"docs\":5,\"blog\":2},\"site-section\":{\"guide\":4}}}");
     });
   }
 
