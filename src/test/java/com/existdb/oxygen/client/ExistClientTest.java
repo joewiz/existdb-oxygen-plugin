@@ -81,18 +81,20 @@ class ExistClientTest {
   }
 
   @Test
-  void getResourceParsesContentAndMime() throws Exception {
-    ExistClient.ResourceContent rc = client.getResource("/db/x.xq");
-    assertTrue(rc.content().contains("42"));
+  void readResourceReturnsContentMimeAndBinaryFlag() throws Exception {
+    ExistClient.ResourceBytes rc = client.readResource("/db/x.xq");
+    assertTrue(new String(rc.bytes(), StandardCharsets.UTF_8).contains("42"));
     assertEquals("application/xquery", rc.mimeType());
-    assertFalse(rc.binary());
+    assertFalse(rc.binary()); // XQuery is textual
   }
 
   @Test
-  void putResourceSendsPathAndContent() throws Exception {
+  void putResourceSendsRawBodyWithPathAndMimeInQuery() throws Exception {
     client.putResource("/db/x.xq", "xquery version \"3.1\"; 99", "application/xquery");
-    assertTrue(server.lastPutBody().contains("\"path\""));
-    assertTrue(server.lastPutBody().contains("99"));
+    assertTrue(server.lastPutBody().contains("99")); // the body is the raw content now
+    String q = server.lastResourcePutQuery();
+    assertTrue(q.contains("path=")); // path/mime ride the query
+    assertTrue(q.contains("mime=application%2Fxquery"));
   }
 
   @Test
@@ -231,7 +233,7 @@ class ExistClientTest {
   @Test
   void nonSuccessStatusRaisesExistHttpException() {
     ExistHttpException ex = org.junit.jupiter.api.Assertions.assertThrows(
-        ExistHttpException.class, () -> client.getResource("/db/missing.xq"));
+        ExistHttpException.class, () -> client.readResource("/db/missing.xq"));
     assertEquals(404, ex.getStatusCode());
     assertTrue(ex.getResponseBody().contains("not found"));
   }

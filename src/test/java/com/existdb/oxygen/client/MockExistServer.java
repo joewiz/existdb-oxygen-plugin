@@ -45,6 +45,7 @@ public final class MockExistServer implements AutoCloseable {
   private volatile String lastLangBody;
   private volatile String lastPackageBody;
   private volatile String lastSearchQuery;
+  private volatile String lastResourcePutQuery;
 
   public MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -71,11 +72,12 @@ public final class MockExistServer implements AutoCloseable {
       if (query != null && query.contains("missing")) {
         respond(ex, 404, "{\"error\":\"not found\"}");
       } else if ("GET".equals(ex.getRequestMethod())) {
-        respond(ex, 200, "{\"path\":\"/db/x.xq\",\"binary\":false,"
-            + "\"content\":\"xquery version \\\"3.1\\\"; 42\",\"mime-type\":\"application/xquery\"}");
+        // Consolidated content endpoint (existdb-openapi#59): raw body, Content-Type = stored mime.
+        respondAs(ex, 200, "xquery version \"3.1\"; 42", "application/xquery");
       } else if ("PUT".equals(ex.getRequestMethod())) {
-        lastPutBody = readBody(ex);
-        respond(ex, 201, "{\"stored\":\"/db/x.xq\"}");
+        lastResourcePutQuery = query; // path/mime now ride the query, not the body
+        lastPutBody = readBody(ex);   // the body is the raw content
+        respond(ex, 201, "{\"path\":\"/db/x.xq\"}");
       } else if ("DELETE".equals(ex.getRequestMethod())) {
         respond(ex, 200, "{\"deleted\":true}");
       } else {
@@ -250,6 +252,10 @@ public final class MockExistServer implements AutoCloseable {
     return lastPutBody;
   }
 
+  String lastResourcePutQuery() {
+    return lastResourcePutQuery;
+  }
+
   String lastSearchQuery() {
     return lastSearchQuery;
   }
@@ -284,8 +290,14 @@ public final class MockExistServer implements AutoCloseable {
   }
 
   private static void respond(HttpExchange ex, int code, String body) throws IOException {
+    respondAs(ex, code, body, "application/json");
+  }
+
+  /** Responds with an explicit {@code Content-Type} (e.g. raw resource content, not JSON). */
+  private static void respondAs(HttpExchange ex, int code, String body, String contentType)
+      throws IOException {
     byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-    ex.getResponseHeaders().add("Content-Type", "application/json");
+    ex.getResponseHeaders().add("Content-Type", contentType);
     ex.sendResponseHeaders(code, bytes.length);
     try (OutputStream os = ex.getResponseBody()) {
       os.write(bytes);

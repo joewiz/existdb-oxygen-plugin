@@ -181,32 +181,18 @@ public final class ExistClient {
   // Resources
   // ---------------------------------------------------------------------------
 
-  /** A fetched resource's content and metadata. */
-  public record ResourceContent(String content, boolean binary, String mimeType) {
-  }
-
-  /** GET /api/db/resource?path=... */
-  public ResourceContent getResource(String dbPath) throws IOException, InterruptedException {
-    HttpResponse<String> r = send(request("/db/resource?path=" + enc(dbPath)).GET().build());
-    JSONObject o = new JSONObject(r.body());
-    return new ResourceContent(
-        o.optString("content", ""),
-        o.optBoolean("binary", false),
-        o.optString("mime-type", null));
-  }
-
-  /** A resource's raw bytes plus the server-declared MIME type (from the streaming endpoint). */
+  /** A resource's raw bytes plus the server-declared MIME type. */
   public record RawResource(byte[] bytes, String mimeType) {
   }
 
   /**
-   * GET /api/db/resource/{path} — fetches the resource's <em>raw bytes</em> (path-in-URL streaming
-   * endpoint). Correct for binary resources (images, PDFs, fonts) where the JSON envelope's text
-   * {@code content} is lossy. Throws {@link ExistHttpException} on non-2xx (404 for a missing
-   * resource).
+   * GET /api/db/resource?path=… — fetches the resource's raw content. This is the single,
+   * binary-safe content endpoint (existdb-openapi#59): the body is the stored bytes with
+   * {@code Content-Type} = the stored mime; binary streams as-is, XML/text is serialized from the
+   * node tree. Throws {@link ExistHttpException} on non-2xx (404 for a missing resource).
    */
   public RawResource getResourceBytes(String dbPath) throws IOException, InterruptedException {
-    HttpRequest req = request("/db/resource/" + encPath(dbPath)).GET().build();
+    HttpRequest req = request("/db/resource?path=" + enc(dbPath)).GET().build();
     HttpResponse<byte[]> resp = sendBytes(req);
     int code = resp.statusCode();
     if (code < 200 || code >= 300) {
@@ -344,29 +330,27 @@ public final class ExistClient {
         .build());
   }
 
-  /** PUT /api/db/resource — stores (creates or updates) a resource. Throws on non-2xx. */
+  /**
+   * PUT /api/db/resource?path=[&mime=] — stores (creates or updates) a resource from a text body
+   * (UTF-8). Delegates to {@link #putResourceBytes}. Throws on non-2xx.
+   */
   public void putResource(String dbPath, String content, String mimeType)
       throws IOException, InterruptedException {
-    JSONObject body = new JSONObject();
-    body.put("path", dbPath);
-    body.put("content", content);
-    if (mimeType != null && !mimeType.isEmpty()) {
-      body.put("mime-type", mimeType);
-    }
-    send(request("/db/resource")
-        .header("Content-Type", "application/json")
-        .PUT(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
-        .build());
+    putResourceBytes(dbPath, content.getBytes(StandardCharsets.UTF_8), mimeType);
   }
 
   /**
-   * PUT /api/db/resource/{path} — stores a resource's <em>raw bytes</em> (path-in-URL streaming
-   * endpoint). Binary-safe, so use it for genuinely-binary resources (images, PDFs, fonts) that the
-   * JSON {@link #putResource} would corrupt by round-tripping through text. Throws on non-2xx.
+   * PUT /api/db/resource?path=[&mime=] — stores a resource from a raw byte body. The single,
+   * binary-safe write endpoint (existdb-openapi#59): the mime is sent via {@code &mime=} (the server
+   * also infers it from the name). Throws on non-2xx.
    */
   public void putResourceBytes(String dbPath, byte[] bytes, String mimeType)
       throws IOException, InterruptedException {
-    send(request("/db/resource/" + encPath(dbPath))
+    String path = "/db/resource?path=" + enc(dbPath);
+    if (mimeType != null && !mimeType.isEmpty()) {
+      path += "&mime=" + enc(mimeType);
+    }
+    send(request(path)
         .header("Content-Type", mimeType != null && !mimeType.isEmpty()
             ? mimeType : "application/octet-stream")
         .PUT(HttpRequest.BodyPublishers.ofByteArray(bytes))
@@ -378,19 +362,14 @@ public final class ExistClient {
   }
 
   /**
-   * Reads a resource's bytes correctly for round-tripping: textual types (XQuery, XML, JSON,
-   * {@code text/*}) from the JSON envelope's UTF-8 content, and genuinely-binary types from the raw
-   * streaming endpoint. This avoids both lossy text round-tripping of binaries and the streaming
-   * endpoint's execution of XQuery modules.
+   * Reads a resource via the single binary-safe content endpoint. The text/binary split is derived
+   * from the mime type (the response's {@code Content-Type}, falling back to the name): textual
+   * types (XQuery, XML, JSON, {@code text/*}) are flagged non-binary, everything else binary.
    */
   public ResourceBytes readResource(String dbPath) throws IOException, InterruptedException {
-    ResourceContent rc = getResource(dbPath);
-    String mime = rc.mimeType() != null ? rc.mimeType() : MimeTypes.byName(dbPath);
-    if (rc.binary() && !MimeTypes.isTextual(mime)) {
-      RawResource raw = getResourceBytes(dbPath);
-      return new ResourceBytes(raw.bytes(), raw.mimeType() != null ? raw.mimeType() : mime, true);
-    }
-    return new ResourceBytes(rc.content().getBytes(StandardCharsets.UTF_8), mime, false);
+    RawResource raw = getResourceBytes(dbPath);
+    String mime = raw.mimeType() != null ? raw.mimeType() : MimeTypes.byName(dbPath);
+    return new ResourceBytes(raw.bytes(), mime, !MimeTypes.isTextual(mime));
   }
 
   // ---------------------------------------------------------------------------
@@ -1080,19 +1059,6 @@ public final class ExistClient {
 
   private static String enc(String s) {
     return URLEncoder.encode(s, StandardCharsets.UTF_8);
-  }
-
-  /** Encodes a DB path for a path-in-URL endpoint: per-segment, preserving slashes (space → %20). */
-  private static String encPath(String dbPath) {
-    String path = dbPath.startsWith("/") ? dbPath.substring(1) : dbPath;
-    StringBuilder out = new StringBuilder();
-    for (String segment : path.split("/")) {
-      if (out.length() > 0) {
-        out.append('/');
-      }
-      out.append(enc(segment).replace("+", "%20"));
-    }
-    return out.toString();
   }
 
   private HttpResponse<byte[]> sendBytes(HttpRequest req) throws IOException, InterruptedException {

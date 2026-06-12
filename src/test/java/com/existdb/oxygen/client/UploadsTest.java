@@ -66,7 +66,8 @@ class UploadsTest {
     Files.writeString(file, "<doc/>");
     int count = Uploads.uploadRecursive(client, "/db/target", file.toFile(), true);
     assertEquals(1, count);
-    assertTrue(server.lastPutBody().contains("/db/target/data.xml"));
+    assertTrue(server.lastResourcePutQuery().contains("data.xml")); // path rides the query now
+    assertTrue(server.lastPutBody().contains("<doc/>"));             // body is the raw content
   }
 
   @Test

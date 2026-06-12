@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.existdb.oxygen.model.ConnectionProfile;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 
@@ -52,6 +53,10 @@ import org.testcontainers.utility.DockerImageName;
 @SuppressWarnings("PMD.ClassNamingConventions")
 class ExistClientIT {
 
+  // NOTE: the resource round-trip below exercises the consolidated content endpoint
+  // (existdb-openapi#59 — raw GET/PUT /api/db/resource?path=). The published beta3 image still
+  // serves the old JSON-envelope/path-in-URL contract, so against it the resource assertions fail;
+  // override with -Dexistdb.docker.image=<an image carrying #59> until a published image ships it.
   private static final String IMAGE =
       System.getProperty("existdb.docker.image", "existdb/existdb:7.0.0-beta3");
   private static final String APP_PATH = "/exist/apps/existdb-openapi";
@@ -95,7 +100,8 @@ class ExistClientIT {
     String path = "/db/oxygen-plugin-it.xq";
     client.putResource(path, "xquery version \"3.1\";\n(: IT marker :) 1 + 1", "application/xquery");
     try {
-      assertTrue(client.getResource(path).content().contains("IT marker"));
+      assertTrue(new String(client.readResource(path).bytes(), StandardCharsets.UTF_8)
+          .contains("IT marker"));
       assertTrue(client.listChildren("/db").stream()
           .anyMatch(e -> !e.collection() && "oxygen-plugin-it.xq".equals(e.name())));
 
