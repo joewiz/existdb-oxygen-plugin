@@ -51,6 +51,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -486,11 +487,55 @@ public final class SearchDialog extends JDialog {
         + "return $h";
   }
 
-  /** A representative eXist full-text query for a keyword/field search (approximates /api/search). */
+  /** A representative eXist full-text query for a keyword/field search, with any active facet
+   *  drill-down folded in (approximates /api/search — result granularity, scoring, KWIC differ). */
   private String keywordXQuery(ExistClient.SearchFieldInfo field, String query) {
     String lucene = field == null ? xqString(query) : field.field() + ":(" + xqString(query) + ")";
-    return "(: approximates /api/search — facet filters, scoring and KWIC differ :)\n"
-        + "collection('" + FIELD_SCOPE + "')//*[ft:query(., '" + lucene + "')]";
+    return "(: approximates /api/search; result granularity, scoring and KWIC differ :)\n"
+        + "collection('" + FIELD_SCOPE + "')//*[ft:query(., '" + lucene + "'"
+        + facetDrillDown() + ")]";
+  }
+
+  /**
+   * The eXist facet drill-down option for the active filters — e.g.
+   * {@code , map { 'facets': map { 'site-app': 'docs', 'site-section': ('guide', 'ref') } }} — or an
+   * empty string when none are active. Same-dimension filters become a value sequence (OR).
+   */
+  private String facetDrillDown() {
+    if (activeFacetFilters.isEmpty()) {
+      return "";
+    }
+    Map<String, List<String>> byDimension = new LinkedHashMap<>();
+    for (String filter : activeFacetFilters) {
+      int colon = filter.indexOf(':');
+      if (colon >= 0) {
+        byDimension.computeIfAbsent(filter.substring(0, colon), k -> new ArrayList<>())
+            .add(filter.substring(colon + 1));
+      }
+    }
+    StringBuilder map = new StringBuilder();
+    for (Map.Entry<String, List<String>> entry : byDimension.entrySet()) {
+      if (map.length() > 0) {
+        map.append(", ");
+      }
+      map.append("'").append(xqString(entry.getKey())).append("': ").append(xqValues(entry.getValue()));
+    }
+    return ", map { 'facets': map { " + map + " } }";
+  }
+
+  /** A single quoted value, or a parenthesized sequence for multiple values (OR within a dimension). */
+  private static String xqValues(List<String> values) {
+    if (values.size() == 1) {
+      return "'" + xqString(values.get(0)) + "'";
+    }
+    StringBuilder seq = new StringBuilder("(");
+    for (int i = 0; i < values.size(); i++) {
+      if (i > 0) {
+        seq.append(", ");
+      }
+      seq.append("'").append(xqString(values.get(i))).append("'");
+    }
+    return seq.append(")").toString();
   }
 
   /** Escapes a value for an XQuery single-quoted string literal (doubles each apostrophe). */
