@@ -488,12 +488,22 @@ public final class SearchDialog extends JDialog {
   }
 
   /** A representative eXist full-text query for a keyword/field search, with any active facet
-   *  drill-down folded in (approximates /api/search — result granularity, scoring, KWIC differ). */
+   *  drill-down folded in (approximates /api/search — scoring and KWIC differ). Selects document
+   *  roots, so the hit count matches the API; a comment shows how to highlight the matches. */
   private String keywordXQuery(ExistClient.SearchFieldInfo field, String query) {
     String lucene = field == null ? xqString(query) : field.field() + ":(" + xqString(query) + ")";
-    return "(: approximates /api/search; result granularity, scoring and KWIC differ :)\n"
-        + "collection('" + FIELD_SCOPE + "')//*[ft:query(., '" + lucene + "'"
-        + facetDrillDown() + ")]";
+    String facets = facetDrillDown();
+    String highlightField = field == null ? "site-content" : field.field();
+    // The site-content field matches (not inline text), so highlighting needs
+    // ft:highlight-field-matches, not util:expand — and facet drill-down disables eXist's
+    // match-tracking, so highlighting only works on the non-faceted query.
+    String note = facets.isEmpty()
+        ? "(: approximates /api/search (scoring and KWIC differ). Append\n"
+            + "   ! ft:highlight-field-matches(., '" + highlightField + "')  to wrap matches in "
+            + "<exist:match>. :)\n"
+        : "(: approximates /api/search (scoring and KWIC differ). Facet drill-down disables eXist's\n"
+            + "   match-tracking, so matches can't be highlighted from the faceted query. :)\n";
+    return note + "collection('" + FIELD_SCOPE + "')/*[ft:query(., '" + lucene + "'" + facets + ")]";
   }
 
   /**
