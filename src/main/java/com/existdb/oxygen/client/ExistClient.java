@@ -761,7 +761,31 @@ public final class ExistClient {
     }
     HttpResponse<String> r = send(request(path.toString()).GET().build());
     JSONObject o = new JSONObject(r.body());
-    JSONArray arr = o.optJSONArray("results");
+    List<SearchHit> hits = parseHits(o.optJSONArray("results"));
+    return new SearchResults(o.optInt("total", hits.size()), hits, parseFacets(o.optJSONObject("facets")));
+  }
+
+  /**
+   * GET /api/search?vector=<field>&similar=<text>&k=<n>&scope=… — semantic "find similar" (kNN):
+   * the server embeds {@code similar} with the field's model and returns the top-{@code k} documents
+   * by similarity score (existdb-openapi#60). The count is {@code results.length} (the response's
+   * {@code total} is unreliable on older beds), and no facets are returned. A vector field the
+   * connection's user may not see returns 403 (surfaced as an {@link ExistHttpException}).
+   */
+  public SearchResults searchVector(String field, String similar, int k, String scope)
+      throws IOException, InterruptedException {
+    StringBuilder path = new StringBuilder("/search?vector=").append(enc(field))
+        .append("&similar=").append(enc(similar)).append("&k=").append(k);
+    if (scope != null && !scope.isBlank()) {
+      path.append("&scope=").append(enc(scope));
+    }
+    HttpResponse<String> r = send(request(path.toString()).GET().build());
+    List<SearchHit> hits = parseHits(new JSONObject(r.body()).optJSONArray("results"));
+    return new SearchResults(hits.size(), hits, Map.of());
+  }
+
+  /** Parses a search response's {@code results} array ({@code [{app,title,snippet,path}…]}). */
+  private static List<SearchHit> parseHits(JSONArray arr) {
     List<SearchHit> hits = new ArrayList<>();
     if (arr != null) {
       for (int i = 0; i < arr.length(); i++) {
@@ -770,7 +794,7 @@ public final class ExistClient {
             h.optString("snippet", ""), h.optString("path", "")));
       }
     }
-    return new SearchResults(o.optInt("total", hits.size()), hits, parseFacets(o.optJSONObject("facets")));
+    return hits;
   }
 
   /** Parses the {@code facets} object ({@code {dimension: {value: count}}}) into a nested map. */

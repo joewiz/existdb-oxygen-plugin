@@ -219,6 +219,26 @@ class ExistClientTest {
   }
 
   @Test
+  void searchVectorSendsParamsAndReturnsRankedHits() throws Exception {
+    ExistClient.SearchResults r = client.searchVector("site-embedding", "speed", 20, "/db");
+    assertEquals(2, r.hits().size()); // count comes from results[], not the response's total
+    assertEquals("Tuning", r.hits().get(0).title()); // already ranked top-k by the server
+    assertTrue(r.facets().isEmpty()); // similarity search returns no facets
+    String q = server.lastSearchQuery();
+    assertTrue(q.contains("vector=site-embedding"));
+    assertTrue(q.contains("similar=speed"));
+    assertTrue(q.contains("k=20"));
+    assertTrue(q.contains("scope=%2Fdb"));
+  }
+
+  @Test
+  void searchVectorForbiddenFieldRaises403() {
+    ExistHttpException ex = assertThrows(ExistHttpException.class,
+        () -> client.searchVector("secret", "speed", 20, "/db"));
+    assertEquals(403, ex.getStatusCode());
+  }
+
+  @Test
   void searchFieldsParsesKindsAndStringOrArrayAnalyzer() throws Exception {
     ExistClient.SearchFields fields = client.searchFields("/db");
     assertEquals("admin", fields.user());
