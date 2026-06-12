@@ -39,6 +39,8 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -106,6 +108,8 @@ public final class SearchDialog extends JDialog {
   private final JLabel intro = new JLabel();
   /** The remembered field name to re-select once discovery completes; applied once, then cleared. */
   private transient String pendingFieldName;
+  /** The embedding model from the last vector search response, for the "Copy as XQuery" output. */
+  private transient String lastVectorModel = "";
   /** Active facet filters ("dimension:value") narrowing the current search; drives the &facet params. */
   private final transient List<String> activeFacetFilters = new ArrayList<>();
   /** The facet drill-down panel (one group of checkboxes per dimension), right of the results. */
@@ -267,6 +271,21 @@ public final class SearchDialog extends JDialog {
     JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
     buttons.add(cancel);
     buttons.add(open);
+    // "Copy as URL/XQuery" for the current query — left of the status, out of the way of Open.
+    JPanel copyButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+    copyButtons.add(OxygenUIComponentsFactory.createButton(new AbstractAction("Copy as URL") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        copyAsUrl();
+      }
+    }));
+    copyButtons.add(OxygenUIComponentsFactory.createButton(new AbstractAction("Copy as XQuery") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        copyAsXQuery();
+      }
+    }));
+    south.add(copyButtons, BorderLayout.WEST);
     // Status goes in CENTER, not WEST: a WEST label takes its full preferred width, so a long error
     // string (e.g. a 500's raw JSON body) overflows and overlaps the buttons. CENTER gets only the
     // space left after the buttons and clips the text instead of colliding with them.
@@ -371,6 +390,9 @@ public final class SearchDialog extends JDialog {
       protected void done() {
         try {
           ExistClient.SearchResults results = get();
+          if (vector) {
+            lastVectorModel = results.model(); // for the "Copy as XQuery" vector output
+          }
           results.hits().forEach(model::addElement);
           status.setText(resultStatus(vector, results.hits().size(), results.total()));
           rebuildFacetPanel(results.facets());
@@ -420,6 +442,66 @@ public final class SearchDialog extends JDialog {
           + (field != null ? field.field() : "selected") + "\" field on this server.";
     }
     return "Search failed: " + cause.getMessage();
+  }
+
+  /** Copies the exact {@code /api/search} URL for the current query to the clipboard. */
+  private void copyAsUrl() {
+    ExistClient client = ExistContext.clientById(selectedServerId());
+    if (client == null) {
+      workspace.showInformationMessage("Select a connected server first.");
+      return;
+    }
+    String query = queryField.getText().trim();
+    ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
+    String url;
+    if (field != null && "vector".equals(field.kind())) {
+      url = client.searchVectorUrl(field.field(), query, VECTOR_K, FIELD_SCOPE);
+    } else if (field == null) {
+      url = client.searchUrl(query, null, null, List.copyOf(activeFacetFilters), LIMIT);
+    } else {
+      url = client.searchUrl(query, field.field(), FIELD_SCOPE, List.copyOf(activeFacetFilters), LIMIT);
+    }
+    toClipboard(url, "Copied search URL to the clipboard.");
+  }
+
+  /** Copies an XQuery for the current query — exact for vectors, a representative query for keyword. */
+  private void copyAsXQuery() {
+    String query = queryField.getText().trim();
+    ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
+    String xquery = field != null && "vector".equals(field.kind())
+        ? vectorXQuery(field.field(), query)
+        : keywordXQuery(field, query);
+    toClipboard(xquery, "Copied XQuery to the clipboard.");
+  }
+
+  /** The eXist vector pipeline behind a "Similar to…" search (model from the last vector response). */
+  private String vectorXQuery(String field, String text) {
+    String model = lastVectorModel == null || lastVectorModel.isBlank()
+        ? "MODEL — run a Similar-to search first to resolve the model" : lastVectorModel;
+    return "(: vector \"Similar to…\" search :)\n"
+        + "let $hits := collection('" + FIELD_SCOPE + "')/ft:query-field-vector('" + field
+        + "', vector:embed('" + xqString(text) + "', '" + xqString(model) + "'), " + VECTOR_K + ")\n"
+        + "for $h in $hits\n"
+        + "order by ft:score($h) descending\n"
+        + "return $h";
+  }
+
+  /** A representative eXist full-text query for a keyword/field search (approximates /api/search). */
+  private String keywordXQuery(ExistClient.SearchFieldInfo field, String query) {
+    String lucene = field == null ? xqString(query) : field.field() + ":(" + xqString(query) + ")";
+    return "(: approximates /api/search — facet filters, scoring and KWIC differ :)\n"
+        + "collection('" + FIELD_SCOPE + "')//*[ft:query(., '" + lucene + "')]";
+  }
+
+  /** Escapes a value for an XQuery single-quoted string literal (doubles each apostrophe). */
+  private static String xqString(String s) {
+    return s == null ? "" : s.replace("'", "''");
+  }
+
+  private void toClipboard(String text, String confirmation) {
+    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
+    status.setText(confirmation);
+    status.setToolTipText(text); // the full copied text on hover
   }
 
   /**
