@@ -488,28 +488,53 @@ public final class SearchDialog extends JDialog {
   }
 
   /** A representative eXist full-text query for a keyword/field search, with any active facet
-   *  drill-down folded in (approximates /api/search). Selects document roots, so the hit count
-   *  matches the API, and ranks them by ft:score so the order matches too; a comment shows how to
-   *  highlight the matches. */
+   *  drill-down folded in (approximates /api/search). Uses field-qualified queries (so the hit count
+   *  matches the API's named-field search rather than a generic full-text scan) and ranks by ft:score
+   *  so the order matches too; a comment shows how to highlight the matches. */
   private String keywordXQuery(ExistClient.SearchFieldInfo field, String query) {
-    String lucene = field == null ? xqString(query) : field.field() + ":(" + xqString(query) + ")";
+    String lucene = field == null
+        ? allFieldsLucene(query)
+        : field.field() + ":(" + xqString(query) + ")";
     String facets = facetDrillDown();
-    String highlightField = field == null ? "site-content" : field.field();
-    // Rank by ft:score descending so the order matches /api/search (a bare path returns document
-    // order, not relevance). The site-content field matches (not inline text), so highlighting needs
-    // ft:highlight-field-matches, not util:expand — and facet drill-down disables eXist's
-    // match-tracking, so highlighting only works on the non-faceted query.
-    String note = facets.isEmpty()
-        ? "(: approximates /api/search, ranked by relevance. Append\n"
-            + "   ! ft:highlight-field-matches(., '" + highlightField + "')  to the return clause to "
-            + "wrap matches in <exist:match>. :)\n"
-        : "(: approximates /api/search, ranked by relevance. Facet drill-down disables eXist's\n"
-            + "   match-tracking, so matches can't be highlighted from the faceted query. :)\n";
+    // Field-qualified queries (field:term) self-restrict to documents where that field is indexed, so
+    // the count matches /api/search; a generic ft:query(., 'term') would instead match every default
+    // full-text index across /db. {@code //*} (not {@code /*}) reaches fields indexed on non-root
+    // elements too. Rank by ft:score descending so the order matches the API. Facet drill-down
+    // disables eXist's match-tracking, so highlighting only works on the non-faceted query.
+    String note;
+    if (!facets.isEmpty()) {
+      note = "(: approximates /api/search, ranked by relevance. Facet drill-down disables eXist's\n"
+          + "   match-tracking, so matches can't be highlighted from the faceted query. :)\n";
+    } else if (field != null) {
+      note = "(: approximates /api/search, ranked by relevance. Append\n"
+          + "   ! ft:highlight-field-matches(., '" + field.field() + "')  to the return clause to "
+          + "wrap matches in <exist:match>. :)\n";
+    } else {
+      note = "(: approximates /api/search, ranked by relevance (searches all indexed text fields;\n"
+          + "   highlight per field with ft:highlight-field-matches(., '<field>')). :)\n";
+    }
     return note
-        + "for $hit in collection('" + FIELD_SCOPE + "')/*[ft:query(., '" + lucene + "'" + facets
+        + "for $hit in collection('" + FIELD_SCOPE + "')//*[ft:query(., '" + lucene + "'" + facets
         + ")]\n"
         + "order by ft:score($hit) descending\n"
         + "return $hit";
+  }
+
+  /** A Lucene query that ORs the term across every discovered text field (kind {@code field}),
+   *  reproducing the API's "all fields" search; falls back to a bare query if no fields are known. */
+  private String allFieldsLucene(String query) {
+    String term = xqString(query);
+    StringBuilder lucene = new StringBuilder();
+    for (int i = 0; i < fieldCombo.getItemCount(); i++) {
+      ExistClient.SearchFieldInfo f = fieldCombo.getItemAt(i);
+      if (f != null && "field".equals(f.kind())) {
+        if (lucene.length() > 0) {
+          lucene.append(" OR ");
+        }
+        lucene.append(f.field()).append(":(").append(term).append(")");
+      }
+    }
+    return lucene.length() == 0 ? term : lucene.toString();
   }
 
   /**
