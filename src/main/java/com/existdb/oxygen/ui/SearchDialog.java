@@ -45,6 +45,7 @@ import java.awt.event.ComponentEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -79,6 +80,8 @@ import javax.swing.SwingWorker;
 public final class SearchDialog extends JDialog {
 
   private static final int LIMIT = 50;
+  /** Top-k for a vector "find similar" search (existdb-openapi#60 clamps k to 1–100). */
+  private static final int VECTOR_K = 20;
   /** The scope the field picker discovers searchable fields under (the whole database). */
   private static final String FIELD_SCOPE = "/db";
   // Persisted across invocations so the dialog reopens with the last server/field/query (#2).
@@ -209,8 +212,9 @@ public final class SearchDialog extends JDialog {
 
     // "Search in" picker, populated from /api/search/fields for the selected server (FLS-filtered).
     fieldCombo.setRenderer(fieldRenderer());
-    fieldCombo.setToolTipText("The searchable fields/facets this server exposes (only those you may "
-        + "see). Choose one to search just that field, or \"All fields\" for the default search.");
+    fieldCombo.setToolTipText("The fields/facets/vector indexes this server exposes (only those you "
+        + "may see). Choose a field for keyword search, a vector index for \"find similar\" "
+        + "(semantic) search, or \"All fields\" for the default keyword search.");
     fieldHint.setForeground(Color.GRAY);
     JPanel fieldRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
     fieldRow.add(new JLabel("Search in:"));
@@ -344,20 +348,23 @@ public final class SearchDialog extends JDialog {
     if (query.isEmpty()) {
       return;
     }
-    // The selected field (null = "All fields"); a field restricts the query to it, scoped like the
-    // discovery call. "All fields" keeps the plain sitewide search unchanged.
+    // The selected field (null = "All fields"). A "vector" kind switches to semantic "find similar"
+    // (kNN) search; a "field" kind restricts the keyword query to it; "All fields" is the plain
+    // sitewide keyword search.
     ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
+    boolean vector = field != null && "vector".equals(field.kind());
+    if (vector) {
+      activeFacetFilters.clear(); // similarity search returns no facets
+    }
     rememberSelections(); // record what was actually searched, not just on close
-    status.setText("Searching…");
+    status.setText(vector ? "Finding similar…" : "Searching…");
     status.setToolTipText(null);
     model.clear();
-    List<String> facetFilters = List.copyOf(activeFacetFilters);
+    List<String> facetFilters = vector ? List.of() : List.copyOf(activeFacetFilters);
     new SwingWorker<ExistClient.SearchResults, Void>() {
       @Override
       protected ExistClient.SearchResults doInBackground() throws Exception {
-        return field == null
-            ? client.search(query, null, null, facetFilters, LIMIT)
-            : client.search(query, field.field(), FIELD_SCOPE, facetFilters, LIMIT);
+        return runQuery(client, query, field, vector, facetFilters);
       }
 
       @Override
@@ -365,10 +372,7 @@ public final class SearchDialog extends JDialog {
         try {
           ExistClient.SearchResults results = get();
           results.hits().forEach(model::addElement);
-          int shown = results.hits().size();
-          status.setText(results.total() > shown
-              ? "Showing " + shown + " of " + results.total() + " matches"
-              : shown + " match" + (shown == 1 ? "" : "es"));
+          status.setText(resultStatus(vector, results.hits().size(), results.total()));
           rebuildFacetPanel(results.facets());
           if (!model.isEmpty()) {
             // Move focus to the results and select the first hit, so Up/Down navigate immediately
@@ -379,15 +383,43 @@ public final class SearchDialog extends JDialog {
           }
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
-          String message = cause instanceof ExistHttpException he && he.getStatusCode() == 403
-              ? "You don't have permission to search the \""
-                  + (field != null ? field.field() : "selected") + "\" field on this server."
-              : "Search failed: " + cause.getMessage();
+          String message = failureMessage(cause, field);
           status.setText(message);
           status.setToolTipText(message); // CENTER clips a long error; keep the full text on hover.
         }
       }
     }.execute();
+  }
+
+  /** Runs the right query for the selection: vector similarity, field-scoped, or sitewide keyword. */
+  private ExistClient.SearchResults runQuery(ExistClient client, String query,
+      ExistClient.SearchFieldInfo field, boolean vector, List<String> facetFilters)
+      throws IOException, InterruptedException {
+    if (vector) {
+      return client.searchVector(field.field(), query, VECTOR_K, FIELD_SCOPE);
+    }
+    return field == null
+        ? client.search(query, null, null, facetFilters, LIMIT)
+        : client.search(query, field.field(), FIELD_SCOPE, facetFilters, LIMIT);
+  }
+
+  /** The status line for a completed search: a similarity count, a paged count, or a match count. */
+  private static String resultStatus(boolean vector, int shown, int total) {
+    if (vector) {
+      return shown + " similar " + (shown == 1 ? "document" : "documents");
+    }
+    return total > shown
+        ? "Showing " + shown + " of " + total + " matches"
+        : shown + " match" + (shown == 1 ? "" : "es");
+  }
+
+  /** A user-facing failure message; an FLS 403 on a chosen field gets a permission-specific note. */
+  private static String failureMessage(Throwable cause, ExistClient.SearchFieldInfo field) {
+    if (cause instanceof ExistHttpException he && he.getStatusCode() == 403) {
+      return "You don't have permission to search the \""
+          + (field != null ? field.field() : "selected") + "\" field on this server.";
+    }
+    return "Search failed: " + cause.getMessage();
   }
 
   /**

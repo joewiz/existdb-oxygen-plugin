@@ -180,18 +180,35 @@ public final class MockExistServer implements AutoCloseable {
 
     handle(prefix + "/search", ex -> {
       lastSearchQuery = ex.getRequestURI().getRawQuery();
-      if (String.valueOf(lastSearchQuery).contains("field=secret")) {
-        // Field-level security: a field the caller may not see is refused (existdb-openapi #55).
-        respond(ex, 403, "{\"error\":\"forbidden\",\"field\":\"secret\"}");
-        return;
+      String q = String.valueOf(lastSearchQuery);
+      if (q.contains("field=secret") || q.contains("vector=secret")) {
+        // Field-level security: a field/vector the caller may not see is refused.
+        respond(ex, 403, "{\"error\":\"forbidden\"}");
+      } else if (q.contains("vector=")) {
+        respond(ex, 200, searchVectorBody());
+      } else {
+        respond(ex, 200, searchKeywordBody());
       }
-      respond(ex, 200, "{\"total\":7,\"query\":\"index\",\"results\":["
-          + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
-          + "\"path\":\"/db/apps/doc/indexing.xml\"},"
-          + "{\"app\":\"doc\",\"title\":\"Tuning\",\"snippet\":\"range index\","
-          + "\"path\":\"/db/apps/doc/tuning.xml\"}],"
-          + "\"facets\":{\"site-app\":{\"docs\":5,\"blog\":2},\"site-section\":{\"guide\":4}}}");
     });
+  }
+
+  private static String searchKeywordBody() {
+    return "{\"total\":7,\"query\":\"index\",\"results\":["
+        + "{\"app\":\"doc\",\"title\":\"(untitled)\",\"snippet\":\"about indexes\","
+        + "\"path\":\"/db/apps/doc/indexing.xml\"},"
+        + "{\"app\":\"doc\",\"title\":\"Tuning\",\"snippet\":\"range index\","
+        + "\"path\":\"/db/apps/doc/tuning.xml\"}],"
+        + "\"facets\":{\"site-app\":{\"docs\":5,\"blog\":2},\"site-section\":{\"guide\":4}}}";
+  }
+
+  /** A vector ("Similar to…") response (existdb-openapi#60): top-k ranked, no facets, span snippets. */
+  private static String searchVectorBody() {
+    return "{\"query\":\"speed\",\"field\":\"site-embedding\",\"model\":\"all-MiniLM-L6-v2\","
+        + "\"k\":20,\"total\":2,\"max-score\":0.9,\"results\":["
+        + "{\"app\":\"doc\",\"title\":\"Tuning\",\"score\":0.9,\"path\":\"/db/apps/doc/tuning.xml\","
+        + "\"uri\":\"/db/apps/doc/tuning.xml\",\"snippet\":\"<span>performance tuning</span>\"},"
+        + "{\"app\":\"doc\",\"title\":\"Indexing\",\"score\":0.7,"
+        + "\"path\":\"/db/apps/doc/indexing.xml\",\"snippet\":\"<span>index config</span>\"}]}";
   }
 
   /**
