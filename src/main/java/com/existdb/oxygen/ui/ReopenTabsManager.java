@@ -46,10 +46,12 @@ import javax.swing.Timer;
  * machinery, so resources opened from the eXist-db pane would otherwise be lost. This manager fills
  * that gap for {@code exist://} editors, keyed per project.
  *
- * <p>It rides on Oxygen's <b>Open last edited files from project</b> setting
- * ({@code open.last.edited.files}): when that is off, Oxygen reopens nothing on startup and keeps tabs
- * as-is across project switches, and this manager does the same (it still <em>records</em> the open set
- * per project, so turning the setting back on restores it).</p>
+ * <p>It is gated by the plugin's own <b>Reopen eXist-db tabs on restart</b> option (on by default):
+ * when that is off, nothing is reopened on startup and tabs are kept as-is across project switches
+ * (the open set is still <em>recorded</em> per project, so turning the option back on restores it).
+ * This mirrors Oxygen's native <b>Open last edited files from project</b> setting, but is a separate
+ * toggle: Oxygen restricts plugin option access to a fixed {@code APIAccessibleOptionTags} whitelist,
+ * which excludes {@code open.last.edited.files}, so a plugin cannot read the native setting at all.</p>
  *
  * <p>Lifecycle: at startup the saved list for the current project is reopened once the workbench has
  * settled (debounced — each tab Oxygen restores pushes it later, so it fires only after Oxygen's own
@@ -63,8 +65,6 @@ public final class ReopenTabsManager {
 
   /** Debounce window: reopen fires this long after the last startup editor-restore event. */
   private static final int REOPEN_DELAY_MS = 1200;
-  /** Oxygen's global "Open last edited files from project" option (default on). */
-  private static final String OPEN_LAST_EDITED_FILES = "open.last.edited.files";
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
@@ -133,12 +133,23 @@ public final class ReopenTabsManager {
     projects.addProjectChangeListener(this::onProjectChanged);
   }
 
-  /** Reopens the current project's saved tabs on startup, unless Oxygen's reopen setting is off. */
+  /** Schedules the debounced startup reopen, unless the plugin's reopen option is off. */
   private void scheduleStartupReopen() {
     if (!reopenEnabled()) {
       reopened = true; // honor the user's choice: nothing is reopened
       return;
     }
+    // The current project URL is not yet available at applicationStarted, so the project key (and
+    // thus the saved-tab set) can only be resolved once the workbench has settled. Defer both to the
+    // debounced timer; each tab Oxygen restores pushes it later, so it fires after the restore burst.
+    reopenTimer = new Timer(REOPEN_DELAY_MS, e -> startupReopen());
+    reopenTimer.setRepeats(false);
+    reopenTimer.start();
+  }
+
+  /** Resolves the now-loaded project and reopens its saved tabs; runs once, when the timer fires. */
+  private void startupReopen() {
+    currentProjectKey = projectKey(workspace.getProjectManager().getCurrentProjectURL());
     List<String> toReopen = profileStore.openTabs(currentProjectKey);
     if (toReopen.isEmpty()) {
       // One-time upgrade migration: seed this project from the legacy single global list, then clear
@@ -150,20 +161,12 @@ public final class ReopenTabsManager {
         profileStore.setOpenTabs(new ArrayList<>());
       }
     }
-    if (toReopen.isEmpty()) {
-      reopened = true;
-    } else {
-      final List<String> snapshot = toReopen;
-      reopenTimer = new Timer(REOPEN_DELAY_MS, e -> reopen(snapshot));
-      reopenTimer.setRepeats(false);
-      reopenTimer.start();
-    }
+    reopen(toReopen);
   }
 
-  /** Whether Oxygen's "Open last edited files from project" is on (so we reopen/swap to match it). */
+  /** Whether the plugin's "Reopen eXist-db tabs on restart" option is on (so we reopen/swap). */
   private boolean reopenEnabled() {
-    return Boolean.parseBoolean(
-        workspace.getOptionsStorage().getOption(OPEN_LAST_EDITED_FILES, "true"));
+    return profileStore.reopenTabs();
   }
 
   /**

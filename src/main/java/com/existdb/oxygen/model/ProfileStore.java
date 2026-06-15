@@ -449,6 +449,21 @@ public final class ProfileStore {
   }
 
   /**
+   * Whether {@code exist://} server editors that were open at last shutdown are reopened on the next
+   * startup (and swapped per project on project switches). On by default. This is the plugin's own
+   * equivalent of Oxygen's "Open last edited files from project" — Oxygen restricts that native
+   * setting to a fixed list of API-accessible options, so a plugin cannot read it and must offer its
+   * own toggle.
+   */
+  public boolean reopenTabs() {
+    return Boolean.parseBoolean(options.get("existdb.reopenTabs", "true"));
+  }
+
+  public void setReopenTabs(boolean reopen) {
+    options.set("existdb.reopenTabs", Boolean.toString(reopen));
+  }
+
+  /**
    * The {@code exist://} collection locations expanded in the pane at last shutdown (the server node
    * is {@code …/db}), used to restore the tree's expansion state. Stored newline-separated.
    */
