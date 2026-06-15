@@ -22,10 +22,17 @@
 package com.existdb.oxygen.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import javax.swing.text.DefaultStyledDocument;
+import javax.swing.text.StyleConstants;
 
 import org.junit.jupiter.api.Test;
 
-/** Tests the serialization-method → highlighting-language mapping. */
+/** Tests the serialization-method → highlighting-language mapping and full-text match highlighting. */
 class ResultHighlighterTest {
 
   @Test
@@ -42,5 +49,28 @@ class ResultHighlighterTest {
         ResultHighlighter.languageFor("adaptive", "  <para>x</para>"));
     assertEquals(ResultHighlighter.Lang.XQUERY,
         ResultHighlighter.languageFor("adaptive", "map{ \"hello\": 1 }"));
+  }
+
+  @Test
+  void highlightMatchesStripsTagsAndPaintsTheMatch() throws Exception {
+    DefaultStyledDocument doc = new DefaultStyledDocument();
+    ResultHighlighter.apply(doc, "<a>foo <exist:match>bar</exist:match> baz</a>",
+        ResultHighlighter.Lang.XML, true);
+    String text = doc.getText(0, doc.getLength());
+    assertFalse(text.contains("exist:match")); // the match tags are hidden
+    assertTrue(text.contains("foo bar baz"));   // the wrapped text remains
+    // "bar" carries a background; the surrounding text does not.
+    int bar = text.indexOf("bar");
+    int foo = text.indexOf("foo");
+    assertNotNull(doc.getCharacterElement(bar).getAttributes().getAttribute(StyleConstants.Background));
+    assertNull(doc.getCharacterElement(foo).getAttributes().getAttribute(StyleConstants.Background));
+  }
+
+  @Test
+  void highlightDisabledKeepsTheRawMarkup() throws Exception {
+    DefaultStyledDocument doc = new DefaultStyledDocument();
+    ResultHighlighter.apply(doc, "<a><exist:match>bar</exist:match></a>",
+        ResultHighlighter.Lang.XML, false);
+    assertTrue(doc.getText(0, doc.getLength()).contains("exist:match")); // raw tags kept
   }
 }
