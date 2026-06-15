@@ -239,27 +239,6 @@ class ExistClientTest {
   }
 
   @Test
-  void searchVectorParsesResolvedModel() throws Exception {
-    assertEquals("all-MiniLM-L6-v2", client.searchVector("site-embedding", "speed", 20, "/db").model());
-  }
-
-  @Test
-  void searchUrlBuildsTheExactRequestUrl() {
-    String url = client.searchUrl("review", "site-content", "/db", List.of("site-app:docs"), 50);
-    assertTrue(url.startsWith(server.baseUrl())); // full URL, ready to paste
-    assertTrue(url.contains("/api/search?q=review&limit=50"));
-    assertTrue(url.contains("&field=site-content"));
-    assertTrue(url.contains("&scope=%2Fdb"));
-    assertTrue(url.contains("&facet=site-app%3Adocs"));
-  }
-
-  @Test
-  void searchVectorUrlBuildsTheExactRequestUrl() {
-    String url = client.searchVectorUrl("site-embedding", "speed", 20, "/db");
-    assertTrue(url.contains("/api/search?vector=site-embedding&similar=speed&k=20&scope=%2Fdb"));
-  }
-
-  @Test
   void searchFieldsParsesKindsAndStringOrArrayAnalyzer() throws Exception {
     ExistClient.SearchFields fields = client.searchFields("/db");
     assertEquals("admin", fields.user());

@@ -109,8 +109,9 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(
         new ProjectBuildCustomizer(pluginWorkspace, profileStore, buildConsole, BUILD_VIEW_ID));
 
-    // Reopen the exist:// server editors that were open at last shutdown (Oxygen restores file:
-    // tabs but not custom-protocol ones), and keep that list current as editors open/close.
+    // Keep the exist:// server editors associated with the active project — reopen them on startup
+    // and swap them in/out on project switch (Oxygen does this for file: tabs but not custom-protocol
+    // ones), riding on Oxygen's "Open last edited files from project" setting.
     reopenTabsManager = new ReopenTabsManager(pluginWorkspace, profileStore);
     reopenTabsManager.install();
 
