@@ -22,6 +22,7 @@
 package com.existdb.oxygen.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -103,6 +104,45 @@ class BuildConfigTest {
   void noBuildRootFound(@TempDir Path dir) throws Exception {
     File file = write(dir, "data.xml", "<x/>");
     assertTrue(BuildConfig.findNearest(file, dir.toFile()).isEmpty());
+  }
+
+  @Test
+  void autoBuildFlagsDefaultOff(@TempDir Path dir) throws Exception {
+    write(dir, ".existdb.json", "{ \"build\": { \"tool\": \"ant\" } }");
+    BuildConfig config = BuildConfig.findNearest(dir.toFile(), null).orElseThrow();
+    assertFalse(config.autoBuild());
+    assertFalse(config.autoInstall());
+  }
+
+  @Test
+  void readsOnSaveAndInstallFlags(@TempDir Path dir) throws Exception {
+    write(dir, ".existdb.json", """
+        { "build": { "tool": "ant", "onSave": true, "install": true } }
+        """);
+    BuildConfig config = BuildConfig.findNearest(dir.toFile(), null).orElseThrow();
+    assertTrue(config.autoBuild());
+    assertTrue(config.autoInstall());
+  }
+
+  @Test
+  void onSaveAppliesToMarkerDetectedBuild(@TempDir Path dir) throws Exception {
+    // build section carries onSave but no tool/command — the command auto-detects from the marker,
+    // and the flag still applies.
+    write(dir, ".existdb.json", "{ \"build\": { \"onSave\": true } }");
+    write(dir, "pom.xml", "<project/>");
+    BuildConfig config = BuildConfig.findNearest(dir.toFile(), null).orElseThrow();
+    assertEquals(BuildConfig.Tool.MAVEN, config.tool());
+    assertEquals("mvn package", config.command());
+    assertTrue(config.autoBuild());
+    assertFalse(config.autoInstall());
+  }
+
+  @Test
+  void markerOnlyBuildHasFlagsOff(@TempDir Path dir) throws Exception {
+    write(dir, "build.xml", "<project/>");
+    BuildConfig config = BuildConfig.findNearest(dir.toFile(), null).orElseThrow();
+    assertFalse(config.autoBuild());
+    assertFalse(config.autoInstall());
   }
 
   @Test

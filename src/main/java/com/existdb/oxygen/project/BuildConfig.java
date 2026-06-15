@@ -42,9 +42,11 @@ import java.util.stream.Stream;
  *
  * <p>The {@code build} section is a plugin extension to the {@code .existdb.json} convention (which
  * standardizes only {@code servers}/{@code sync}); shape:
- * {@code "build": { "tool": "ant|maven|npm|gulp|custom", "command": "ant xar", "artifact": "build/*.xar" }}.
- * All keys are optional — {@code command} defaults from {@code tool}, {@code artifact} defaults to
- * scanning for the newest {@code .xar}.</p>
+ * {@code "build": { "tool": "ant|maven|npm|gulp|custom", "command": "ant xar", "artifact": "build/*.xar",
+ * "onSave": true, "install": true }}. All keys are optional — {@code command} defaults from
+ * {@code tool}, {@code artifact} defaults to scanning for the newest {@code .xar}. {@code onSave}
+ * (default false) opts the package into auto-build when a file under it is saved; {@code install}
+ * (default false) also installs the built {@code .xar} after a successful auto-build.</p>
  */
 public final class BuildConfig {
 
@@ -55,12 +57,32 @@ public final class BuildConfig {
   private final Tool tool;
   private final String command;
   private final String artifactGlob;
+  private final boolean autoBuild;
+  private final boolean autoInstall;
 
-  private BuildConfig(File dir, Tool tool, String command, String artifactGlob) {
+  private BuildConfig(File dir, Tool tool, String command, String artifactGlob,
+      boolean autoBuild, boolean autoInstall) {
     this.dir = dir;
     this.tool = tool;
     this.command = command;
     this.artifactGlob = artifactGlob;
+    this.autoBuild = autoBuild;
+    this.autoInstall = autoInstall;
+  }
+
+  /** Whether this package opts into auto-build on save ({@code build.onSave}). */
+  public boolean autoBuild() {
+    return autoBuild;
+  }
+
+  /** Whether a successful auto-build also installs the {@code .xar} ({@code build.install}). */
+  public boolean autoInstall() {
+    return autoInstall;
+  }
+
+  /** A copy of this config with the auto-build/auto-install flags set. */
+  private BuildConfig withFlags(boolean newAutoBuild, boolean newAutoInstall) {
+    return new BuildConfig(dir, tool, command, artifactGlob, newAutoBuild, newAutoInstall);
   }
 
   /** The package/build root directory (the command's working directory). */
@@ -97,39 +119,41 @@ public final class BuildConfig {
     return Optional.empty();
   }
 
-  /** The build config rooted exactly at {@code dir}, or empty if it isn't a build root. */
+  /**
+   * The build config rooted exactly at {@code dir}, or empty if it isn't a build root. The
+   * command/tool/artifact come from an explicit {@code .existdb.json} build section if it specifies
+   * them, otherwise from a build marker; the {@code onSave}/{@code install} flags are read from the
+   * build section either way (so an auto-detected build can still opt into auto-build).
+   */
   static Optional<BuildConfig> at(File dir) {
-    BuildConfig explicit = fromDescriptor(dir);
-    if (explicit != null) {
-      return Optional.of(explicit);
+    JSONObject build = readBuildSection(dir);
+    BuildConfig base = fromBuildSection(dir, build);
+    if (base == null) {
+      base = detectFromMarker(dir);
     }
-    if (new File(dir, "build.xml").isFile()) {
-      return Optional.of(detected(dir, Tool.ANT));
+    if (base == null) {
+      return Optional.empty();
     }
-    if (new File(dir, "pom.xml").isFile()) {
-      return Optional.of(detected(dir, Tool.MAVEN));
-    }
-    if (new File(dir, "package.json").isFile()) {
-      return Optional.of(detected(dir, Tool.NPM));
-    }
-    if (new File(dir, "gulpfile.js").isFile()) {
-      return Optional.of(detected(dir, Tool.GULP));
-    }
-    return Optional.empty();
+    boolean autoBuild = build != null && build.optBoolean("onSave", false);
+    boolean autoInstall = build != null && build.optBoolean("install", false);
+    return Optional.of(base.withFlags(autoBuild, autoInstall));
   }
 
-  /** An explicit build config from {@code dir}'s {@code .existdb.json} build section, or {@code null}. */
-  private static BuildConfig fromDescriptor(File dir) {
+  /** The {@code build} object from {@code dir}'s {@code .existdb.json}, or {@code null} if none/malformed. */
+  private static JSONObject readBuildSection(File dir) {
     File descriptor = new File(dir, ExistdbProjectConfig.FILE_NAME);
     if (!descriptor.isFile()) {
       return null;
     }
-    JSONObject build;
     try {
-      build = new JSONObject(Files.readString(descriptor.toPath())).optJSONObject("build");
+      return new JSONObject(Files.readString(descriptor.toPath())).optJSONObject("build");
     } catch (IOException | RuntimeException e) {
       return null; // malformed descriptor — fall back to marker auto-detection
     }
+  }
+
+  /** An explicit build config from an already-read build section, or {@code null} if underspecified. */
+  private static BuildConfig fromBuildSection(File dir, JSONObject build) {
     if (build == null) {
       return null;
     }
@@ -142,11 +166,28 @@ public final class BuildConfig {
       command = defaultCommand(tool);
     }
     return new BuildConfig(dir, tool == null ? Tool.CUSTOM : tool, command,
-        emptyToNull(build.optString("artifact", null)));
+        emptyToNull(build.optString("artifact", null)), false, false);
+  }
+
+  /** A build config auto-detected from a build marker in {@code dir}, or {@code null} if none. */
+  private static BuildConfig detectFromMarker(File dir) {
+    if (new File(dir, "build.xml").isFile()) {
+      return detected(dir, Tool.ANT);
+    }
+    if (new File(dir, "pom.xml").isFile()) {
+      return detected(dir, Tool.MAVEN);
+    }
+    if (new File(dir, "package.json").isFile()) {
+      return detected(dir, Tool.NPM);
+    }
+    if (new File(dir, "gulpfile.js").isFile()) {
+      return detected(dir, Tool.GULP);
+    }
+    return null;
   }
 
   private static BuildConfig detected(File dir, Tool tool) {
-    return new BuildConfig(dir, tool, defaultCommand(tool), defaultArtifact(tool));
+    return new BuildConfig(dir, tool, defaultCommand(tool), defaultArtifact(tool), false, false);
   }
 
   private static Tool parseTool(String name) {

@@ -87,6 +87,16 @@
         "artifact": {
           "type": "string",
           "description": "Glob locating the produced .xar (relative to this file), e.g. \"build/*.xar\". Defaults to the most recently built .xar when absent."
+        },
+        "onSave": {
+          "type": "boolean",
+          "description": "Auto-build this package when a file under it is saved in Oxygen. Off by default. The first auto-build prompts once to trust the project.",
+          "default": false
+        },
+        "install": {
+          "type": "boolean",
+          "description": "When onSave is set, also install the built .xar (via xst) to the resolved server after a successful auto-build. Off by default.",
+          "default": false
         }
       },
       "additionalProperties": false

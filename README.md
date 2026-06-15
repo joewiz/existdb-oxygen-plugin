@@ -81,7 +81,9 @@ The descriptor is discovered by a **closest-ancestor walk**: from the selected f
   "build": {
     "tool": "ant",
     "command": "ant xar",
-    "artifact": "build/*.xar"
+    "artifact": "build/*.xar",
+    "onSave": true,
+    "install": true
   }
 }
 ```
@@ -92,8 +94,10 @@ The descriptor is discovered by a **closest-ancestor walk**: from the selected f
   - **`tool`** — `ant`, `maven`, `npm`, `gulp`, or `custom`.
   - **`command`** — the exact shell command (defaults from `tool`: `ant`, `mvn package`, `npm run build`, `gulp`).
   - **`artifact`** — a glob locating the produced `.xar` (defaults to the most recently built `.xar` under the directory).
+  - **`onSave`** — when `true`, auto-build the package whenever a file under it is saved in Oxygen (see [Auto-build on save](#auto-build-on-save) below). Off by default.
+  - **`install`** — when `true` (and `onSave` is on), also install the built `.xar` after a successful auto-build. Off by default.
 
-  When there is no `build` section (or no `.existdb.json` at all), the plugin **auto-detects** the tool from a build marker: `build.xml` → Ant, `pom.xml` → Maven, `package.json` → npm, `gulpfile.js` → gulp. So an existing eXist app with a standard `build.xml` builds with no configuration.
+  When there is no `build` section (or no `.existdb.json` at all), the plugin **auto-detects** the tool from a build marker: `build.xml` → Ant, `pom.xml` → Maven, `package.json` → npm, `gulpfile.js` → gulp. So an existing eXist app with a standard `build.xml` builds with no configuration. The `onSave`/`install` flags still apply to an auto-detected build (put a `build` section with just those flags alongside your `build.xml`).
 
   **Build-time parameters (e.g. a version).** Many eXist apps take the version as a build argument — the standard app `build.xml` substitutes `${app.version}` into `expath-pkg.xml`, and release tooling passes it (e.g. semantic-release runs `ant -Dapp.version=…`). Since `command` is a full shell command, just include the argument there for local builds: `"command": "ant -Dapp.version=1.0.0-dev"`. (Without it, a local `ant` leaves `${app.version}` unexpanded and produces an `.xar` that won't install cleanly.) Real release versions still come from your CI/release tooling; the `command` value is only for local Build / Build & Install.
 
@@ -105,6 +109,12 @@ The Project-pane context menu offers **Build** and **Build & Install**:
 - **Build & Install** then installs the freshly built `.xar` on the target server with [`xst`](https://github.com/eXist-db/xst) (`xst package install`), over eXist's existing REST. The first time (before you trust the project) a dialog shows the build command and lets you pick/override the **target connection** (defaulting to the resolved one). Credentials always come from your saved connection and are passed to `xst` through the environment, never on the command line. (`xst` must be installed — `npm install --global @existdb/xst`.)
 
 Because running a project-defined command executes code on your machine, the first build per project shows a **trust prompt** with the exact command and directory; "Don't ask again for this project" remembers your choice (after which Build & Install is one click, to the resolved connection).
+
+### Auto-build on save
+
+Set `"build": { "onSave": true }` to rebuild the package automatically whenever you save a file under it in Oxygen — handy for a tight edit/build loop. Add `"install": true` to also install the built `.xar` to the resolved connection after each successful build (the same target resolution as Build & Install). Output streams to the **eXist-db Build** console as usual, without stealing focus.
+
+It's off by default — a safety gate, like `sync.onSave`. Because auto-build runs your build command without asking each time, the **first** auto-build per project shows a one-time prompt to enable it (and remembers your choice). A burst of saves is **debounced** into a single build, and builds for one package never overlap — if you save while a build is running, exactly one rebuild is queued. Saves are detected inside Oxygen, so this covers your own edits (edits made by external tools aren't watched).
 
 ### How the install connection is resolved
 
