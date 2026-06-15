@@ -39,6 +39,8 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -49,6 +51,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -106,6 +109,8 @@ public final class SearchDialog extends JDialog {
   private final JLabel intro = new JLabel();
   /** The remembered field name to re-select once discovery completes; applied once, then cleared. */
   private transient String pendingFieldName;
+  /** The embedding model from the last vector search response, for the "Copy as XQuery" output. */
+  private transient String lastVectorModel = "";
   /** Active facet filters ("dimension:value") narrowing the current search; drives the &facet params. */
   private final transient List<String> activeFacetFilters = new ArrayList<>();
   /** The facet drill-down panel (one group of checkboxes per dimension), right of the results. */
@@ -267,6 +272,21 @@ public final class SearchDialog extends JDialog {
     JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
     buttons.add(cancel);
     buttons.add(open);
+    // "Copy as URL/XQuery" for the current query — left of the status, out of the way of Open.
+    JPanel copyButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+    copyButtons.add(OxygenUIComponentsFactory.createButton(new AbstractAction("Copy as URL") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        copyAsUrl();
+      }
+    }));
+    copyButtons.add(OxygenUIComponentsFactory.createButton(new AbstractAction("Copy as XQuery") {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        copyAsXQuery();
+      }
+    }));
+    south.add(copyButtons, BorderLayout.WEST);
     // Status goes in CENTER, not WEST: a WEST label takes its full preferred width, so a long error
     // string (e.g. a 500's raw JSON body) overflows and overlaps the buttons. CENTER gets only the
     // space left after the buttons and clips the text instead of colliding with them.
@@ -371,6 +391,9 @@ public final class SearchDialog extends JDialog {
       protected void done() {
         try {
           ExistClient.SearchResults results = get();
+          if (vector) {
+            lastVectorModel = results.model(); // for the "Copy as XQuery" vector output
+          }
           results.hits().forEach(model::addElement);
           status.setText(resultStatus(vector, results.hits().size(), results.total()));
           rebuildFacetPanel(results.facets());
@@ -420,6 +443,152 @@ public final class SearchDialog extends JDialog {
           + (field != null ? field.field() : "selected") + "\" field on this server.";
     }
     return "Search failed: " + cause.getMessage();
+  }
+
+  /** Copies the exact {@code /api/search} URL for the current query to the clipboard. */
+  private void copyAsUrl() {
+    ExistClient client = ExistContext.clientById(selectedServerId());
+    if (client == null) {
+      workspace.showInformationMessage("Select a connected server first.");
+      return;
+    }
+    String query = queryField.getText().trim();
+    ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
+    String url;
+    if (field != null && "vector".equals(field.kind())) {
+      url = client.searchVectorUrl(field.field(), query, VECTOR_K, FIELD_SCOPE);
+    } else if (field == null) {
+      url = client.searchUrl(query, null, null, List.copyOf(activeFacetFilters), LIMIT);
+    } else {
+      url = client.searchUrl(query, field.field(), FIELD_SCOPE, List.copyOf(activeFacetFilters), LIMIT);
+    }
+    toClipboard(url, "URL copied");
+  }
+
+  /** Copies an XQuery for the current query — exact for vectors, a representative query for keyword. */
+  private void copyAsXQuery() {
+    String query = queryField.getText().trim();
+    ExistClient.SearchFieldInfo field = (ExistClient.SearchFieldInfo) fieldCombo.getSelectedItem();
+    String xquery = field != null && "vector".equals(field.kind())
+        ? vectorXQuery(field.field(), query)
+        : keywordXQuery(field, query);
+    toClipboard(xquery, "XQuery copied");
+  }
+
+  /** The eXist vector pipeline behind a "Similar to…" search (model from the last vector response). */
+  private String vectorXQuery(String field, String text) {
+    String model = lastVectorModel == null || lastVectorModel.isBlank()
+        ? "MODEL — run a Similar-to search first to resolve the model" : lastVectorModel;
+    return "(: vector \"Similar to…\" search :)\n"
+        + "let $hits := collection('" + FIELD_SCOPE + "')/ft:query-field-vector('" + field
+        + "', vector:embed('" + xqString(text) + "', '" + xqString(model) + "'), " + VECTOR_K + ")\n"
+        + "for $h in $hits\n"
+        + "order by ft:score($h) descending\n"
+        + "return $h";
+  }
+
+  /** A representative eXist full-text query for a keyword/field search, with any active facet
+   *  drill-down folded in (approximates /api/search). Uses field-qualified queries (so the hit count
+   *  matches the API's named-field search rather than a generic full-text scan) and ranks by ft:score
+   *  so the order matches too; a comment shows how to highlight the matches. */
+  private String keywordXQuery(ExistClient.SearchFieldInfo field, String query) {
+    String lucene = field == null
+        ? allFieldsLucene(query)
+        : field.field() + ":(" + xqString(query) + ")";
+    String facets = facetDrillDown();
+    // Field-qualified queries (field:term) self-restrict to documents where that field is indexed, so
+    // the count matches /api/search; a generic ft:query(., 'term') would instead match every default
+    // full-text index across /db. Selecting document roots with /* (not the //* wildcard, which loses
+    // eXist's match-tracking) keeps ft:highlight-field-matches working on the result. Rank by ft:score
+    // descending so the order matches the API. Facet drill-down disables match-tracking, so
+    // highlighting only works on the non-faceted query.
+    String note;
+    if (!facets.isEmpty()) {
+      note = "(: approximates /api/search, ranked by relevance. Facet drill-down disables eXist's\n"
+          + "   match-tracking, so matches can't be highlighted from the faceted query. :)\n";
+    } else if (field != null) {
+      note = "(: approximates /api/search, ranked by relevance. Append\n"
+          + "   ! ft:highlight-field-matches(., '" + field.field() + "')  to the return clause to "
+          + "wrap matches in <exist:match>. :)\n";
+    } else {
+      note = "(: approximates /api/search, ranked by relevance (searches all indexed text fields;\n"
+          + "   highlight per field with ft:highlight-field-matches(., '<field>')). :)\n";
+    }
+    return note
+        + "for $hit in collection('" + FIELD_SCOPE + "')/*[ft:query(., '" + lucene + "'" + facets
+        + ")]\n"
+        + "order by ft:score($hit) descending\n"
+        + "return $hit";
+  }
+
+  /** A Lucene query that ORs the term across every discovered text field (kind {@code field}),
+   *  reproducing the API's "all fields" search; falls back to a bare query if no fields are known. */
+  private String allFieldsLucene(String query) {
+    String term = xqString(query);
+    StringBuilder lucene = new StringBuilder();
+    for (int i = 0; i < fieldCombo.getItemCount(); i++) {
+      ExistClient.SearchFieldInfo f = fieldCombo.getItemAt(i);
+      if (f != null && "field".equals(f.kind())) {
+        if (lucene.length() > 0) {
+          lucene.append(" OR ");
+        }
+        lucene.append(f.field()).append(":(").append(term).append(")");
+      }
+    }
+    return lucene.length() == 0 ? term : lucene.toString();
+  }
+
+  /**
+   * The eXist facet drill-down option for the active filters — e.g.
+   * {@code , map { 'facets': map { 'site-app': 'docs', 'site-section': ('guide', 'ref') } }} — or an
+   * empty string when none are active. Same-dimension filters become a value sequence (OR).
+   */
+  private String facetDrillDown() {
+    if (activeFacetFilters.isEmpty()) {
+      return "";
+    }
+    Map<String, List<String>> byDimension = new LinkedHashMap<>();
+    for (String filter : activeFacetFilters) {
+      int colon = filter.indexOf(':');
+      if (colon >= 0) {
+        byDimension.computeIfAbsent(filter.substring(0, colon), k -> new ArrayList<>())
+            .add(filter.substring(colon + 1));
+      }
+    }
+    StringBuilder map = new StringBuilder();
+    for (Map.Entry<String, List<String>> entry : byDimension.entrySet()) {
+      if (map.length() > 0) {
+        map.append(", ");
+      }
+      map.append("'").append(xqString(entry.getKey())).append("': ").append(xqValues(entry.getValue()));
+    }
+    return ", map { 'facets': map { " + map + " } }";
+  }
+
+  /** A single quoted value, or a parenthesized sequence for multiple values (OR within a dimension). */
+  private static String xqValues(List<String> values) {
+    if (values.size() == 1) {
+      return "'" + xqString(values.get(0)) + "'";
+    }
+    StringBuilder seq = new StringBuilder("(");
+    for (int i = 0; i < values.size(); i++) {
+      if (i > 0) {
+        seq.append(", ");
+      }
+      seq.append("'").append(xqString(values.get(i))).append("'");
+    }
+    return seq.append(")").toString();
+  }
+
+  /** Escapes a value for an XQuery single-quoted string literal (doubles each apostrophe). */
+  private static String xqString(String s) {
+    return s == null ? "" : s.replace("'", "''");
+  }
+
+  private void toClipboard(String text, String confirmation) {
+    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
+    status.setText(confirmation);
+    status.setToolTipText(text); // the full copied text on hover
   }
 
   /**
