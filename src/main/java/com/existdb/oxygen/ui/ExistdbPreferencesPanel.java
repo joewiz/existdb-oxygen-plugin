@@ -114,6 +114,8 @@ public final class ExistdbPreferencesPanel {
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
       new JCheckBox("Restore open collections on startup");
+  private final JCheckBox reopenTabsPref =
+      new JCheckBox("Reopen eXist-db editor tabs on restart");
   /** Connections-section description; its HTML wrap width tracks its actual width (auto-flow). */
   private final JLabel connectionsNote = new JLabel();
 
@@ -292,9 +294,11 @@ public final class ExistdbPreferencesPanel {
     showHiddenPref.setSelected(store.showHidden());
     uploadHiddenPref.setSelected(store.uploadHidden());
     restorePanePref.setSelected(store.restorePane());
+    reopenTabsPref.setSelected(store.reopenTabs());
 
     JComponent hidden = section("Hidden files", leftAlignedColumn(showHiddenPref, uploadHiddenPref));
-    JComponent pane = section("eXist-db pane", leftAlignedColumn(restorePanePref));
+    JComponent pane =
+        section("eXist-db pane", leftAlignedColumn(restorePanePref, reopenTabsPref));
 
     JPanel prefs = new JPanel(new BorderLayout());
     prefs.add(hidden, BorderLayout.NORTH);
@@ -517,6 +521,7 @@ public final class ExistdbPreferencesPanel {
     store.setShowHidden(showHiddenPref.isSelected());
     store.setUploadHidden(uploadHiddenPref.isSelected());
     store.setRestorePane(restorePanePref.isSelected());
+    store.setReopenTabs(reopenTabsPref.isSelected());
     // Apply the new defaults live: results view re-applies display prefs; the pane rebuilds servers.
     store.notifyResultsPrefsChanged();
     store.notifyConnectionsChanged();
@@ -532,6 +537,7 @@ public final class ExistdbPreferencesPanel {
     showHiddenPref.setSelected(false);
     uploadHiddenPref.setSelected(false);
     restorePanePref.setSelected(true);
+    reopenTabsPref.setSelected(true);
   }
 
   private ConnectionProfile selected() {

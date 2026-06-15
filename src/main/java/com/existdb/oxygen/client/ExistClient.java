@@ -712,7 +712,7 @@ public final class ExistClient {
    * {@code {"site-app": {"docs": 8, "blog": 12}}}).
    */
   public record SearchResults(int total, List<SearchHit> hits,
-      Map<String, Map<String, Integer>> facets, String model) {
+      Map<String, Map<String, Integer>> facets) {
   }
 
   /**
@@ -744,17 +744,6 @@ public final class ExistClient {
    */
   public SearchResults search(String query, String field, String scope,
       List<String> facetFilters, int limit) throws IOException, InterruptedException {
-    HttpResponse<String> r =
-        send(request(searchPath(query, field, scope, facetFilters, limit)).GET().build());
-    JSONObject o = new JSONObject(r.body());
-    List<SearchHit> hits = parseHits(o.optJSONArray("results"));
-    return new SearchResults(o.optInt("total", hits.size()), hits,
-        parseFacets(o.optJSONObject("facets")), o.optString("model", ""));
-  }
-
-  /** The {@code /search?…} path for a keyword search — shared by {@link #search} and {@link #searchUrl}. */
-  private static String searchPath(String query, String field, String scope,
-      List<String> facetFilters, int limit) {
     StringBuilder path = new StringBuilder("/search?q=").append(enc(query))
         .append("&limit=").append(limit);
     if (field != null && !field.isBlank()) {
@@ -770,44 +759,29 @@ public final class ExistClient {
         }
       }
     }
-    return path.toString();
-  }
-
-  /** The full GET URL this client would issue for the given keyword search (for "Copy as URL"). */
-  public String searchUrl(String query, String field, String scope,
-      List<String> facetFilters, int limit) {
-    return profile.getApiRoot() + searchPath(query, field, scope, facetFilters, limit);
+    HttpResponse<String> r = send(request(path.toString()).GET().build());
+    JSONObject o = new JSONObject(r.body());
+    List<SearchHit> hits = parseHits(o.optJSONArray("results"));
+    return new SearchResults(o.optInt("total", hits.size()), hits, parseFacets(o.optJSONObject("facets")));
   }
 
   /**
    * GET /api/search?vector=<field>&similar=<text>&k=<n>&scope=… — semantic "find similar" (kNN):
    * the server embeds {@code similar} with the field's model and returns the top-{@code k} documents
    * by similarity score (existdb-openapi#60). The count is {@code results.length} (the response's
-   * {@code total} is unreliable on older beds), and no facets are returned. The resolved embedding
-   * model is reported back in {@link SearchResults#model()}. A vector field the connection's user may
-   * not see returns 403 (surfaced as an {@link ExistHttpException}).
+   * {@code total} is unreliable on older beds), and no facets are returned. A vector field the
+   * connection's user may not see returns 403 (surfaced as an {@link ExistHttpException}).
    */
   public SearchResults searchVector(String field, String similar, int k, String scope)
       throws IOException, InterruptedException {
-    HttpResponse<String> r = send(request(searchVectorPath(field, similar, k, scope)).GET().build());
-    JSONObject o = new JSONObject(r.body());
-    List<SearchHit> hits = parseHits(o.optJSONArray("results"));
-    return new SearchResults(hits.size(), hits, Map.of(), o.optString("model", ""));
-  }
-
-  /** The {@code /search?vector=…} path for a similarity search. */
-  private static String searchVectorPath(String field, String similar, int k, String scope) {
     StringBuilder path = new StringBuilder("/search?vector=").append(enc(field))
         .append("&similar=").append(enc(similar)).append("&k=").append(k);
     if (scope != null && !scope.isBlank()) {
       path.append("&scope=").append(enc(scope));
     }
-    return path.toString();
-  }
-
-  /** The full GET URL this client would issue for the given vector search (for "Copy as URL"). */
-  public String searchVectorUrl(String field, String similar, int k, String scope) {
-    return profile.getApiRoot() + searchVectorPath(field, similar, k, scope);
+    HttpResponse<String> r = send(request(path.toString()).GET().build());
+    List<SearchHit> hits = parseHits(new JSONObject(r.body()).optJSONArray("results"));
+    return new SearchResults(hits.size(), hits, Map.of());
   }
 
   /** Parses a search response's {@code results} array ({@code [{app,title,snippet,path}…]}). */

@@ -56,6 +56,8 @@ public final class ProfileStore {
   private static final String KEY_CONNECTIONS = "existdb.connections.v2";
   /** Per-user secret store prefix for a connection's password (never project-scoped). */
   private static final String SECRET_PREFIX = "existdb.secret.";
+  /** Key for the per-project map of open {@code exist://} editor locations (JSON: project URL → list). */
+  private static final String KEY_OPEN_TABS_BY_PROJECT = "existdb.openTabsByProject";
 
   /** The default package registry (eXist-db's public-repo), always present if the list is empty. */
   public static final String DEFAULT_REGISTRY = "https://exist-db.org/exist/apps/public-repo";
@@ -381,9 +383,9 @@ public final class ProfileStore {
   }
 
   /**
-   * The {@code exist://} editor locations that were open at last shutdown, in tab order, so they can
-   * be reopened on the next start (Oxygen restores {@code file:} tabs but not custom-protocol ones).
-   * Stored newline-separated.
+   * The legacy single global list of {@code exist://} editor locations open at last shutdown. Retained
+   * only to seed the per-project map on a one-time upgrade migration; new state is keyed per project
+   * (see {@link #openTabs(String)}).
    */
   public List<String> openTabs() {
     List<String> out = new ArrayList<>();
@@ -400,6 +402,41 @@ public final class ProfileStore {
   }
 
   /**
+   * The {@code exist://} editor locations open under the given project (keyed by its URL), in tab
+   * order, so they can be reopened when that project is loaded — Oxygen associates {@code file:} tabs
+   * with a project and swaps them on project switch, but excludes custom-protocol ones, so we keep
+   * our own per-project list. An empty/unknown key (no project) is a valid key.
+   */
+  public List<String> openTabs(String projectKey) {
+    String json = options.get(KEY_OPEN_TABS_BY_PROJECT, "");
+    if (json.isBlank()) {
+      return new ArrayList<>();
+    }
+    JSONArray arr = new JSONObject(json).optJSONArray(projectKey);
+    List<String> out = new ArrayList<>();
+    if (arr != null) {
+      for (int i = 0; i < arr.length(); i++) {
+        String url = arr.optString(i, "");
+        if (!url.isBlank()) {
+          out.add(url);
+        }
+      }
+    }
+    return out;
+  }
+
+  public void setOpenTabs(String projectKey, List<String> urls) {
+    String json = options.get(KEY_OPEN_TABS_BY_PROJECT, "");
+    JSONObject map = json.isBlank() ? new JSONObject() : new JSONObject(json);
+    if (urls.isEmpty()) {
+      map.remove(projectKey);
+    } else {
+      map.put(projectKey, new JSONArray(urls));
+    }
+    options.set(KEY_OPEN_TABS_BY_PROJECT, map.toString());
+  }
+
+  /**
    * Whether the eXist-db pane re-expands, on startup, the servers and collections that were open at
    * last shutdown (re-fetching them live). On by default; turning it off gives a clean, fast pane.
    */
@@ -409,6 +446,21 @@ public final class ProfileStore {
 
   public void setRestorePane(boolean restore) {
     options.set("existdb.restorePane", Boolean.toString(restore));
+  }
+
+  /**
+   * Whether {@code exist://} server editors that were open at last shutdown are reopened on the next
+   * startup (and swapped per project on project switches). On by default. This is the plugin's own
+   * equivalent of Oxygen's "Open last edited files from project" — Oxygen restricts that native
+   * setting to a fixed list of API-accessible options, so a plugin cannot read it and must offer its
+   * own toggle.
+   */
+  public boolean reopenTabs() {
+    return Boolean.parseBoolean(options.get("existdb.reopenTabs", "true"));
+  }
+
+  public void setReopenTabs(boolean reopen) {
+    options.set("existdb.reopenTabs", Boolean.toString(reopen));
   }
 
   /**

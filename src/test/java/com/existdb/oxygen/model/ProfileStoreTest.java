@@ -194,6 +194,30 @@ class ProfileStoreTest {
   }
 
   @Test
+  void openTabsAreKeyedPerProject() {
+    ProfileStore store = store(new HashMap<>());
+    String projectA = "file:/work/a.xpr";
+    String projectB = "file:/work/b.xpr";
+    assertTrue(store.openTabs(projectA).isEmpty());
+
+    store.setOpenTabs(projectA, List.of(
+        "exist://srv-1/db/apps/a/index.xq", "exist://srv-1/db/a/notes.xml"));
+    store.setOpenTabs(projectB, List.of("exist://srv-1/db/apps/b/main.xq"));
+
+    // Each project keeps its own list; one doesn't leak into the other.
+    List<String> a = store.openTabs(projectA);
+    assertEquals(2, a.size());
+    assertEquals("exist://srv-1/db/apps/a/index.xq", a.get(0));
+    assertEquals(List.of("exist://srv-1/db/apps/b/main.xq"), store.openTabs(projectB));
+    assertTrue(store.openTabs("file:/work/unknown.xpr").isEmpty());
+
+    // Clearing one project leaves the other intact.
+    store.setOpenTabs(projectA, List.of());
+    assertTrue(store.openTabs(projectA).isEmpty());
+    assertEquals(1, store.openTabs(projectB).size());
+  }
+
+  @Test
   void registriesDefaultToPublicRepoThenPersist() {
     ProfileStore store = store(new HashMap<>());
     assertEquals(List.of(ProfileStore.DEFAULT_REGISTRY), store.registries());

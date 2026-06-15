@@ -115,7 +115,6 @@ public final class ExistResultsView extends JPanel {
   private final JComboBox<Integer> pageSizeCombo =
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
   private final JButton indentButton;
-  private final JButton highlightButton;
   private final JButton wrapButton;
   private final JButton firstButton;
   private final JButton prevButton;
@@ -148,8 +147,6 @@ public final class ExistResultsView extends JPanel {
   private int page = 1;
   private int pageSize = 10;
   private boolean indent = true;
-  /** Whether to paint full-text hits (<exist:match>/<mark>) in results; session-only, default on. */
-  private boolean highlightMatches = true;
   /** When true, long result lines wrap to the viewport width instead of scrolling horizontally. */
   private boolean wrap;
   private int selectedIndex;
@@ -183,21 +180,6 @@ public final class ExistResultsView extends JPanel {
       @Override
       public void actionPerformed(ActionEvent e) {
         indent = Boolean.TRUE.equals(getValue(SELECTED_KEY));
-        refreshPage();
-      }
-    }, false);
-
-    highlightButton = OxygenUIComponentsFactory.createToolbarToggleButton(new AbstractAction() {
-      {
-        putValue(SMALL_ICON, icon("/images/ContentHighlightActivated16.png"));
-        putValue(NAME, "Highlight");
-        putValue(SHORT_DESCRIPTION, "Highlight full-text hits (<exist:match>/<mark>) in results");
-        putValue(SELECTED_KEY, highlightMatches);
-      }
-
-      @Override
-      public void actionPerformed(ActionEvent e) {
-        highlightMatches = Boolean.TRUE.equals(getValue(SELECTED_KEY));
         refreshPage();
       }
     }, false);
@@ -458,7 +440,6 @@ public final class ExistResultsView extends JPanel {
     left.add(methodCombo);
     left.add(wrapButton);
     left.add(indentButton);
-    left.add(highlightButton);
 
     JPanel nav = new JPanel(new FlowLayout(FlowLayout.CENTER, 2, 2));
     nav.add(firstButton);
@@ -751,7 +732,7 @@ public final class ExistResultsView extends JPanel {
     area.setOpaque(false);
     area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, fontSize));
     ResultHighlighter.apply(area.getStyledDocument(), value,
-        ResultHighlighter.languageFor(method, value), highlightMatches);
+        ResultHighlighter.languageFor(method, value));
     rowTextPanes.add(area);
     // Per-result copy is provided by the floating button at the viewport's right edge, so it stays
     // visible even when a result is wider than the view.
