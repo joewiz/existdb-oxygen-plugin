@@ -463,6 +463,41 @@ public final class ProfileStore {
     options.set("existdb.reopenTabs", Boolean.toString(reopen));
   }
 
+  // ---------------------------------------------------------------------------
+  // Serialization defaults (per operation): how XML resources are serialized by
+  // existdb-openapi when read. "open" = loading into the editor, "download" =
+  // saving/exporting to disk. Each scope has indent / expand-xincludes /
+  // omit-xml-declaration. eXide defaults: indent on, expand-xincludes off
+  // (preserve <xi:include>), omit-xml-declaration on.
+  // ---------------------------------------------------------------------------
+
+  /** Reads a per-scope serialization flag ({@code scope} = "open"/"download", {@code param} = the key). */
+  public boolean serializationFlag(String scope, String param, boolean defaultValue) {
+    return Boolean.parseBoolean(
+        options.get("existdb.serialization." + scope + "." + param, Boolean.toString(defaultValue)));
+  }
+
+  public void setSerializationFlag(String scope, String param, boolean value) {
+    options.set("existdb.serialization." + scope + "." + param, Boolean.toString(value));
+  }
+
+  /** Serialization options for opening a resource into the editor. */
+  public SerializationOptions openSerialization() {
+    return serializationFor("open");
+  }
+
+  /** Serialization options for downloading/exporting a resource to disk. */
+  public SerializationOptions downloadSerialization() {
+    return serializationFor("download");
+  }
+
+  private SerializationOptions serializationFor(String scope) {
+    return new SerializationOptions(
+        serializationFlag(scope, "indent", true),
+        serializationFlag(scope, "expand-xincludes", false),
+        serializationFlag(scope, "omit-xml-declaration", true));
+  }
+
   /**
    * The {@code exist://} collection locations expanded in the pane at last shutdown (the server node
    * is {@code …/db}), used to restore the tree's expansion state. Stored newline-separated.

@@ -54,6 +54,21 @@ Right-click in an XQuery editor (or use the keyboard shortcuts) for the eXist-db
 
 The completion, hover (rich Markdown with Parameters/Returns), parameter hints, and variable-type hover need a server with existdb-openapi [#42](https://github.com/eXist-db/existdb-openapi/pull/42), [#44](https://github.com/eXist-db/existdb-openapi/pull/44), and [#45](https://github.com/eXist-db/existdb-openapi/pull/45); they degrade gracefully (show nothing) against older servers.
 
+## Serialization defaults
+
+**Preferences → Plugins → eXist-db → Serialization** controls how the server serializes XML resources when the plugin reads them, separately for two operations:
+
+- **Open** — loading a resource into the editor.
+- **Download** — saving/exporting a resource to disk (the eXist-db pane's *Download* action and drag-to-Finder export).
+
+Each has three toggles, mirroring eXide, sent to existdb-openapi on `GET /api/db/resource` as the W3C `indent` and `omit-xml-declaration` parameters plus the eXist serializer extension `exist.expand-xincludes` (eXist extensions take the `exist.` prefix; the W3C parameters do not):
+
+- **Indent** — pretty-print (default on).
+- **Expand XIncludes** — when **off** (the default), `<xi:include>` elements are returned **verbatim** rather than expanded. This matters most for **Open**: editing an expanded document and saving it back would overwrite the stored resource with the expanded content, destroying the includes. Leaving it off preserves them across the round-trip.
+- **Omit XML Declaration** — drop the `<?xml …?>` prolog (default on).
+
+Requires a server whose `/api/db/resource` honors these parameters (existdb-openapi [#59](https://github.com/eXist-db/existdb-openapi/pull/59)); against older servers the params are ignored (or, for `expand-xincludes` on a pre-#59 build, may error) — so this is gated on #59.
+
 ## Project configuration (`.existdb.json`)
 
 When you work on an eXist app from the **Project** pane (files on disk, not the database), a `.existdb.json` in the app's directory tells the plugin which server the app belongs to and how to build and install it. This is the same `.existdb.json` convention used by [existdb-langserver](https://github.com/eXist-db/existdb-langserver) (and atom-existdb / vscode-existdb) — the plugin reads the established `servers` and `sync` sections and adds a `build` section described below.

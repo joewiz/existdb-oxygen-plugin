@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.model.ConnectionProfile;
+import com.existdb.oxygen.model.SerializationOptions;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
 
 import java.io.OutputStream;
@@ -86,6 +87,26 @@ class ExistClientTest {
     assertTrue(new String(rc.bytes(), StandardCharsets.UTF_8).contains("42"));
     assertEquals("application/xquery", rc.mimeType());
     assertFalse(rc.binary()); // XQuery is textual
+  }
+
+  @Test
+  void readResourceWithoutOptionsSendsNoSerializationParams() throws Exception {
+    client.readResource("/db/x.xq");
+    String q = server.lastResourceGetQuery();
+    assertFalse(q.contains("indent"));
+    assertFalse(q.contains("expand-xincludes"));
+    assertFalse(q.contains("omit-xml-declaration"));
+  }
+
+  @Test
+  void readResourceWithOptionsSendsCanonicalSerializationParams() throws Exception {
+    // indent=true, expand-xincludes=false (preserve), omit-xml-declaration=true
+    client.readResource("/db/x.xq", new SerializationOptions(true, false, true));
+    String q = server.lastResourceGetQuery();
+    assertTrue(q.contains("indent=yes"), q);
+    assertTrue(q.contains("omit-xml-declaration=yes"), q);
+    // The eXist extension is exist.-prefixed; W3C params are not.
+    assertTrue(q.contains("exist.expand-xincludes=no"), q);
   }
 
   @Test
