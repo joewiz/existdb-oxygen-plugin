@@ -47,6 +47,7 @@ public final class MockExistServer implements AutoCloseable {
   private volatile String lastSearchQuery;
   private volatile String lastResourcePutQuery;
   private volatile String lastResourceGetQuery;
+  private volatile String lastExportQuery;
 
   public MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -68,24 +69,9 @@ public final class MockExistServer implements AutoCloseable {
       }
     });
 
-    handle(prefix + "/db/resource", ex -> {
-      String query = ex.getRequestURI().getRawQuery();
-      if (query != null && query.contains("missing")) {
-        respond(ex, 404, "{\"error\":\"not found\"}");
-      } else if ("GET".equals(ex.getRequestMethod())) {
-        // Consolidated content endpoint (existdb-openapi#59): raw body, Content-Type = stored mime.
-        lastResourceGetQuery = query; // serialization params (if any) ride the query string
-        respondAs(ex, 200, "xquery version \"3.1\"; 42", "application/xquery");
-      } else if ("PUT".equals(ex.getRequestMethod())) {
-        lastResourcePutQuery = query; // path/mime now ride the query, not the body
-        lastPutBody = readBody(ex);   // the body is the raw content
-        respond(ex, 201, "{\"path\":\"/db/x.xq\"}");
-      } else if ("DELETE".equals(ex.getRequestMethod())) {
-        respond(ex, 200, "{\"deleted\":true}");
-      } else {
-        respond(ex, 405, "{}");
-      }
-    });
+    handle(prefix + "/db/resource", this::handleResource);
+    // Longest-prefix match wins, so this beats /db/collection for export requests.
+    handle(prefix + "/db/collection/export", this::handleExport);
 
     handle(prefix + "/db/collection", ex -> {
       if ("DELETE".equals(ex.getRequestMethod())) {
@@ -280,6 +266,10 @@ public final class MockExistServer implements AutoCloseable {
     return lastResourceGetQuery;
   }
 
+  String lastExportQuery() {
+    return lastExportQuery;
+  }
+
   String lastSearchQuery() {
     return lastSearchQuery;
   }
@@ -299,6 +289,39 @@ public final class MockExistServer implements AutoCloseable {
   @Override
   public void close() {
     server.stop(0);
+  }
+
+  /** GET/PUT/DELETE on the consolidated content endpoint (existdb-openapi#59). */
+  private void handleResource(HttpExchange ex) throws IOException {
+    String query = ex.getRequestURI().getRawQuery();
+    if (query != null && query.contains("missing")) {
+      respond(ex, 404, "{\"error\":\"not found\"}");
+    } else if ("GET".equals(ex.getRequestMethod())) {
+      lastResourceGetQuery = query; // serialization params (if any) ride the query string
+      respondAs(ex, 200, "xquery version \"3.1\"; 42", "application/xquery");
+    } else if ("PUT".equals(ex.getRequestMethod())) {
+      lastResourcePutQuery = query; // path/mime now ride the query, not the body
+      lastPutBody = readBody(ex);   // the body is the raw content
+      respond(ex, 201, "{\"path\":\"/db/x.xq\"}");
+    } else if ("DELETE".equals(ex.getRequestMethod())) {
+      respond(ex, 200, "{\"deleted\":true}");
+    } else {
+      respond(ex, 405, "{}");
+    }
+  }
+
+  /** GET /api/db/collection/export — a fake zip/xar archive with a Content-Disposition file name. */
+  private void handleExport(HttpExchange ex) throws IOException {
+    lastExportQuery = ex.getRequestURI().getRawQuery();
+    String fmt = String.valueOf(lastExportQuery).contains("format=xar") ? "xar" : "zip";
+    String name = "xar".equals(fmt) ? "myapp-1.0.xar" : "coll.zip";
+    byte[] body = ("PK-fake-archive-" + fmt).getBytes(StandardCharsets.UTF_8);
+    ex.getResponseHeaders().add("Content-Type", "application/zip");
+    ex.getResponseHeaders().add("Content-Disposition", "attachment; filename=\"" + name + "\"");
+    ex.sendResponseHeaders(200, body.length);
+    try (OutputStream os = ex.getResponseBody()) {
+      os.write(body);
+    }
   }
 
   private void handle(String path, HttpHandler handler) {

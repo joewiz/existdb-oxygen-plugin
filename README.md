@@ -56,18 +56,21 @@ The completion, hover (rich Markdown with Parameters/Returns), parameter hints, 
 
 ## Serialization defaults
 
-**Preferences → Plugins → eXist-db → Serialization** controls how the server serializes XML resources when the plugin reads them, separately for two operations:
+**Preferences → Plugins → eXist-db → Serialization** controls how the server serializes XML resources when the plugin reads them, separately for three operations:
 
 - **Open** — loading a resource into the editor.
-- **Download** — saving/exporting a resource to disk (the eXist-db pane's *Download* action and drag-to-Finder export).
+- **Download** — saving a single resource to disk (the eXist-db pane's *Download…* action and drag-to-Finder export).
+- **Package** — exporting a whole collection to disk (the eXist-db pane's collection *Download (.zip)…* / *Download Package (.xar)…* actions).
 
-Each has three toggles, mirroring eXide, sent to existdb-openapi on `GET /api/db/resource` as the W3C `indent` and `omit-xml-declaration` parameters plus the eXist serializer extension `exist.expand-xincludes` (eXist extensions take the `exist.` prefix; the W3C parameters do not):
+Each has three toggles, mirroring eXide, sent to existdb-openapi (on `GET /api/db/resource` for Open/Download, `GET /api/db/collection/export` for Package) as the W3C `indent` and `omit-xml-declaration` parameters plus the eXist serializer extension `exist.expand-xincludes` (eXist extensions take the `exist.` prefix; the W3C parameters do not):
 
-- **Indent** — pretty-print (default on).
-- **Expand XIncludes** — when **off** (the default), `<xi:include>` elements are returned **verbatim** rather than expanded. This matters most for **Open**: editing an expanded document and saving it back would overwrite the stored resource with the expanded content, destroying the includes. Leaving it off preserves them across the round-trip.
+- **Indent** — pretty-print (default on for Open/Download, off for Package).
+- **Expand XIncludes** — when **off** (the default for all three), `<xi:include>` elements are returned **verbatim** rather than expanded. This matters most for **Open**: editing an expanded document and saving it back would overwrite the stored resource with the expanded content, destroying the includes. Leaving it off preserves them across the round-trip.
 - **Omit XML Declaration** — drop the `<?xml …?>` prolog (default on).
 
-Requires a server whose `/api/db/resource` honors these parameters (existdb-openapi [#59](https://github.com/eXist-db/existdb-openapi/pull/59)); against older servers the params are ignored (or, for `expand-xincludes` on a pre-#59 build, may error) — so this is gated on #59.
+**Collection download.** Right-clicking a collection in the eXist-db pane offers **Download (.zip)…** (the collection's subtree zipped) and **Download Package (.xar)…** (an installable EXPath package named from the app's descriptors), both saved to `~/Downloads` and serialized per the **Package** column.
+
+Requires a server whose `/api/db/resource` and `/api/db/collection/export` honor these parameters (existdb-openapi [#59](https://github.com/eXist-db/existdb-openapi/pull/59) and the collection-export endpoint); against older servers the params are ignored (or, for `expand-xincludes` on a pre-#59 build, may error).
 
 ## Project configuration (`.existdb.json`)
 

@@ -693,6 +693,11 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("New Collection…", "/images/NewFolder16.png", null,
           () -> newCollection(node, existNode)));
       menu.addSeparator();
+      menu.add(menuItem("Download (.zip)…", "/images/Save16.png", null,
+          () -> downloadCollection(existNode, "zip")));
+      menu.add(menuItem("Download Package (.xar)…", "/images/Save16.png", null,
+          () -> downloadCollection(existNode, "xar")));
+      menu.addSeparator();
       menu.add(menuItem("Refresh", "/images/Refresh16.png", f5, () -> reloadNode(node)));
       if (DB_ROOT.equals(existNode.path)) {
         menu.addSeparator();
@@ -785,6 +790,41 @@ public final class ExistdbBrowserPanel extends JPanel {
         try {
           get();
           workspace.showStatusMessage("Downloaded to " + target);
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          workspace.showErrorMessage("Download failed: " + cause.getMessage());
+        }
+      }
+    }.execute();
+  }
+
+  /**
+   * Downloads a collection's subtree to {@code ~/Downloads} as a {@code zip} or {@code xar} archive
+   * via {@code GET /api/db/collection/export}, using the Package serialization defaults. The server
+   * names the file (for {@code xar}, from the package descriptors); a 400 (e.g. {@code xar} on a
+   * collection with no {@code expath-pkg.xml}) surfaces as an error message.
+   */
+  private void downloadCollection(ExistNode existNode, String format) {
+    final ExistClient client = ExistContext.clientById(existNode.serverId);
+    if (client == null) {
+      workspace.showInformationMessage("Connect to eXist-db first.");
+      return;
+    }
+    new SwingWorker<Path, Void>() {
+      @Override
+      protected Path doInBackground() throws Exception {
+        ExistClient.ExportedArchive archive =
+            client.exportCollection(existNode.path, format, profileStore.packageSerialization());
+        Path target = uniqueTarget(
+            Path.of(System.getProperty("user.home"), "Downloads"), archive.fileName());
+        Files.write(target, archive.bytes());
+        return target;
+      }
+
+      @Override
+      protected void done() {
+        try {
+          workspace.showStatusMessage("Downloaded to " + get());
         } catch (Exception ex) {
           Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
           workspace.showErrorMessage("Download failed: " + cause.getMessage());

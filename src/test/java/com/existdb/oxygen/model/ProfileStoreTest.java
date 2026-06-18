@@ -246,6 +246,15 @@ class ProfileStoreTest {
   }
 
   @Test
+  void packageSerializationDefaultsHaveIndentOff() {
+    ProfileStore store = store(new HashMap<>());
+    SerializationOptions pkg = store.packageSerialization();
+    assertFalse(pkg.indent());            // Package default: indent OFF (eXide)
+    assertFalse(pkg.expandXIncludes());   // preserve <xi:include>
+    assertTrue(pkg.omitXmlDeclaration()); // omit the XML declaration
+  }
+
+  @Test
   void serializationFlagsRoundTripPerScope() {
     ProfileStore store = store(new HashMap<>());
     store.setSerializationFlag("open", "expand-xincludes", true);

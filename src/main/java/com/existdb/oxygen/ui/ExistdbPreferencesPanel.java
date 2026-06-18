@@ -123,6 +123,9 @@ public final class ExistdbPreferencesPanel {
   private final JCheckBox downloadIndentPref = new JCheckBox();
   private final JCheckBox downloadExpandPref = new JCheckBox();
   private final JCheckBox downloadOmitPref = new JCheckBox();
+  private final JCheckBox packageIndentPref = new JCheckBox();
+  private final JCheckBox packageExpandPref = new JCheckBox();
+  private final JCheckBox packageOmitPref = new JCheckBox();
   /** Connections-section description; its HTML wrap width tracks its actual width (auto-flow). */
   private final JLabel connectionsNote = new JLabel();
 
@@ -330,6 +333,9 @@ public final class ExistdbPreferencesPanel {
     downloadIndentPref.setSelected(store.serializationFlag("download", "indent", true));
     downloadExpandPref.setSelected(store.serializationFlag("download", "expand-xincludes", false));
     downloadOmitPref.setSelected(store.serializationFlag("download", "omit-xml-declaration", true));
+    packageIndentPref.setSelected(store.serializationFlag("package", "indent", false));
+    packageExpandPref.setSelected(store.serializationFlag("package", "expand-xincludes", false));
+    packageOmitPref.setSelected(store.serializationFlag("package", "omit-xml-declaration", true));
 
     JPanel grid = new JPanel(new GridBagLayout());
     GridBagConstraints c = new GridBagConstraints();
@@ -340,14 +346,18 @@ public final class ExistdbPreferencesPanel {
     grid.add(columnHeader("Open"), c);
     c.gridx = 2;
     grid.add(columnHeader("Download"), c);
-    serializationRow(grid, c, 1, "Indent", openIndentPref, downloadIndentPref);
-    serializationRow(grid, c, 2, "Expand XIncludes", openExpandPref, downloadExpandPref);
-    serializationRow(grid, c, 3, "Omit XML Declaration", openOmitPref, downloadOmitPref);
+    c.gridx = 3;
+    grid.add(columnHeader("Package"), c);
+    serializationRow(grid, c, 1, "Indent", openIndentPref, downloadIndentPref, packageIndentPref);
+    serializationRow(grid, c, 2, "Expand XIncludes",
+        openExpandPref, downloadExpandPref, packageExpandPref);
+    serializationRow(grid, c, 3, "Omit XML Declaration",
+        openOmitPref, downloadOmitPref, packageOmitPref);
     return section("Loading documents from eXist-db", grid);
   }
 
   private static void serializationRow(JPanel grid, GridBagConstraints c, int row, String label,
-      JCheckBox open, JCheckBox download) {
+      JCheckBox open, JCheckBox download, JCheckBox pkg) {
     c.gridy = row;
     c.gridx = 0;
     c.anchor = GridBagConstraints.WEST;
@@ -357,6 +367,8 @@ public final class ExistdbPreferencesPanel {
     grid.add(open, c);
     c.gridx = 2;
     grid.add(download, c);
+    c.gridx = 3;
+    grid.add(pkg, c);
   }
 
   private static JLabel columnHeader(String text) {
@@ -601,6 +613,9 @@ public final class ExistdbPreferencesPanel {
     store.setSerializationFlag("download", "indent", downloadIndentPref.isSelected());
     store.setSerializationFlag("download", "expand-xincludes", downloadExpandPref.isSelected());
     store.setSerializationFlag("download", "omit-xml-declaration", downloadOmitPref.isSelected());
+    store.setSerializationFlag("package", "indent", packageIndentPref.isSelected());
+    store.setSerializationFlag("package", "expand-xincludes", packageExpandPref.isSelected());
+    store.setSerializationFlag("package", "omit-xml-declaration", packageOmitPref.isSelected());
     // Results view always re-applies display prefs (cheap, doesn't touch the pane). The pane only
     // rebuilds when its contents actually changed — so editing serialization/results prefs keeps the
     // open collections expanded.
@@ -637,6 +652,9 @@ public final class ExistdbPreferencesPanel {
     downloadIndentPref.setSelected(true);
     downloadExpandPref.setSelected(false);
     downloadOmitPref.setSelected(true);
+    packageIndentPref.setSelected(false);
+    packageExpandPref.setSelected(false);
+    packageOmitPref.setSelected(true);
   }
 
   private ConnectionProfile selected() {
