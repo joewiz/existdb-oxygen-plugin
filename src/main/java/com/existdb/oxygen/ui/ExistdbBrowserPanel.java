@@ -772,8 +772,10 @@ public final class ExistdbBrowserPanel extends JPanel {
       @Override
       protected Void doInBackground() throws Exception {
         // Read bytes correctly (raw bytes for binary, UTF-8 content for text) so downloaded images
-        // and other binaries aren't corrupted by a text round-trip.
-        ExistClient.ResourceBytes resource = client.readResource(existNode.path);
+        // and other binaries aren't corrupted by a text round-trip. XML uses the "Download"
+        // serialization defaults.
+        ExistClient.ResourceBytes resource =
+            client.readResource(existNode.path, profileStore.downloadSerialization());
         Files.write(target, resource.bytes());
         return null;
       }
@@ -1075,7 +1077,8 @@ public final class ExistdbBrowserPanel extends JPanel {
       return en.path + " (not connected)";
     }
     try {
-      ExistClient.ResourceBytes resource = client.readResource(en.path);
+      ExistClient.ResourceBytes resource =
+          client.readResource(en.path, profileStore.downloadSerialization());
       Files.write(uniqueTarget(dir, en.name), resource.bytes());
       return null;
     } catch (InterruptedException ex) {
@@ -1871,7 +1874,8 @@ public final class ExistdbBrowserPanel extends JPanel {
         materialize(client, child.path(), child.name(), child.collection(), out.toPath());
       }
     } else {
-      Files.write(out.toPath(), client.readResource(path).bytes());
+      // Drag-to-Finder export to disk → the "Download" serialization defaults.
+      Files.write(out.toPath(), client.readResource(path, profileStore.downloadSerialization()).bytes());
     }
     return out;
   }

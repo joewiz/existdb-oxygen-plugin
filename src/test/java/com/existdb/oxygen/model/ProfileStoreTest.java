@@ -233,4 +233,26 @@ class ProfileStoreTest {
     store.setRegistries(List.of(ProfileStore.DEFAULT_REGISTRY));
     assertEquals(ProfileStore.DEFAULT_REGISTRY, store.selectedRegistry());
   }
+
+  @Test
+  void serializationDefaultsMirrorEXide() {
+    ProfileStore store = store(new HashMap<>());
+    for (SerializationOptions opts
+        : List.of(store.openSerialization(), store.downloadSerialization())) {
+      assertTrue(opts.indent());             // indent on
+      assertFalse(opts.expandXIncludes());   // preserve <xi:include>
+      assertTrue(opts.omitXmlDeclaration()); // omit the XML declaration
+    }
+  }
+
+  @Test
+  void serializationFlagsRoundTripPerScope() {
+    ProfileStore store = store(new HashMap<>());
+    store.setSerializationFlag("open", "expand-xincludes", true);
+    store.setSerializationFlag("download", "indent", false);
+    assertTrue(store.openSerialization().expandXIncludes());
+    assertFalse(store.downloadSerialization().indent());
+    // Scopes are independent: download's expand-xincludes is untouched.
+    assertFalse(store.downloadSerialization().expandXIncludes());
+  }
 }

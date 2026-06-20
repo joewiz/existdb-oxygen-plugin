@@ -22,6 +22,7 @@
 package com.existdb.oxygen.client;
 
 import com.existdb.oxygen.model.ConnectionProfile;
+import com.existdb.oxygen.model.SerializationOptions;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -194,7 +195,19 @@ public final class ExistClient {
    * node tree. Throws {@link ExistHttpException} on non-2xx (404 for a missing resource).
    */
   public RawResource getResourceBytes(String dbPath) throws IOException, InterruptedException {
-    HttpRequest req = request("/db/resource?path=" + enc(dbPath)).GET().build();
+    return getResourceBytes(dbPath, null);
+  }
+
+  /**
+   * As {@link #getResourceBytes(String)}, asking the server to serialize XML with {@code options}
+   * (indent / omit-xml-declaration / expand-xincludes). {@code null} sends no serialization params,
+   * leaving the server's defaults — and so stays compatible with servers that predate them.
+   */
+  public RawResource getResourceBytes(String dbPath, SerializationOptions options)
+      throws IOException, InterruptedException {
+    String path = "/db/resource?path=" + enc(dbPath)
+        + (options != null ? options.toQueryFragment() : "");
+    HttpRequest req = request(path).GET().build();
     HttpResponse<byte[]> resp = sendBytes(req);
     int code = resp.statusCode();
     if (code < 200 || code >= 300) {
@@ -369,7 +382,13 @@ public final class ExistClient {
    * types (XQuery, XML, JSON, {@code text/*}) are flagged non-binary, everything else binary.
    */
   public ResourceBytes readResource(String dbPath) throws IOException, InterruptedException {
-    RawResource raw = getResourceBytes(dbPath);
+    return readResource(dbPath, null);
+  }
+
+  /** As {@link #readResource(String)}, with serialization options applied to XML resources. */
+  public ResourceBytes readResource(String dbPath, SerializationOptions options)
+      throws IOException, InterruptedException {
+    RawResource raw = getResourceBytes(dbPath, options);
     String mime = raw.mimeType() != null ? raw.mimeType() : MimeTypes.byName(dbPath);
     return new ResourceBytes(raw.bytes(), mime, !MimeTypes.isTextual(mime));
   }

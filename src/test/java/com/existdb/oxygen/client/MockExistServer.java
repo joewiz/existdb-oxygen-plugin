@@ -46,6 +46,7 @@ public final class MockExistServer implements AutoCloseable {
   private volatile String lastPackageBody;
   private volatile String lastSearchQuery;
   private volatile String lastResourcePutQuery;
+  private volatile String lastResourceGetQuery;
 
   public MockExistServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -73,6 +74,7 @@ public final class MockExistServer implements AutoCloseable {
         respond(ex, 404, "{\"error\":\"not found\"}");
       } else if ("GET".equals(ex.getRequestMethod())) {
         // Consolidated content endpoint (existdb-openapi#59): raw body, Content-Type = stored mime.
+        lastResourceGetQuery = query; // serialization params (if any) ride the query string
         respondAs(ex, 200, "xquery version \"3.1\"; 42", "application/xquery");
       } else if ("PUT".equals(ex.getRequestMethod())) {
         lastResourcePutQuery = query; // path/mime now ride the query, not the body
@@ -272,6 +274,10 @@ public final class MockExistServer implements AutoCloseable {
 
   String lastResourcePutQuery() {
     return lastResourcePutQuery;
+  }
+
+  String lastResourceGetQuery() {
+    return lastResourceGetQuery;
   }
 
   String lastSearchQuery() {

@@ -26,6 +26,8 @@ import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
 import com.existdb.oxygen.client.MimeTypes;
 import com.existdb.oxygen.lang.LangServiceSupport;
+import com.existdb.oxygen.model.ProfileStore;
+import com.existdb.oxygen.model.SerializationOptions;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -69,7 +71,9 @@ final class ExistURLConnection extends URLConnection {
       // from the JSON envelope's UTF-8 content — eXist flags XQuery as binary, yet its content is
       // real source, and the raw streaming endpoint would *execute* an .xq/.xqm rather than return
       // it — while genuinely-binary resources (images, PDFs, fonts) come back as raw bytes.
-      ExistClient.ResourceBytes rb = client.readResource(dbPath());
+      // Apply the user's "Open" serialization defaults (esp. expand-xincludes=no so editing and
+      // re-saving an <xi:include> document doesn't silently expand and destroy the includes).
+      ExistClient.ResourceBytes rb = client.readResource(dbPath(), openSerialization());
       this.content = rb.bytes();
       this.mimeType = rb.mimeType();
     } catch (ExistHttpException e) {
@@ -130,6 +134,12 @@ final class ExistURLConnection extends URLConnection {
   @Override
   public boolean getDoOutput() {
     return true;
+  }
+
+  /** The "Open" serialization defaults, or {@code null} before the plugin has published the store. */
+  private static SerializationOptions openSerialization() {
+    ProfileStore store = ExistContext.profileStore();
+    return store == null ? null : store.openSerialization();
   }
 
   private ExistClient requireClient() throws IOException {

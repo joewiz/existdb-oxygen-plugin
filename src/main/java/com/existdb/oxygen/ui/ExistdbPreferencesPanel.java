@@ -108,14 +108,21 @@ public final class ExistdbPreferencesPanel {
       OxygenUIComponentsFactory.createComboBox(new DefaultComboBoxModel<>(PAGE_SIZES));
   private final JRadioButton destBrowse = new JRadioButton("eXist-db Results pane");
   private final JRadioButton destEditor = new JRadioButton("New editor window");
-  private final JCheckBox indentPref = new JCheckBox("Indent (pretty-print) results");
-  private final JCheckBox wrapPref = new JCheckBox("Wrap long result lines");
+  private final JCheckBox indentPref = new JCheckBox("Indent results");
+  private final JCheckBox wrapPref = new JCheckBox("Line wrap");
   private final JCheckBox showHiddenPref = new JCheckBox("Show hidden files and directories");
   private final JCheckBox uploadHiddenPref = new JCheckBox("Upload hidden files and directories");
   private final JCheckBox restorePanePref =
       new JCheckBox("Restore open collections on startup");
   private final JCheckBox reopenTabsPref =
       new JCheckBox("Reopen eXist-db editor tabs on restart");
+  // Serialization matrix: [Open, Download] × [Indent, Expand XIncludes, Omit XML Declaration].
+  private final JCheckBox openIndentPref = new JCheckBox();
+  private final JCheckBox openExpandPref = new JCheckBox();
+  private final JCheckBox openOmitPref = new JCheckBox();
+  private final JCheckBox downloadIndentPref = new JCheckBox();
+  private final JCheckBox downloadExpandPref = new JCheckBox();
+  private final JCheckBox downloadOmitPref = new JCheckBox();
   /** Connections-section description; its HTML wrap width tracks its actual width (auto-flow). */
   private final JLabel connectionsNote = new JLabel();
 
@@ -191,9 +198,10 @@ public final class ExistdbPreferencesPanel {
     JComponent connectionsScroll = OxygenUIComponentsFactory.createScrollPane(table,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    // Fixed ~10-row height, like the Data Sources Connections table (not stretched to fill the page).
+    // Fixed ~3-row height (scrolls beyond) — the connections table is the cheapest control to cap, so
+    // the whole page fits a 14" laptop screen at default resolution without vertical truncation.
     int header = table.getTableHeader().getPreferredSize().height;
-    connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 10 + header + 4));
+    connectionsScroll.setPreferredSize(new Dimension(680, table.getRowHeight() * 3 + header + 4));
     JPanel connectionsContent = new JPanel(new BorderLayout());
     connectionsContent.add(connectionsDescription(), BorderLayout.NORTH);
     connectionsContent.add(connectionsScroll, BorderLayout.CENTER);
@@ -204,8 +212,11 @@ public final class ExistdbPreferencesPanel {
     updateMoveEnabled();
 
     JPanel bottom = new JPanel(new BorderLayout());
-    bottom.add(buildResultPrefs(), BorderLayout.CENTER);
-    bottom.add(buildBrowsingPrefs(), BorderLayout.SOUTH);
+    bottom.add(buildResultPrefs(), BorderLayout.NORTH);
+    JPanel lower = new JPanel(new BorderLayout());
+    lower.add(buildSerializationPrefs(), BorderLayout.NORTH);
+    lower.add(buildBrowsingPrefs(), BorderLayout.CENTER);
+    bottom.add(lower, BorderLayout.CENTER);
 
     // Stack connections over the defaults at the top; extra page height falls below (not into the
     // table) — so the Connections table keeps its fixed height like Oxygen's Data Sources page.
@@ -307,6 +318,54 @@ public final class ExistdbPreferencesPanel {
   }
 
   /**
+   * The serialization matrix: how XML resources are serialized by existdb-openapi when read, per
+   * operation — Open (load into the editor) vs. Download (save/export to disk) — across Indent,
+   * Expand XIncludes, and Omit XML Declaration. Defaults mirror eXide: indent on, expand-xincludes
+   * off (preserve {@code <xi:include>}), omit-xml-declaration on.
+   */
+  private JComponent buildSerializationPrefs() {
+    openIndentPref.setSelected(store.serializationFlag("open", "indent", true));
+    openExpandPref.setSelected(store.serializationFlag("open", "expand-xincludes", false));
+    openOmitPref.setSelected(store.serializationFlag("open", "omit-xml-declaration", true));
+    downloadIndentPref.setSelected(store.serializationFlag("download", "indent", true));
+    downloadExpandPref.setSelected(store.serializationFlag("download", "expand-xincludes", false));
+    downloadOmitPref.setSelected(store.serializationFlag("download", "omit-xml-declaration", true));
+
+    JPanel grid = new JPanel(new GridBagLayout());
+    GridBagConstraints c = new GridBagConstraints();
+    c.insets = new Insets(2, 8, 2, 8);
+    c.gridy = 0;
+    c.anchor = GridBagConstraints.CENTER;
+    c.gridx = 1;
+    grid.add(columnHeader("Open"), c);
+    c.gridx = 2;
+    grid.add(columnHeader("Download"), c);
+    serializationRow(grid, c, 1, "Indent", openIndentPref, downloadIndentPref);
+    serializationRow(grid, c, 2, "Expand XIncludes", openExpandPref, downloadExpandPref);
+    serializationRow(grid, c, 3, "Omit XML Declaration", openOmitPref, downloadOmitPref);
+    return section("Loading documents from eXist-db", grid);
+  }
+
+  private static void serializationRow(JPanel grid, GridBagConstraints c, int row, String label,
+      JCheckBox open, JCheckBox download) {
+    c.gridy = row;
+    c.gridx = 0;
+    c.anchor = GridBagConstraints.WEST;
+    grid.add(new JLabel(label), c);
+    c.anchor = GridBagConstraints.CENTER;
+    c.gridx = 1;
+    grid.add(open, c);
+    c.gridx = 2;
+    grid.add(download, c);
+  }
+
+  private static JLabel columnHeader(String text) {
+    JLabel label = new JLabel(text);
+    label.setFont(label.getFont().deriveFont(Font.BOLD));
+    return label;
+  }
+
+  /**
    * The Connections-section description: what these connections are used for. Sits below the
    * "Connections" heading and above the table (the section-description pattern Oxygen uses, e.g. the
    * Batch Documents Converter's "Word styles mapping"). Mentions XQuery validation as one use, naming
@@ -373,9 +432,9 @@ public final class ExistdbPreferencesPanel {
   }
 
   /**
-   * The persisted query/result defaults, laid out vertically (one field per row) like Oxygen's own
-   * preference pages: a {@code label: control} grid for the destination, serialization method, and
-   * page size, with the boolean Indent/Wrap toggles as their own flush-left checkbox rows.
+   * The persisted query/result defaults: a lead "View results in:" row (the results destination),
+   * then a "Results pane defaults" section laying out the serialization method, page size, and the
+   * Indent/Line-wrap toggles vertically (one field per row) like Oxygen's own preference pages.
    */
   private JComponent buildResultPrefs() {
     methodPref.setSelectedIndex(methodIndex(store.resultsMethod()));
@@ -392,49 +451,55 @@ public final class ExistdbPreferencesPanel {
     constrainWidth(methodPref, 120);
     constrainWidth(pageSizePref, 90);
 
+    // "View results in:" — both radios side by side on one row, above the Results-pane defaults.
+    JPanel destRow = new JPanel(new GridBagLayout());
+    GridBagConstraints d = new GridBagConstraints();
+    d.insets = new Insets(2, 4, 2, 4);
+    d.anchor = GridBagConstraints.LINE_START;
+    d.gridx = 0;
+    destRow.add(new JLabel("View results in:"), d);
+    d.gridx = 1;
+    destRow.add(destBrowse, d);
+    d.gridx = 2;
+    destRow.add(destEditor, d);
+    d.gridx = 3;
+    d.weightx = 1.0;
+    d.fill = GridBagConstraints.HORIZONTAL;
+    destRow.add(new JPanel(), d);
+
+    // "Results pane defaults": serialization method, page size, then the boolean toggles.
     JPanel prefs = new JPanel(new GridBagLayout());
     GridBagConstraints c = new GridBagConstraints();
     c.insets = new Insets(2, 4, 2, 4);
     c.anchor = GridBagConstraints.LINE_START;
-
-    // "View results in:" — both radios side by side on one row (like the Global/Project toggle).
     c.gridy = 0;
     c.gridx = 0;
-    prefs.add(new JLabel("View results in:"), c);
-    c.gridx = 1;
-    prefs.add(destBrowse, c);
-    c.gridx = 2;
-    prefs.add(destEditor, c);
-
-    // "Serialization:" and "Results per page:" — label: combo rows.
-    c.gridy = 1;
-    c.gridx = 0;
-    prefs.add(new JLabel("Serialization:"), c);
+    prefs.add(new JLabel("Serialization method:"), c);
     c.gridx = 1;
     prefs.add(methodPref, c);
-
-    c.gridy = 2;
+    c.gridy = 1;
     c.gridx = 0;
     prefs.add(new JLabel("Results per page:"), c);
     c.gridx = 1;
     prefs.add(pageSizePref, c);
-
-    // The boolean toggles as their own flush-left rows, spanning the label + control columns.
     c.gridx = 0;
     c.gridwidth = 2;
-    c.gridy = 3;
+    c.gridy = 2;
     prefs.add(indentPref, c);
-    c.gridy = 4;
+    c.gridy = 3;
     prefs.add(wrapPref, c);
     c.gridwidth = 1;
-
     // A glue cell to the right keeps the grid flush left instead of centered in the page width.
     c.gridx = 3;
     c.gridy = 0;
     c.weightx = 1.0;
     c.fill = GridBagConstraints.HORIZONTAL;
     prefs.add(new JPanel(), c);
-    return section("Query result defaults", prefs);
+
+    JPanel container = new JPanel(new BorderLayout());
+    container.add(destRow, BorderLayout.NORTH);
+    container.add(section("Results pane defaults", prefs), BorderLayout.CENTER);
+    return container;
   }
 
   /** Pins a component to a fixed width (its preferred height kept) so combos sit at a uniform size. */
@@ -511,6 +576,14 @@ public final class ExistdbPreferencesPanel {
 
   /** Persists the working copy, the chosen default, and the display defaults (option-page Apply/OK). */
   void save() {
+    // Decide up front whether the eXist-db pane needs rebuilding: only when the connections
+    // themselves change, or when hidden-file visibility (which the pane displays) flips. Otherwise a
+    // mere serialization/results pref edit would rebuild the tree and collapse the open collections.
+    boolean connectionsChanged = !connectionsSignature(store.loadAll(),
+        store.defaultProfileId()).equals(connectionsSignature(profiles,
+        defaultProfile != null ? defaultProfile.getId() : null));
+    boolean showHiddenChanged = showHiddenPref.isSelected() != store.showHidden();
+
     store.saveAll(profiles);
     store.setDefaultProfileId(defaultProfile != null ? defaultProfile.getId() : null);
     store.setResultsMethod(METHOD_VALUES[methodPref.getSelectedIndex()]);
@@ -522,9 +595,29 @@ public final class ExistdbPreferencesPanel {
     store.setUploadHidden(uploadHiddenPref.isSelected());
     store.setRestorePane(restorePanePref.isSelected());
     store.setReopenTabs(reopenTabsPref.isSelected());
-    // Apply the new defaults live: results view re-applies display prefs; the pane rebuilds servers.
+    store.setSerializationFlag("open", "indent", openIndentPref.isSelected());
+    store.setSerializationFlag("open", "expand-xincludes", openExpandPref.isSelected());
+    store.setSerializationFlag("open", "omit-xml-declaration", openOmitPref.isSelected());
+    store.setSerializationFlag("download", "indent", downloadIndentPref.isSelected());
+    store.setSerializationFlag("download", "expand-xincludes", downloadExpandPref.isSelected());
+    store.setSerializationFlag("download", "omit-xml-declaration", downloadOmitPref.isSelected());
+    // Results view always re-applies display prefs (cheap, doesn't touch the pane). The pane only
+    // rebuilds when its contents actually changed — so editing serialization/results prefs keeps the
+    // open collections expanded.
     store.notifyResultsPrefsChanged();
-    store.notifyConnectionsChanged();
+    if (connectionsChanged || showHiddenChanged) {
+      store.notifyConnectionsChanged();
+    }
+  }
+
+  /** A stable signature of the connection set (and default), to detect whether it changed on save. */
+  private static String connectionsSignature(List<ConnectionProfile> profiles, String defaultId) {
+    StringBuilder sb = new StringBuilder("default=").append(defaultId).append('\n');
+    for (ConnectionProfile p : profiles) {
+      sb.append(p.getId()).append('|').append(p.getName()).append('|').append(p.getBaseUrl())
+          .append('|').append(p.getUser()).append('|').append(p.isAcceptSelfSigned()).append('\n');
+    }
+    return sb.toString();
   }
 
   /** Resets the display/browsing defaults to their factory values (connections are left untouched). */
@@ -538,6 +631,12 @@ public final class ExistdbPreferencesPanel {
     uploadHiddenPref.setSelected(false);
     restorePanePref.setSelected(true);
     reopenTabsPref.setSelected(true);
+    openIndentPref.setSelected(true);
+    openExpandPref.setSelected(false);
+    openOmitPref.setSelected(true);
+    downloadIndentPref.setSelected(true);
+    downloadExpandPref.setSelected(false);
+    downloadOmitPref.setSelected(true);
   }
 
   private ConnectionProfile selected() {
