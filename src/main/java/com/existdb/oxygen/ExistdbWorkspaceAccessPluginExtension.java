@@ -22,7 +22,9 @@
 package com.existdb.oxygen;
 
 import com.existdb.oxygen.model.ProfileStore;
+import com.existdb.oxygen.ui.AutoBuildWatcher;
 import com.existdb.oxygen.ui.BuildConsoleView;
+import com.existdb.oxygen.ui.BuildService;
 import com.existdb.oxygen.ui.CompletionAction;
 import com.existdb.oxygen.ui.EvaluateQueryAction;
 import com.existdb.oxygen.ui.ExistResultsView;
@@ -104,10 +106,16 @@ public final class ExistdbWorkspaceAccessPluginExtension implements WorkspaceAcc
     new UploadOnSaveWatcher(pluginWorkspace, profileStore).install();
 
     // "Build" in the Project pane → run the package's build (Ant/Maven/npm/gulp) via the login shell,
-    // streaming to the eXist-db Build console.
+    // streaming to the eXist-db Build console. The same BuildService also drives auto-build-on-save.
     final BuildConsoleView buildConsole = new BuildConsoleView();
+    final BuildService buildService =
+        new BuildService(pluginWorkspace, profileStore, buildConsole, BUILD_VIEW_ID);
     pluginWorkspace.getProjectManager().addPopUpMenuCustomizer(
-        new ProjectBuildCustomizer(pluginWorkspace, profileStore, buildConsole, BUILD_VIEW_ID));
+        new ProjectBuildCustomizer(pluginWorkspace, profileStore, buildService));
+
+    // Auto-build (and optionally install) a package when a file under it is saved, if its
+    // .existdb.json opts in (build.onSave / build.install).
+    new AutoBuildWatcher(pluginWorkspace, buildService).install();
 
     // Keep the exist:// server editors associated with the active project — reopen them on startup
     // and swap them in/out on project switch (Oxygen does this for file: tabs but not custom-protocol

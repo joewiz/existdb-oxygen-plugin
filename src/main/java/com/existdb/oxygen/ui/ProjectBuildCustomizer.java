@@ -24,45 +24,30 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.project.BuildConfig;
-import com.existdb.oxygen.project.ProjectConnection;
+import com.existdb.oxygen.ui.BuildService.InstallTarget;
 
-import ro.sync.exml.workspace.api.editor.WSEditor;
-import ro.sync.exml.workspace.api.editor.page.text.WSTextEditorPage;
 import ro.sync.exml.workspace.api.standalone.StandalonePluginWorkspace;
-import ro.sync.exml.workspace.api.standalone.project.ProjectController;
 import ro.sync.exml.workspace.api.standalone.project.ProjectPopupMenuCustomizer;
-import ro.sync.exml.workspace.api.standalone.ui.OKCancelDialog;
-import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 
-import java.awt.BorderLayout;
-import java.awt.Font;
-import java.awt.Frame;
 import java.awt.GridLayout;
-import java.awt.KeyboardFocusManager;
-import java.awt.Window;
 import java.io.File;
-import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 import javax.swing.ImageIcon;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
-import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.text.JTextComponent;
 
 /**
- * Adds a "Build" item to Oxygen's Project-pane contextual menu. It finds the package's build root
- * (the closest ancestor-or-self with a {@code .existdb.json} build section or a build marker — Ant,
- * Maven, npm, gulp), runs the build through the user's login shell ({@link BuildRunner}, so toolchain
- * binaries resolve without hardcoded paths), and streams output to the "eXist-db Build" console.
+ * Adds "Build" and "Build &amp; Install" items to Oxygen's Project-pane contextual menu. It finds the
+ * package's build root (the closest ancestor-or-self with a {@code .existdb.json} build section or a
+ * build marker — Ant, Maven, npm, gulp) and runs it through the shared {@link BuildService}, which
+ * streams output to the "eXist-db Build" console and (for Build &amp; Install) deploys the built
+ * {@code .xar} via {@code xst}.
  *
  * <p>Running a project-defined command is gated by a trust prompt (the command and directory are
  * shown; "don't ask again" remembers the directory) — a project file shouldn't silently execute
@@ -74,15 +59,13 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
-  private final transient BuildConsoleView console;
-  private final transient String buildViewId;
+  private final transient BuildService buildService;
 
   public ProjectBuildCustomizer(StandalonePluginWorkspace workspace, ProfileStore profileStore,
-      BuildConsoleView console, String buildViewId) {
+      BuildService buildService) {
     this.workspace = workspace;
     this.profileStore = profileStore;
-    this.console = console;
-    this.buildViewId = buildViewId;
+    this.buildService = buildService;
   }
 
   @Override
@@ -108,7 +91,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
   }
 
   private void build(File selected, boolean installAfter) {
-    BuildConfig config = BuildConfig.findNearest(selected, projectRoot()).orElse(null);
+    BuildConfig config = BuildConfig.findNearest(selected, buildService.projectRoot()).orElse(null);
     if (config == null) {
       workspace.showInformationMessage("No build file found for this selection — add a \"build\" "
           + "section to .existdb.json, or a build.xml, pom.xml, package.json, or gulpfile.js.");
@@ -126,70 +109,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
         return;
       }
     }
-    workspace.showView(buildViewId, true);
-    console.setConsoleFont(currentEditorFont());
-    console.clear();
-    console.appendLine("$ " + config.command());
-    console.appendLine("  (in " + config.dir().getAbsolutePath() + ")");
-    console.appendLine("");
-    BuildRunner.run(config.command(), config.dir(), console::appendLine,
-        exitCode -> onBuildFinished(config, exitCode, target));
-  }
-
-  private void onBuildFinished(BuildConfig config, int exitCode, InstallTarget target) {
-    console.appendLine("");
-    if (exitCode != 0) {
-      console.appendLine("BUILD FAILED (exit code " + exitCode + ")");
-      workspace.showStatusMessage("Build failed: " + config.dir().getName());
-      return;
-    }
-    console.appendLine("BUILD SUCCESSFUL");
-    Optional<File> artifact = config.locateArtifact();
-    artifact.ifPresent(file -> console.appendLine("Artifact: " + file.getAbsolutePath()));
-    if (target == null) {
-      workspace.showStatusMessage("Build succeeded: " + config.dir().getName());
-    } else if (artifact.isEmpty()) {
-      console.appendLine("No .xar artifact found to install.");
-      workspace.showStatusMessage("Build succeeded, but no .xar to install");
-    } else {
-      install(config.dir(), artifact.get(), target);
-    }
-  }
-
-  /** Installs the built {@code .xar} on the target server via {@code xst package install}. */
-  private void install(File dir, File xar, InstallTarget target) {
-    console.appendLine("");
-    console.appendLine("$ xst package install " + xar.getName()
-        + "  →  " + target.serverRoot() + " (as " + target.user() + ")");
-    Map<String, String> env = new HashMap<>();
-    env.put("EXISTDB_SERVER", target.serverRoot());
-    env.put("EXISTDB_USER", target.user());
-    env.put("EXISTDB_PASS", target.password() == null ? "" : target.password());
-    if (target.acceptSelfSigned()) {
-      // Let xst/node-exist accept eXist's default self-signed HTTPS cert (dev setups).
-      env.put("NODE_TLS_REJECT_UNAUTHORIZED", "0");
-    }
-    String command = "xst package install " + shellQuote(xar.getAbsolutePath());
-    BuildRunner.run(command, dir, env, console::appendLine, exitCode -> {
-      console.appendLine("");
-      if (exitCode == 0) {
-        console.appendLine("INSTALL SUCCESSFUL");
-        workspace.showStatusMessage("Installed " + xar.getName() + " to " + target.label());
-      } else {
-        console.appendLine("INSTALL FAILED (exit code " + exitCode + ")");
-        workspace.showStatusMessage("Install failed: " + xar.getName());
-      }
-    });
-  }
-
-  /** Where to install: the eXist server root + credentials, and a display label. */
-  private record InstallTarget(String serverRoot, String user, String password,
-      boolean acceptSelfSigned, String label) {
-
-    static InstallTarget of(ConnectionProfile profile) {
-      return new InstallTarget(profile.getServerRoot(), profile.getUser(), profile.getPassword(),
-          profile.isAcceptSelfSigned(), profile.getName());
-    }
+    buildService.build(config, target, true, () -> { });
   }
 
   /**
@@ -203,7 +123,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
       workspace.showInformationMessage("Add an eXist-db connection first (eXist-db pane → gear).");
       return null;
     }
-    ConnectionProfile resolved = resolveDefaultProfile(config.dir(), profiles);
+    ConnectionProfile resolved = buildService.resolveDefaultProfile(config.dir(), profiles);
     String dirPath = config.dir().getAbsolutePath();
     if (profileStore.isBuildDirTrusted(dirPath)) {
       return InstallTarget.of(resolved); // trusted → one-click to the resolved connection
@@ -219,61 +139,13 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     panel.add(new JLabel("Install to:"));
     panel.add(serverCombo);
     panel.add(remember);
-    if (!showConfirm("Build and Install", panel)) {
+    if (!buildService.showConfirm("Build and Install", panel)) {
       return null;
     }
     if (remember.isSelected()) {
       profileStore.addTrustedBuildDir(dirPath);
     }
     return InstallTarget.of(profiles.get(serverCombo.getSelectedIndex()));
-  }
-
-  /**
-   * The connection to install {@code buildRoot} to by default: the server named in the closest
-   * {@code .existdb.json} or {@code .env} (see {@link ProjectConnection}) matched to a saved
-   * connection, falling back to the default connection.
-   */
-  private ConnectionProfile resolveDefaultProfile(File buildRoot, List<ConnectionProfile> profiles) {
-    ConnectionProfile match = ProjectConnection.resolve(buildRoot, projectRoot())
-        .map(resolved -> matchProfile(resolved.serverRoot(), profiles))
-        .orElse(null);
-    return match != null ? match : defaultProfile(profiles);
-  }
-
-  /** The saved connection whose base URL matches {@code serverRoot} (eXist root), or {@code null}. */
-  private static ConnectionProfile matchProfile(String serverRoot, List<ConnectionProfile> profiles) {
-    String wanted = stripTrailingSlash(serverRoot);
-    for (ConnectionProfile profile : profiles) {
-      String base = stripTrailingSlash(profile.getBaseUrl());
-      if (base != null && (base.startsWith(wanted) || wanted.startsWith(base))) {
-        return profile;
-      }
-    }
-    return null;
-  }
-
-  private ConnectionProfile defaultProfile(List<ConnectionProfile> profiles) {
-    String defaultId = profileStore.defaultProfileId();
-    return profiles.stream()
-        .filter(p -> p.getId() != null && p.getId().equals(defaultId))
-        .findFirst()
-        .orElse(profiles.get(0));
-  }
-
-  private static String stripTrailingSlash(String url) {
-    if (url == null) {
-      return null;
-    }
-    String trimmed = url.trim();
-    while (trimmed.endsWith("/")) {
-      trimmed = trimmed.substring(0, trimmed.length() - 1);
-    }
-    return trimmed;
-  }
-
-  /** Single-quotes a path for the POSIX shell that {@link BuildRunner} runs the command in. */
-  private static String shellQuote(String path) {
-    return "'" + path.replace("'", "'\\''") + "'";
   }
 
   /**
@@ -291,7 +163,7 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     panel.add(new JLabel(config.command()));
     panel.add(new JLabel(dirPath));
     panel.add(remember);
-    if (!showConfirm("Build", panel)) {
+    if (!buildService.showConfirm("Build", panel)) {
       return false;
     }
     if (remember.isSelected()) {
@@ -300,54 +172,8 @@ public final class ProjectBuildCustomizer implements ProjectPopupMenuCustomizer 
     return true;
   }
 
-  /** The project's root directory (the {@code .xpr}'s folder), used as the build-root-walk boundary. */
-  private File projectRoot() {
-    ProjectController project = workspace.getProjectManager();
-    URL projectUrl = project == null ? null : project.getCurrentProjectURL();
-    if (projectUrl == null || !"file".equals(projectUrl.getProtocol())) {
-      return null;
-    }
-    try {
-      return new File(projectUrl.toURI()).getParentFile();
-    } catch (URISyntaxException e) {
-      return null;
-    }
-  }
-
-  /** Shows {@code content} in a native Oxygen OK/Cancel dialog; returns true when OK was pressed. */
-  private boolean showConfirm(String title, JComponent content) {
-    OKCancelDialog dialog = OxygenUIComponentsFactory.createOkCancelDialog(activeFrame(), title, true);
-    dialog.getContentPane().add(content, BorderLayout.CENTER);
-    dialog.pack();
-    dialog.setLocationRelativeTo(activeFrame());
-    dialog.setVisible(true);
-    return dialog.getResult() == OKCancelDialog.RESULT_OK;
-  }
-
-  /**
-   * The active editor's text font — Oxygen's effective editor font (default or user-customized) — so
-   * the build console matches the editor. {@code null} when no text editor is open (keeps the
-   * console's monospaced default). The SDK exposes no editor-font option, so we read it live.
-   */
-  private Font currentEditorFont() {
-    WSEditor editor = workspace.getCurrentEditorAccess(StandalonePluginWorkspace.MAIN_EDITING_AREA);
-    if (editor != null && editor.getCurrentPage() instanceof WSTextEditorPage page
-        && page.getTextComponent() instanceof JTextComponent component) {
-      return component.getFont();
-    }
-    return null;
-  }
-
   private static ImageIcon loadMenuIcon() {
     URL url = ProjectBuildCustomizer.class.getResource("/images/exist-server.png");
     return url == null ? null : new ImageIcon(url);
-  }
-
-  private static Frame activeFrame() {
-    Window window = KeyboardFocusManager.getCurrentKeyboardFocusManager().getActiveWindow();
-    while (window != null && !(window instanceof Frame)) {
-      window = window.getOwner();
-    }
-    return (Frame) window;
   }
 }
