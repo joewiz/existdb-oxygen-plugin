@@ -110,6 +110,24 @@ class ExistClientTest {
   }
 
   @Test
+  void exportCollectionSendsFormatAndSerializationParamsAndReadsFilename() throws Exception {
+    ExistClient.ExportedArchive zip = client.exportCollection(
+        "/db/apps/myapp", "zip", new SerializationOptions(false, false, true));
+    String q = server.lastExportQuery();
+    assertTrue(q.contains("path="), q);
+    assertTrue(q.contains("format=zip"), q);
+    assertTrue(q.contains("exist.expand-xincludes=no"), q); // eXist extension is exist.-prefixed
+    assertTrue(q.contains("omit-xml-declaration=yes"), q);
+    assertEquals("coll.zip", zip.fileName()); // from Content-Disposition
+    assertTrue(zip.bytes().length > 0);
+
+    // xar format → the server names it from the package descriptors.
+    ExistClient.ExportedArchive xar = client.exportCollection("/db/apps/myapp", "xar", null);
+    assertTrue(server.lastExportQuery().contains("format=xar"));
+    assertEquals("myapp-1.0.xar", xar.fileName());
+  }
+
+  @Test
   void putResourceSendsRawBodyWithPathAndMimeInQuery() throws Exception {
     client.putResource("/db/x.xq", "xquery version \"3.1\"; 99", "application/xquery");
     assertTrue(server.lastPutBody().contains("99")); // the body is the raw content now

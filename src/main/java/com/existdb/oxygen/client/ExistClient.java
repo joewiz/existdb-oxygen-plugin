@@ -49,6 +49,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -391,6 +393,46 @@ public final class ExistClient {
     RawResource raw = getResourceBytes(dbPath, options);
     String mime = raw.mimeType() != null ? raw.mimeType() : MimeTypes.byName(dbPath);
     return new ResourceBytes(raw.bytes(), mime, !MimeTypes.isTextual(mime));
+  }
+
+  /** An exported collection archive: the bytes plus the server-suggested file name. */
+  public record ExportedArchive(byte[] bytes, String fileName) {
+  }
+
+  /**
+   * GET /api/db/collection/export — downloads a collection's subtree as a {@code zip} or {@code xar}
+   * archive (binary-safe; XML resources serialized with {@code options}). For {@code xar} the server
+   * names the file from the package descriptors; the suggested name is read from
+   * {@code Content-Disposition} (falling back to the collection name). Throws on non-2xx — e.g. 400
+   * when {@code xar} is requested for a collection with no {@code expath-pkg.xml}.
+   */
+  public ExportedArchive exportCollection(String dbPath, String format, SerializationOptions options)
+      throws IOException, InterruptedException {
+    String path = "/db/collection/export?path=" + enc(dbPath) + "&format=" + enc(format)
+        + (options != null ? options.toQueryFragment() : "");
+    HttpRequest req = request(path).GET().build();
+    HttpResponse<byte[]> resp = sendBytes(req);
+    int code = resp.statusCode();
+    if (code < 200 || code >= 300) {
+      throw new ExistHttpException(code, req.method() + " " + req.uri().getPath(),
+          new String(resp.body(), StandardCharsets.UTF_8));
+    }
+    String fileName = fileNameFromContentDisposition(
+        resp.headers().firstValue("Content-Disposition").orElse(null));
+    if (fileName == null) {
+      String leaf = dbPath.substring(dbPath.lastIndexOf('/') + 1);
+      fileName = (leaf.isEmpty() ? "export" : leaf) + "." + format;
+    }
+    return new ExportedArchive(resp.body(), fileName);
+  }
+
+  /** Extracts {@code filename="…"} from a {@code Content-Disposition} header, or {@code null}. */
+  private static String fileNameFromContentDisposition(String header) {
+    if (header == null) {
+      return null;
+    }
+    Matcher m = Pattern.compile("filename\\*?=\"?([^\";]+)\"?").matcher(header);
+    return m.find() ? m.group(1).trim() : null;
   }
 
   // ---------------------------------------------------------------------------

@@ -483,19 +483,29 @@ public final class ProfileStore {
 
   /** Serialization options for opening a resource into the editor. */
   public SerializationOptions openSerialization() {
-    return serializationFor("open");
+    return serializationFor("open", true, true);
   }
 
   /** Serialization options for downloading/exporting a resource to disk. */
   public SerializationOptions downloadSerialization() {
-    return serializationFor("download");
+    return serializationFor("download", true, true);
   }
 
-  private SerializationOptions serializationFor(String scope) {
+  /**
+   * Serialization options for exporting a collection as a package (zip/.xar). eXide's Package
+   * defaults differ from Open/Download: indent off (compact, exact bytes for packaging).
+   */
+  public SerializationOptions packageSerialization() {
+    return serializationFor("package", false, true);
+  }
+
+  // expand-xincludes defaults off (preserve <xi:include>) for every scope; indent/omit vary.
+  private SerializationOptions serializationFor(String scope, boolean indentDefault,
+      boolean omitDefault) {
     return new SerializationOptions(
-        serializationFlag(scope, "indent", true),
+        serializationFlag(scope, "indent", indentDefault),
         serializationFlag(scope, "expand-xincludes", false),
-        serializationFlag(scope, "omit-xml-declaration", true));
+        serializationFlag(scope, "omit-xml-declaration", omitDefault));
   }
 
   /**
