@@ -21,6 +21,7 @@
  */
 package com.existdb.oxygen.ui;
 
+import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.project.BuildConfig;
@@ -42,14 +43,14 @@ import java.awt.Window;
 import java.io.File;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.HashMap;
+import java.nio.file.Files;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.SwingWorker;
 import javax.swing.text.JTextComponent;
 
 /**
@@ -75,13 +76,11 @@ public final class BuildService {
     this.buildViewId = buildViewId;
   }
 
-  /** Where to install: the eXist server root + credentials, and a display label. */
-  public record InstallTarget(String serverRoot, String user, String password,
-      boolean acceptSelfSigned, String label) {
+  /** Where to install: the saved connection to deploy the built {@code .xar} to. */
+  public record InstallTarget(ConnectionProfile profile) {
 
     public static InstallTarget of(ConnectionProfile profile) {
-      return new InstallTarget(profile.getServerRoot(), profile.getUser(), profile.getPassword(),
-          profile.isAcceptSelfSigned(), profile.getName());
+      return new InstallTarget(profile);
     }
   }
 
@@ -122,35 +121,41 @@ public final class BuildService {
       workspace.showStatusMessage("Build succeeded, but no .xar to install");
       onComplete.run();
     } else {
-      install(config.dir(), artifact.get(), target, onComplete);
+      install(artifact.get(), target, onComplete);
     }
   }
 
-  /** Installs the built {@code .xar} on the target server via {@code xst package install}. */
-  private void install(File dir, File xar, InstallTarget target, Runnable onComplete) {
+  /**
+   * Installs the built {@code .xar} on the target server by uploading it to existdb-openapi's
+   * multipart packages endpoint ({@link ExistClient#installPackageFile}) — no {@code xst} required.
+   */
+  private void install(File xar, InstallTarget target, Runnable onComplete) {
+    ConnectionProfile profile = target.profile();
     console.appendLine("");
-    console.appendLine("$ xst package install " + xar.getName()
-        + "  →  " + target.serverRoot() + " (as " + target.user() + ")");
-    Map<String, String> env = new HashMap<>();
-    env.put("EXISTDB_SERVER", target.serverRoot());
-    env.put("EXISTDB_USER", target.user());
-    env.put("EXISTDB_PASS", target.password() == null ? "" : target.password());
-    if (target.acceptSelfSigned()) {
-      // Let xst/node-exist accept eXist's default self-signed HTTPS cert (dev setups).
-      env.put("NODE_TLS_REJECT_UNAUTHORIZED", "0");
-    }
-    String command = "xst package install " + shellQuote(xar.getAbsolutePath());
-    BuildRunner.run(command, dir, env, console::appendLine, exitCode -> {
-      console.appendLine("");
-      if (exitCode == 0) {
-        console.appendLine("INSTALL SUCCESSFUL");
-        workspace.showStatusMessage("Installed " + xar.getName() + " to " + target.label());
-      } else {
-        console.appendLine("INSTALL FAILED (exit code " + exitCode + ")");
-        workspace.showStatusMessage("Install failed: " + xar.getName());
+    console.appendLine("Installing " + xar.getName() + "  →  " + profile.getName()
+        + " (as " + profile.getUser() + ")…");
+    new SwingWorker<ExistClient.InstalledPackage, Void>() {
+      @Override
+      protected ExistClient.InstalledPackage doInBackground() throws Exception {
+        return new ExistClient(profile)
+            .installPackageFile(xar.getName(), Files.readAllBytes(xar.toPath()));
       }
-      onComplete.run();
-    });
+
+      @Override
+      protected void done() {
+        try {
+          ExistClient.InstalledPackage pkg = get();
+          String version = pkg.version().isEmpty() ? "" : " " + pkg.version();
+          console.appendLine("INSTALL SUCCESSFUL: " + pkg.name() + version);
+          workspace.showStatusMessage("Installed " + pkg.name() + version + " to " + profile.getName());
+        } catch (Exception ex) {
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          console.appendLine("INSTALL FAILED: " + cause.getMessage());
+          workspace.showStatusMessage("Install failed: " + xar.getName());
+        }
+        onComplete.run();
+      }
+    }.execute();
   }
 
   /**
@@ -228,11 +233,6 @@ public final class BuildService {
       trimmed = trimmed.substring(0, trimmed.length() - 1);
     }
     return trimmed;
-  }
-
-  /** Single-quotes a path for the POSIX shell that {@link BuildRunner} runs the command in. */
-  private static String shellQuote(String path) {
-    return "'" + path.replace("'", "'\\''") + "'";
   }
 
   /** The project's root directory (the {@code .xpr}'s folder), used as the build-root-walk boundary. */

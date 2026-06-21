@@ -124,7 +124,7 @@ The descriptor is discovered by a **closest-ancestor walk**: from the selected f
 The Project-pane context menu offers **Build** and **Build & Install**:
 
 - **Build** runs the resolved command and streams its output to the **eXist-db Build** console. Commands run through your **login shell** (`$SHELL -l -i -c`), so tools installed via Homebrew, asdf, nvm, etc. resolve exactly as they do in your terminal — no need to put them on Oxygen's PATH or hardcode paths.
-- **Build & Install** then installs the freshly built `.xar` on the target server with [`xst`](https://github.com/eXist-db/xst) (`xst package install`), over eXist's existing REST. The first time (before you trust the project) a dialog shows the build command and lets you pick/override the **target connection** (defaulting to the resolved one). Credentials always come from your saved connection and are passed to `xst` through the environment, never on the command line. (`xst` must be installed — `npm install --global @existdb/xst`.)
+- **Build & Install** then installs the freshly built `.xar` on the target server by uploading it to existdb-openapi (`POST /api/packages/install`, multipart) — no `xst` or other external tool required. The first time (before you trust the project) a dialog shows the build command and lets you pick/override the **target connection** (defaulting to the resolved one); credentials come from that saved connection. (Requires an existdb-openapi build that accepts the multipart upload — see the note under [Install a local `.xar`](#install-a-local-xar).)
 
 Because running a project-defined command executes code on your machine, the first build per project shows a **trust prompt** with the exact command and directory; "Don't ask again for this project" remembers your choice (after which Build & Install is one click, to the resolved connection).
 
@@ -133,6 +133,12 @@ Because running a project-defined command executes code on your machine, the fir
 Set `"build": { "onSave": true }` to rebuild the package automatically whenever you save a file under it in Oxygen — handy for a tight edit/build loop. Add `"install": true` to also install the built `.xar` to the resolved connection after each successful build (the same target resolution as Build & Install). Output streams to the **eXist-db Build** console as usual, without stealing focus.
 
 It's off by default — a safety gate, like `sync.onSave`. Because auto-build runs your build command without asking each time, the **first** auto-build per project shows a one-time prompt to enable it (and remembers your choice). A burst of saves is **debounced** into a single build, and builds for one package never overlap — if you save while a build is running, exactly one rebuild is queued. Saves are detected inside Oxygen, so this covers your own edits (edits made by external tools aren't watched).
+
+### Install a local `.xar`
+
+The Package Manager (eXist-db pane → server node → **Manage Packages…**) has an **Install .xar…** action: pick a local `.xar` and it's uploaded and installed on that server. This uses the same mechanism as **Build & Install** — a `multipart/form-data` upload to existdb-openapi's `POST /api/packages/install` — so neither needs `xst` or any external tool.
+
+Package installs (both **Install .xar…** and **Build & Install**) require an existdb-openapi build whose `packages:install` reads the multipart `file` part (the consolidated upload handler + [eXist-db/exist#6507](https://github.com/eXist-db/exist/issues/6507)). Against older servers the upload returns a clear error.
 
 ### How the install connection is resolved
 

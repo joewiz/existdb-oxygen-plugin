@@ -34,6 +34,8 @@ import ro.sync.exml.workspace.api.standalone.ui.OxygenUIComponentsFactory;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Frame;
+import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -51,6 +53,7 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.ListSelectionModel;
@@ -60,19 +63,15 @@ import javax.swing.table.AbstractTableModel;
 
 /**
  * Manages the EXPath packages / apps installed on one eXist-db server: lists them, checks the public
- * registry for updates, applies an update, and removes a package (offering a forced removal when
- * other packages depend on it). Installing a locally built {@code .xar} is present but disabled until
- * existdb-openapi implements the multipart upload branch of {@code POST /api/packages/install}.
+ * registry for updates, applies an update, removes a package (offering a forced removal when other
+ * packages depend on it), and installs a locally built {@code .xar} (uploaded to
+ * {@code POST /api/packages/install} as multipart/form-data).
  *
  * <p>Actions apply immediately against the server (there is no staged "OK to commit"); the dialog's
  * OK/Cancel both simply close it. Built with {@link OxygenUIComponentsFactory} components and hosted
  * in an {@link OKCancelDialog} for native chrome.
  */
 public final class PackageManagerDialog {
-
-  private static final String INSTALL_DISABLED_TOOLTIP =
-      "Installing a local .xar requires a newer existdb-openapi (multipart upload is not yet "
-          + "implemented on the server). Update from the registry is available now.";
 
   private final transient ExistClient client;
   private final transient ProfileStore profileStore;
@@ -86,6 +85,7 @@ public final class PackageManagerDialog {
   private JButton updateButton;
   private JButton removeButton;
   private JLabel statusLabel;
+  private JProgressBar spinner;
   /** The registry {@code /find} URL for the selected registry (used to apply updates). */
   private transient String registryFindUrl;
 
@@ -192,9 +192,7 @@ public final class PackageManagerDialog {
     updateButton = button("Update", this::updateSelected);
     removeButton = button("Remove…", this::removeSelected);
     JButton refreshButton = button("Refresh", this::reload);
-    JButton installButton = button("Install .xar…", () -> { });
-    installButton.setEnabled(false);
-    installButton.setToolTipText(INSTALL_DISABLED_TOOLTIP);
+    JButton installButton = button("Install .xar…", this::installLocalXar);
 
     JPanel buttons = new JPanel();
     buttons.setLayout(new BoxLayout(buttons, BoxLayout.Y_AXIS));
@@ -210,7 +208,16 @@ public final class PackageManagerDialog {
 
   private JComponent buildStatusBar() {
     statusLabel = new JLabel(model.getRowCount() + " packages installed");
-    return statusLabel;
+    spinner = new JProgressBar();
+    spinner.setIndeterminate(true);
+    spinner.setVisible(false);
+    Dimension size = new Dimension(90, spinner.getPreferredSize().height);
+    spinner.setPreferredSize(size);
+    spinner.setMaximumSize(size);
+    JPanel bar = new JPanel(new BorderLayout());
+    bar.add(statusLabel, BorderLayout.WEST);
+    bar.add(spinner, BorderLayout.EAST);
+    return bar;
   }
 
   private JButton button(String label, Runnable action) {
@@ -331,6 +338,35 @@ public final class PackageManagerDialog {
     }.execute();
   }
 
+  /** Prompts for a local {@code .xar} and uploads it to the server via multipart install. */
+  private void installLocalXar() {
+    // Oxygen's own chooser so it honors the "Use platform file chooser" preference.
+    final File file = PluginWorkspaceProvider.getPluginWorkspace()
+        .chooseFile("Install .xar package", new String[] {"xar"}, "eXist-db packages (*.xar)");
+    if (file == null) {
+      return;
+    }
+    setBusy(true, "Installing " + file.getName() + "…");
+    new SwingWorker<ExistClient.InstalledPackage, Void>() {
+      @Override
+      protected ExistClient.InstalledPackage doInBackground() throws Exception {
+        return client.installPackageFile(file.getName(), Files.readAllBytes(file.toPath()));
+      }
+
+      @Override
+      protected void done() {
+        try {
+          ExistClient.InstalledPackage pkg = get();
+          String version = pkg.version().isEmpty() ? "" : " " + pkg.version();
+          reloadAfter("Installed " + pkg.name() + version);
+        } catch (Exception ex) {
+          error("Install failed", ex);
+          setBusy(false, null);
+        }
+      }
+    }.execute();
+  }
+
   private void removeSelected() {
     PackageInfo pkg = selectedPackage();
     if (pkg == null) {
@@ -413,6 +449,7 @@ public final class PackageManagerDialog {
   private void setBusy(boolean busy, String status) {
     host.getContentPane().setEnabled(!busy);
     table.setEnabled(!busy);
+    spinner.setVisible(busy); // indeterminate progress while a server op runs (install/update/remove)
     if (busy) {
       updateButton.setEnabled(false);
       removeButton.setEnabled(false);

@@ -143,6 +143,19 @@ class ExistClientTest {
   }
 
   @Test
+  void installPackageFileUploadsMultipartAndParsesResult() throws Exception {
+    ExistClient.InstalledPackage pkg =
+        client.installPackageFile("smoke-1.0.xar", "PKzip".getBytes(StandardCharsets.UTF_8));
+    assertEquals("x", pkg.name());
+    assertEquals("/db/system/repo/x", pkg.target());
+    // The request was a multipart upload carrying the .xar as the "file" part.
+    String body = server.lastPackageBody();
+    assertTrue(body.contains("name=\"file\""), body);
+    assertTrue(body.contains("filename=\"smoke-1.0.xar\""), body);
+    assertTrue(body.contains("PKzip"), body);
+  }
+
+  @Test
   void createCollectionSucceeds() throws Exception {
     client.createCollection("/db/new-coll"); // must not throw
   }
