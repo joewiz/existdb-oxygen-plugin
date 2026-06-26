@@ -74,20 +74,24 @@ public final class RunInResultsViewAction extends AbstractAction {
       workspace.showInformationMessage("Connect to eXist-db first (eXist-db view → Connect…).");
       return;
     }
-    String query = queryText((JTextComponent) page.getTextComponent());
+    // Run the selection if there is one, else the whole editor; remember where the selection starts
+    // so an error's selection-relative line/column maps back to the document for caret-jump.
+    final JTextComponent component = (JTextComponent) page.getTextComponent();
+    final String selection = component.getSelectedText();
+    final boolean usingSelection = selection != null && !selection.isBlank();
+    final String query = usingSelection ? selection : component.getText();
+    final int queryBaseOffset = usingSelection ? component.getSelectionStart() : 0;
     if (query.isBlank()) {
       workspace.showInformationMessage("Nothing to run — the editor is empty.");
       return;
     }
     String moduleLoadPath = LangServiceSupport.moduleLoadPath(editor.getEditorLocation());
     String serverId = ExistContext.serverIdFor(editor.getEditorLocation());
-    workspace.showView(viewId, true);
-    resultsView.run(client, serverId, query, moduleLoadPath, null);
-  }
-
-  private static String queryText(JTextComponent component) {
-    String selection = component.getSelectedText();
-    return selection != null && !selection.isBlank() ? selection : component.getText();
+    // Open and focus the pane only when the query returns results; on an error, leave the pane's
+    // open/closed state alone and jump the editor caret to the offending position instead.
+    resultsView.run(client, serverId, query, moduleLoadPath, null,
+        () -> workspace.showView(viewId, true),
+        cause -> QueryErrorCaret.jumpTo(component, query, queryBaseOffset, cause));
   }
 
   private static WSTextEditorPage textPage(WSEditor editor) {

@@ -57,6 +57,7 @@ import java.awt.event.MouseEvent;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
@@ -530,7 +531,7 @@ public final class ExistResultsView extends JPanel {
 
   /** Runs {@code query} on {@code client}, opening a fresh cursor and showing the first page. */
   public void run(ExistClient existClient, String serverIdentifier, String query,
-      String moduleLoadPath, String contextItem) {
+      String moduleLoadPath, String contextItem, Runnable onResults, Consumer<Throwable> onError) {
     // Clear the previous run's results up front, so they don't linger while this query runs or
     // remain visible (looking like this query's output) if it fails before producing any.
     clearResults();
@@ -554,8 +555,21 @@ public final class ExistResultsView extends JPanel {
               + totalItems);
           selectedIndex = totalItems > 0 ? 1 : 0;
           goToPage(1);
+          // Reveal/focus the pane only when there's something to show; an empty result just reports
+          // to the status bar and leaves the pane's open/closed state to the user.
+          if (totalItems > 0) {
+            if (onResults != null) {
+              onResults.run();
+            }
+          } else {
+            workspace.showStatusMessage("eXist-db: the query returned no results.");
+          }
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
+          // Don't open the pane on failure; let the caller jump the editor caret to the error.
+          if (onError != null) {
+            onError.accept(cause);
+          }
           showMessage(XQueryError.describe("Query failed", cause));
           metricsLabel.setText(" ");
         }
