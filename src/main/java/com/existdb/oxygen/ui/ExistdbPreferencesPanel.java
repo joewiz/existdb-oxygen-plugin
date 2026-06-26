@@ -626,12 +626,19 @@ public final class ExistdbPreferencesPanel {
     }
   }
 
-  /** A stable signature of the connection set (and default), to detect whether it changed on save. */
+  /**
+   * A stable signature of the connection set (and default), to detect whether it changed on save.
+   * Must cover every field that affects the live {@link com.existdb.oxygen.client.ExistClient} —
+   * including the password — so that editing it fires {@code notifyConnectionsChanged()} and the
+   * cached clients are rebuilt. Omitting the password let a password-only edit slip through, so the
+   * old credentials kept being used until the next restart.
+   */
   private static String connectionsSignature(List<ConnectionProfile> profiles, String defaultId) {
     StringBuilder sb = new StringBuilder("default=").append(defaultId).append('\n');
     for (ConnectionProfile p : profiles) {
       sb.append(p.getId()).append('|').append(p.getName()).append('|').append(p.getBaseUrl())
-          .append('|').append(p.getUser()).append('|').append(p.isAcceptSelfSigned()).append('\n');
+          .append('|').append(p.getUser()).append('|').append(p.getPassword())
+          .append('|').append(p.isAcceptSelfSigned()).append('\n');
     }
     return sb.toString();
   }
