@@ -24,6 +24,7 @@ package com.existdb.oxygen.ui;
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
 import com.existdb.oxygen.client.ExistHttpException;
+import com.existdb.oxygen.client.XQueryError;
 import com.existdb.oxygen.model.ConnectionProfile;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.protocol.ExistURLStreamHandler;
@@ -419,7 +420,7 @@ public final class SearchDialog extends JDialog {
       return "You don't have permission to search the \""
           + (field != null ? field.field() : "selected") + "\" field on this server.";
     }
-    return "Search failed: " + cause.getMessage();
+    return XQueryError.describe("Search failed", cause);
   }
 
   /**
