@@ -22,6 +22,7 @@
 package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.client.XQueryError;
 import com.existdb.oxygen.model.ProfileStore;
 import com.existdb.oxygen.query.QueryRunner;
 
@@ -537,7 +538,7 @@ public final class ExistResultsView extends JPanel {
           goToPage(1);
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
-          showMessage("Query failed: " + cause.getMessage());
+          showMessage(XQueryError.describe("Query failed", cause));
           metricsLabel.setText(" ");
         }
       }
@@ -599,7 +600,7 @@ public final class ExistResultsView extends JPanel {
               "Showing results " + start + " to " + (start + count - 1) + " of " + totalItems);
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
-          showMessage("Could not fetch results: " + cause.getMessage());
+          showMessage(XQueryError.describe("Could not fetch results", cause));
         }
         updateNavState();
       }

@@ -23,6 +23,7 @@ package com.existdb.oxygen.ui;
 
 import com.existdb.oxygen.ExistContext;
 import com.existdb.oxygen.client.ExistClient;
+import com.existdb.oxygen.client.XQueryError;
 import com.existdb.oxygen.lang.LangServiceSupport;
 import com.existdb.oxygen.query.QueryRunner;
 
@@ -110,7 +111,7 @@ public final class RunCurrentEditorAction extends AbstractAction {
           openResults(get(), serverId);
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
-          workspace.showErrorMessage("XQuery failed: " + cause.getMessage());
+          workspace.showErrorMessage(XQueryError.describe("XQuery failed", cause));
         }
       }
     }.execute();
