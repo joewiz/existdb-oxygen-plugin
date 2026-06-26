@@ -1189,15 +1189,7 @@ public final class ExistClient {
           (java.security.PrivilegedExceptionAction<HttpResponse<String>>) () ->
               http.send(req, HttpResponse.BodyHandlers.ofString()));
     } catch (java.security.PrivilegedActionException e) {
-      Throwable cause = e.getCause();
-      if (cause instanceof IOException io) {
-        throw io;
-      }
-      if (cause instanceof InterruptedException ie) {
-        Thread.currentThread().interrupt();
-        throw ie;
-      }
-      throw new IOException(cause);
+      throw unwrap(e);
     }
   }
 
@@ -1211,15 +1203,26 @@ public final class ExistClient {
           (java.security.PrivilegedExceptionAction<HttpResponse<byte[]>>) () ->
               http.send(req, HttpResponse.BodyHandlers.ofByteArray()));
     } catch (java.security.PrivilegedActionException e) {
-      Throwable cause = e.getCause();
-      if (cause instanceof IOException io) {
-        throw io;
-      }
-      if (cause instanceof InterruptedException ie) {
-        Thread.currentThread().interrupt();
-        throw ie;
-      }
-      throw new IOException(cause);
+      throw unwrap(e);
     }
+  }
+
+  /**
+   * Unwraps a {@link java.security.PrivilegedActionException} from a send into the exception the
+   * caller expects: an {@link InterruptedException} (re-setting the interrupt flag), or an
+   * {@link IOException} — translated to a friendly {@link ExistConnectionException} when the cause
+   * is an unreachable/timed-out/TLS connection, so {@code getMessage()} never reads {@code null}.
+   */
+  private IOException unwrap(java.security.PrivilegedActionException e) throws InterruptedException {
+    Throwable cause = e.getCause();
+    if (cause instanceof InterruptedException ie) {
+      Thread.currentThread().interrupt();
+      throw ie;
+    }
+    if (cause instanceof IOException io) {
+      ExistConnectionException friendly = ExistConnectionException.from(profile, io);
+      return friendly != null ? friendly : io;
+    }
+    return new IOException(cause);
   }
 }
