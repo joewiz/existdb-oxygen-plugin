@@ -693,9 +693,9 @@ public final class ExistdbBrowserPanel extends JPanel {
       menu.add(menuItem("New Collection…", "/images/NewFolder16.png", null,
           () -> newCollection(node, existNode)));
       menu.addSeparator();
-      menu.add(menuItem("Download (.zip)…", "/images/Save16.png", null,
+      menu.add(menuItem("Download as .zip…", "/images/Save16.png", null,
           () -> downloadCollection(existNode, "zip")));
-      menu.add(menuItem("Download Package (.xar)…", "/images/Save16.png", null,
+      menu.add(menuItem("Download as .xar…", "/images/Save16.png", null,
           () -> downloadCollection(existNode, "xar")));
       menu.addSeparator();
       menu.add(menuItem("Refresh", "/images/Refresh16.png", f5, () -> reloadNode(node)));
