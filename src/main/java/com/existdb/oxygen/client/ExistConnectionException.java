@@ -45,7 +45,7 @@ public class ExistConnectionException extends IOException {
    * Wraps a recognized connection failure in a user-facing message naming the server, or returns
    * {@code null} if the cause isn't a connection problem (the caller then rethrows it unchanged).
    */
-  static ExistConnectionException from(ConnectionProfile profile, IOException cause) {
+  public static ExistConnectionException from(ConnectionProfile profile, IOException cause) {
     String server = "\"" + profile.getName() + "\" at " + profile.getBaseUrl();
     String message;
     if (cause instanceof UnknownHostException) {

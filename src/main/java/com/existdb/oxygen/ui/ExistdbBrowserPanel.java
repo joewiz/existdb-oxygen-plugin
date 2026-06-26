@@ -45,8 +45,10 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Frame;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Image;
+import java.awt.Insets;
 import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.RenderingHints;
@@ -58,6 +60,7 @@ import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
@@ -141,6 +144,8 @@ public final class ExistdbBrowserPanel extends JPanel {
 
   private final transient StandalonePluginWorkspace workspace;
   private final transient ProfileStore profileStore;
+  /** Reachability of each server, shown as a status dot on its node and polled while the pane shows. */
+  private final transient ConnectionHealth health;
 
   private final DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("servers");
   // Inline rename commits land in valueForPathChanged: keep the ExistNode userObject and perform the
@@ -174,6 +179,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     super(new BorderLayout());
     this.workspace = workspace;
     this.profileStore = profileStore;
+    this.health = new ConnectionHealth(profileStore::loadAll, tree::repaint);
 
     setMinimumSize(new Dimension(150, 0));
     setPreferredSize(new Dimension(260, 400));
@@ -213,6 +219,18 @@ public final class ExistdbBrowserPanel extends JPanel {
     // upload), so the new resources appear without a manual Refresh.
     ExistContext.addCollectionChangeListener((serverId, path) ->
         SwingUtilities.invokeLater(() -> refreshIfShowing(serverId, path)));
+
+    // Poll server reachability only while the pane is actually showing, so a hidden/unwatched view
+    // sends nothing.
+    addHierarchyListener(e -> {
+      if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0) {
+        if (isShowing()) {
+          health.start();
+        } else {
+          health.stop();
+        }
+      }
+    });
   }
 
   /**
@@ -517,6 +535,7 @@ public final class ExistdbBrowserPanel extends JPanel {
       rootNode.add(serverNode);
     }
     treeModel.reload();
+    health.serversChanged();
   }
 
   // ---------------------------------------------------------------------------
@@ -1587,8 +1606,11 @@ public final class ExistdbBrowserPanel extends JPanel {
         node.removeAllChildren();
         try {
           populateChildren(node, existNode, get());
+          health.record(existNode.serverId, null);
         } catch (Exception ex) {
-          workspace.showErrorMessage("Failed to list " + existNode.path + ": " + ex.getMessage());
+          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+          health.record(existNode.serverId, cause);
+          workspace.showErrorMessage("Failed to list " + existNode.path + ": " + cause.getMessage());
         }
         treeModel.reload(node);
         tree.expandPath(new TreePath(node.getPath()));
@@ -2463,31 +2485,82 @@ public final class ExistdbBrowserPanel extends JPanel {
   }
 
   /** Node tooltip: a server node shows its base URL; other nodes show their DB path. */
-  private static String tooltipFor(ExistNode existNode) {
+  private String tooltipFor(ExistNode existNode) {
     if (!DB_ROOT.equals(existNode.path)) {
       return existNode.path;
     }
     ExistClient client = ExistContext.clientById(existNode.serverId);
     String base = client != null ? client.getProfile().getBaseUrl() : "";
-    return base.isEmpty() ? existNode.name : existNode.name + " — " + base;
+    String label = base.isEmpty() ? existNode.name : existNode.name + " — " + base;
+    ConnectionHealth.Health h = health.health(existNode.serverId);
+    return switch (h.status()) {
+      case ONLINE -> label + " (online)";
+      case OFFLINE -> label + " (offline" + (h.detail() == null ? "" : " — " + h.detail()) + ")";
+      case AUTH_FAILED -> label + " (" + h.detail() + ")";
+      case UNKNOWN -> label;
+    };
   }
 
-  /** Renders collections (incl. server nodes) as folders, resources as files, with a tooltip. */
-  private static final class ExistTreeCellRenderer extends DefaultTreeCellRenderer {
+  /** Renders collections (incl. server nodes) as folders, resources as files, with a tooltip. A
+   * server node also gets a reachability dot painted to the right of its name. */
+  private final class ExistTreeCellRenderer extends DefaultTreeCellRenderer {
+    private static final int DOT = 8;
+    private static final int DOT_GAP = 6;
+    /** The status-dot color for the row being rendered, or null for rows that get no dot. */
+    private transient Color dotColor;
+
     @Override
     public Component getTreeCellRendererComponent(JTree t, Object value, boolean selected,
         boolean expanded, boolean leaf, int row, boolean focus) {
       super.getTreeCellRendererComponent(t, value, selected, expanded, leaf, row, focus);
       // Inherit the Oxygen tree's font so labels match the rest of the workbench's tree views.
       setFont(t.getFont());
+      dotColor = null;
       if (value instanceof DefaultMutableTreeNode node
           && node.getUserObject() instanceof ExistNode existNode) {
         setIcon(iconFor(existNode, expanded));
         setToolTipText(tooltipFor(existNode));
+        if (DB_ROOT.equals(existNode.path)) {
+          dotColor = health.health(existNode.serverId).status().color();
+        }
       } else {
         setToolTipText(null);
       }
       return this;
+    }
+
+    @Override
+    public Dimension getPreferredSize() {
+      Dimension size = super.getPreferredSize();
+      if (size != null && dotColor != null) {
+        size.width += DOT_GAP + DOT;
+      }
+      return size;
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+      super.paintComponent(g);
+      if (dotColor == null) {
+        return;
+      }
+      Insets insets = getInsets();
+      int x = insets.left;
+      if (getIcon() != null) {
+        x += getIcon().getIconWidth() + getIconTextGap();
+      }
+      x += getFontMetrics(getFont()).stringWidth(getText()) + DOT_GAP;
+      int y = (getHeight() - DOT) / 2;
+      Graphics2D g2 = (Graphics2D) g.create();
+      try {
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setColor(dotColor);
+        g2.fillOval(x, y, DOT, DOT);
+        g2.setColor(dotColor.darker());
+        g2.drawOval(x, y, DOT, DOT);
+      } finally {
+        g2.dispose();
+      }
     }
 
     /** Server nodes get the eXist icon; collections folders; resources a per-extension type icon. */
