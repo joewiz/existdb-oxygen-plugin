@@ -60,7 +60,7 @@ The completion, hover (rich Markdown with Parameters/Returns), parameter hints, 
 
 - **Open** — loading a resource into the editor.
 - **Download** — saving a single resource to disk (the eXist-db pane's *Download…* action and drag-to-Finder export).
-- **Package** — exporting a whole collection to disk (the eXist-db pane's collection *Download (.zip)…* / *Download Package (.xar)…* actions).
+- **Package** — exporting a whole collection to disk (the eXist-db pane's collection *Download as .zip…* / *Download as .xar…* actions).
 
 Each has three toggles, mirroring eXide, sent to existdb-openapi (on `GET /api/db/resource` for Open/Download, `GET /api/db/collection/export` for Package) as the W3C `indent` and `omit-xml-declaration` parameters plus the eXist serializer extension `exist.expand-xincludes` (eXist extensions take the `exist.` prefix; the W3C parameters do not):
 
@@ -68,7 +68,7 @@ Each has three toggles, mirroring eXide, sent to existdb-openapi (on `GET /api/d
 - **Expand XIncludes** — when **off** (the default for all three), `<xi:include>` elements are returned **verbatim** rather than expanded. This matters most for **Open**: editing an expanded document and saving it back would overwrite the stored resource with the expanded content, destroying the includes. Leaving it off preserves them across the round-trip.
 - **Omit XML Declaration** — drop the `<?xml …?>` prolog (default on).
 
-**Collection download.** Right-clicking a collection in the eXist-db pane offers **Download (.zip)…** (the collection's subtree zipped) and **Download Package (.xar)…** (an installable EXPath package named from the app's descriptors), both saved to `~/Downloads` and serialized per the **Package** column.
+**Collection download.** Right-clicking a collection in the eXist-db pane offers **Download as .zip…** (the collection's subtree zipped) and **Download as .xar…** (an installable EXPath package named from the app's descriptors), both saved to `~/Downloads` and serialized per the **Package** column.
 
 Requires a server whose `/api/db/resource` and `/api/db/collection/export` honor these parameters (existdb-openapi [#59](https://github.com/eXist-db/existdb-openapi/pull/59) and the collection-export endpoint); against older servers the params are ignored (or, for `expand-xincludes` on a pre-#59 build, may error).
 

@@ -303,21 +303,15 @@ public final class ExistdbPreferencesPanel {
     }
   }
 
-  /** Pane preferences: hidden-file handling, and restoring the open collections on startup. */
+  /** Pane preferences: hidden-file handling, restoring open collections, and reopening tabs. */
   private JComponent buildBrowsingPrefs() {
     showHiddenPref.setSelected(store.showHidden());
     uploadHiddenPref.setSelected(store.uploadHidden());
     restorePanePref.setSelected(store.restorePane());
     reopenTabsPref.setSelected(store.reopenTabs());
 
-    JComponent hidden = section("Hidden files", leftAlignedColumn(showHiddenPref, uploadHiddenPref));
-    JComponent pane =
-        section("eXist-db pane", leftAlignedColumn(restorePanePref, reopenTabsPref));
-
-    JPanel prefs = new JPanel(new BorderLayout());
-    prefs.add(hidden, BorderLayout.NORTH);
-    prefs.add(pane, BorderLayout.SOUTH);
-    return prefs;
+    return section("eXist-db pane",
+        leftAlignedColumn(showHiddenPref, uploadHiddenPref, restorePanePref, reopenTabsPref));
   }
 
   /**
@@ -353,7 +347,14 @@ public final class ExistdbPreferencesPanel {
         openExpandPref, downloadExpandPref, packageExpandPref);
     serializationRow(grid, c, 3, "Omit XML Declaration",
         openOmitPref, downloadOmitPref, packageOmitPref);
-    return section("Loading documents from eXist-db", grid);
+    // A glue cell to the right absorbs the extra width so the grid stays flush left (not centered),
+    // matching the other preference sections.
+    c.gridy = 0;
+    c.gridx = 4;
+    c.weightx = 1.0;
+    c.fill = GridBagConstraints.HORIZONTAL;
+    grid.add(new JPanel(), c);
+    return section("Serialization defaults", grid);
   }
 
   private static void serializationRow(JPanel grid, GridBagConstraints c, int row, String label,
