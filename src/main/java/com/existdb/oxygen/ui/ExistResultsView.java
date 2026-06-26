@@ -452,6 +452,7 @@ public final class ExistResultsView extends JPanel {
     nav.add(lastButton);
 
     JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 2));
+    right.add(clearButton());
     right.add(pageSizeCombo);
 
     // Equal-weight side cells alone don't center the nav: GridBag only splits the *extra* space
@@ -512,10 +513,27 @@ public final class ExistResultsView extends JPanel {
     }, false);
   }
 
+  /** The toolbar "Clear results" button — discards the current results and releases the cursor. */
+  private JButton clearButton() {
+    return OxygenUIComponentsFactory.createToolbarButton(new AbstractAction() {
+      {
+        putValue(SMALL_ICON, icon("/images/Remove16.png"));
+        putValue(SHORT_DESCRIPTION, "Clear results");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        clearResults();
+      }
+    }, false);
+  }
+
   /** Runs {@code query} on {@code client}, opening a fresh cursor and showing the first page. */
   public void run(ExistClient existClient, String serverIdentifier, String query,
       String moduleLoadPath, String contextItem) {
-    closeCursorQuietly();
+    // Clear the previous run's results up front, so they don't linger while this query runs or
+    // remain visible (looking like this query's output) if it fails before producing any.
+    clearResults();
     this.client = existClient;
     this.serverId = serverIdentifier;
     metricsLabel.setText("Running…");
@@ -551,23 +569,42 @@ public final class ExistResultsView extends JPanel {
     refreshPage();
   }
 
+  /** Removes all rendered result rows and their floating copy/open buttons (no state reset). */
+  private void clearRows() {
+    rows.removeAll();
+    rowPanels.clear();
+    rowTextPanes.clear();
+    for (JButton button : rowCopyButtons) {
+      layered.remove(button);
+    }
+    rowCopyButtons.clear();
+    for (JButton button : rowOpenButtons) {
+      layered.remove(button);
+    }
+    rowOpenButtons.clear();
+    layered.repaint();
+    rows.revalidate();
+    rows.repaint();
+  }
+
+  /** Discards the displayed results and releases the cursor — the toolbar Clear action, and the
+   * up-front reset on each re-run so stale results never linger. */
+  private void clearResults() {
+    closeCursorQuietly();
+    cursor = null;
+    totalItems = 0;
+    page = 1;
+    selectedIndex = 0;
+    clearRows();
+    rangeLabel.setText("No results");
+    metricsLabel.setText(" ");
+    updateNavState();
+  }
+
   private void refreshPage() {
     if (cursor == null || totalItems == 0) {
-      rows.removeAll();
-      rowPanels.clear();
-      rowTextPanes.clear();
-      for (JButton button : rowCopyButtons) {
-        layered.remove(button);
-      }
-      rowCopyButtons.clear();
-      for (JButton button : rowOpenButtons) {
-        layered.remove(button);
-      }
-      rowOpenButtons.clear();
-      layered.repaint();
+      clearRows();
       rangeLabel.setText("No results");
-      rows.revalidate();
-      rows.repaint();
       updateNavState();
       return;
     }
