@@ -213,6 +213,7 @@ Limitations in Oxygen's plugin SDK (28.1) that forced a workaround here, or that
 
 - Oxygen XML Editor **26.0+** (developed against 28.1, which bundles a Java 21 runtime).
 - An eXist-db 7 instance with the **existdb-openapi** app installed (provides `/exist/apps/existdb-openapi/api/*`).
+  - **Pre-1.0 caveat — needs the "trio" build.** Several features rely on existdb-openapi (and eXist core) behavior that is still in-flight across open PRs and not yet in a published release — e.g. create-on-`PUT` of a resource, the structured `/api/query` error envelope, and multipart `.xar` install. Until those land in releases, full functionality requires the **trio** integration build (eXist core + existdb-openapi + eXide merged together). The exact required behaviors, the pinned image CI runs against, and a merge-down checklist are documented in [`.github/trio-image.md`](.github/trio-image.md). Against a plain published eXist 7 + released existdb-openapi, those specific features will be unavailable until the constituent PRs ship.
 
 ## Build
 
