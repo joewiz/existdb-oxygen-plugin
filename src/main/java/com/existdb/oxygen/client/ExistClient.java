@@ -502,22 +502,35 @@ public final class ExistClient {
     return new RemoveResult(true, List.of(), null);
   }
 
+  /** An installed package's identity, from a successful install response's {@code result}. */
+  public record InstalledPackage(String name, String version, String target) {
+  }
+
   /**
-   * POST /api/packages/install (multipart) — installs a package from a local {@code .xar}.
+   * POST /api/packages/install (multipart) — installs a package from a local {@code .xar}, uploaded
+   * as the {@code file} part of a {@code multipart/form-data} body. Returns the installed package's
+   * name/version/target on success; throws {@link IOException} with the server message on failure.
    *
-   * <p>The existdb-openapi {@code packages:install} handler does not yet read the multipart
-   * {@code file} part (only the JSON registry path is implemented), so this currently has no effect
-   * server-side; the Package Manager's "Install .xar…" action stays disabled until the server ships
-   * the multipart branch (tasking filed 2026-06-06). Kept here so enabling it is a one-line change.
+   * <p>Requires an existdb-openapi build whose {@code packages:install} reads the multipart
+   * {@code file} part (the consolidated upload handler + eXist-db/exist#6507).</p>
    */
-  public void installPackageFile(String filename, byte[] xar)
+  public InstalledPackage installPackageFile(String filename, byte[] xar)
       throws IOException, InterruptedException {
     String boundary = "----existdb-oxygen-" + UUID.randomUUID();
     byte[] body = multipartFile(boundary, "file", filename, xar);
-    send(request("/packages/install")
+    JSONObject o = new JSONObject(send(request("/packages/install")
         .header("Content-Type", "multipart/form-data; boundary=" + boundary)
         .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-        .build());
+        .build()).body());
+    if (!o.optBoolean("success", false)) {
+      throw new IOException("Install failed: " + installError(o));
+    }
+    JSONObject result = o.optJSONObject("result");
+    if (result == null) {
+      result = new JSONObject();
+    }
+    return new InstalledPackage(result.optString("name", filename),
+        result.optString("version", ""), result.optString("target", ""));
   }
 
   /**
