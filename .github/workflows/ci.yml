@@ -30,6 +30,13 @@ jobs:
   integration:
     name: integration (Docker)
     runs-on: ubuntu-latest
+    env:
+      # Pinned trio image: eXist 7 + existdb-openapi carrying the behavior the plugin relies on
+      # (create-on-PUT, the #71 query-error envelope, multipart install #49, collection export,
+      # ft:fields, vector). Public on GHCR, so no docker login is needed. Provenance, the
+      # behaviors it guarantees, the merge-down checklist, and the rebuild recipe are in
+      # .github/trio-image.md — bump this digest there in lockstep when the trio advances.
+      TRIO_IMAGE: ghcr.io/joewiz/existdb-trio@sha256:427fa2dd82a135da952db07544ef222cd889e0ca6495197b24f817c19a9a2630
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -39,5 +46,6 @@ jobs:
           java-version: '21'
           cache: maven
       # ubuntu runners expose /var/run/docker.sock natively, so Testcontainers boots eXist 7.
-      - name: Integration tests against eXist 7 + existdb-openapi
-        run: mvn -B verify -Pit
+      # The IT reads -Dexistdb.docker.image and caps the container at 4 GiB (see ExistClientIT).
+      - name: Integration tests against the pinned trio image
+        run: mvn -B verify -Pit -Dexistdb.docker.image=$TRIO_IMAGE
