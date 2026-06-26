@@ -53,17 +53,22 @@ import org.testcontainers.utility.DockerImageName;
 @SuppressWarnings("PMD.ClassNamingConventions")
 class ExistClientIT {
 
-  // NOTE: the resource round-trip below exercises the consolidated content endpoint
-  // (existdb-openapi#59 — raw GET/PUT /api/db/resource?path=). The published beta3 image still
-  // serves the old JSON-envelope/path-in-URL contract, so against it the resource assertions fail;
-  // override with -Dexistdb.docker.image=<an image carrying #59> until a published image ships it.
+  // This IT exercises trio-era openapi behavior (e.g. create-on-PUT /api/db/resource?path=, the #71
+  // query-error envelope) that the published beta3 image lacks. CI overrides the image to the pinned
+  // trio build via -Dexistdb.docker.image=<digest> (see .github/trio-image.md); the beta3 default
+  // here only keeps a local `mvn verify -Pit` from breaking when no override is given.
   private static final String IMAGE =
       System.getProperty("existdb.docker.image", "existdb/existdb:7.0.0-beta3");
   private static final String APP_PATH = "/exist/apps/existdb-openapi";
+  // The trio image's JVM runs ZGC with -XX:MaxRAMPercentage=75, so the heap is sized to the
+  // container's cgroup memory limit. With no limit it would size to ~75% of the runner's full RAM
+  // and risk an OOM-kill; cap the container at 4 GiB (well above the ~2.6 GiB working set).
+  private static final long MEMORY_LIMIT_BYTES = 4L * 1024 * 1024 * 1024;
 
   private static final GenericContainer<?> EXIST =
       new GenericContainer<>(DockerImageName.parse(IMAGE))
           .withExposedPorts(8080)
+          .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withMemory(MEMORY_LIMIT_BYTES))
           .waitingFor(Wait.forHttp(APP_PATH + "/api/langservice/capabilities")
               .forStatusCode(200)
               .withStartupTimeout(Duration.ofMinutes(3)));
