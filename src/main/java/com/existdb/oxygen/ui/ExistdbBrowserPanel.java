@@ -1594,6 +1594,10 @@ public final class ExistdbBrowserPanel extends JPanel {
       return;
     }
     existNode.loading = true;
+    // Capture whether this load is part of the startup restore now, at dispatch — not in the async
+    // callback below, where it would read false: the restore clears `restoring` as soon as the last
+    // saved path is dispatched, before this (async) load actually completes.
+    final boolean restoreLoad = restoring;
     new SwingWorker<List<ExistClient.ChildEntry>, Void>() {
       @Override
       protected List<ExistClient.ChildEntry> doInBackground() throws Exception {
@@ -1608,9 +1612,7 @@ public final class ExistdbBrowserPanel extends JPanel {
           populateChildren(node, existNode, get());
           health.record(existNode.serverId, null);
         } catch (Exception ex) {
-          Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-          health.record(existNode.serverId, cause);
-          workspace.showErrorMessage("Failed to list " + existNode.path + ": " + cause.getMessage());
+          reportListFailure(existNode, ex, restoreLoad);
         }
         treeModel.reload(node);
         tree.expandPath(new TreePath(node.getPath()));
@@ -1620,6 +1622,21 @@ public final class ExistdbBrowserPanel extends JPanel {
         }
       }
     }.execute();
+  }
+
+  /**
+   * Records a failed collection listing and reports it. The startup pane-restore re-expands
+   * saved-open collections automatically, so a node that can no longer be listed (permission, server
+   * offline, or deleted since) is skipped silently when {@code restoreLoad} is true — the connection
+   * is still flagged via the status dot — rather than interrupting launch with a modal. A
+   * user-initiated expand ({@code restoreLoad} false) still shows the error.
+   */
+  private void reportListFailure(ExistNode existNode, Exception ex, boolean restoreLoad) {
+    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+    health.record(existNode.serverId, cause);
+    if (!restoreLoad) {
+      workspace.showErrorMessage("Failed to list " + existNode.path + ": " + cause.getMessage());
+    }
   }
 
   /** Builds child nodes for a freshly listed collection and marks it loaded. */
