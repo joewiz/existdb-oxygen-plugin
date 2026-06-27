@@ -62,8 +62,10 @@ public final class MockExistServer implements AutoCloseable {
     handle(prefix + "/db", ex -> {
       if (ex.getRequestURI().getPath().endsWith("/api/db")) {
         respond(ex, 200, "{\"type\":\"collection\",\"name\":\"db\",\"path\":\"/db\",\"children\":["
-            + "{\"type\":\"collection\",\"name\":\"apps\",\"path\":\"/db/apps\"},"
-            + "{\"type\":\"resource\",\"name\":\"index.xq\",\"path\":\"/db/index.xq\"}]}");
+            + "{\"type\":\"collection\",\"name\":\"apps\",\"path\":\"/db/apps\",\"accessible\":true},"
+            + "{\"type\":\"resource\",\"name\":\"index.xq\",\"path\":\"/db/index.xq\"},"
+            + "{\"type\":\"collection\",\"name\":\"secret\",\"path\":\"/db/secret\","
+            + "\"accessible\":false,\"error\":\"Permission denied\"}]}");
       } else {
         respond(ex, 404, "{}");
       }

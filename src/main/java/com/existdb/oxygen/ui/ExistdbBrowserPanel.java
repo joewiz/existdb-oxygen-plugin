@@ -133,6 +133,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   private static final ImageIcon SERVER_ICON =
       loadFirstIcon("/images/exist-server.png", "/images/DBConnection16.png");
 
+  /** Dimmed label color for a locked (inaccessible) collection. */
+  private static final Color LOCKED_FOREGROUND = Color.GRAY;
+
   /** Maps a file extension (lower-case) to one of Oxygen's bundled file-type icons, and caches them. */
   private static final Map<String, String> TYPE_ICON_RESOURCES = buildTypeIconResources();
   private static final Map<String, ImageIcon> TYPE_ICON_CACHE = new ConcurrentHashMap<>();
@@ -281,8 +284,10 @@ public final class ExistdbBrowserPanel extends JPanel {
         continue;
       }
       DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(new ExistNode(
-          existNode.serverId, childPathOf(existNode, child), child.name(), child.collection()));
-      if (child.collection()) {
+          existNode.serverId, childPathOf(existNode, child), child.name(), child.collection(),
+          child.accessible()));
+      // A collection we can't enter gets no placeholder, so it renders as a non-expandable leaf.
+      if (child.collection() && child.accessible()) {
         addPlaceholder(childNode);
       }
       treeModel.insertNodeInto(childNode, node,
@@ -1586,7 +1591,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     if (!(node.getUserObject() instanceof ExistNode existNode)) {
       return;
     }
-    if (!existNode.collection || existNode.loaded || existNode.loading) {
+    if (!existNode.collection || !existNode.accessible || existNode.loaded || existNode.loading) {
       return;
     }
     final ExistClient client = ExistContext.clientById(existNode.serverId);
@@ -1631,9 +1636,10 @@ public final class ExistdbBrowserPanel extends JPanel {
         continue; // hidden (dot-prefixed) resource/collection
       }
       String childPath = childPathOf(existNode, child);
-      DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(
-          new ExistNode(existNode.serverId, childPath, child.name(), child.collection()));
-      if (child.collection()) {
+      DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(new ExistNode(
+          existNode.serverId, childPath, child.name(), child.collection(), child.accessible()));
+      // A collection we can't enter gets no placeholder, so it renders as a non-expandable leaf.
+      if (child.collection() && child.accessible()) {
         addPlaceholder(childNode);
       }
       node.add(childNode);
@@ -2487,7 +2493,8 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** Node tooltip: a server node shows its base URL; other nodes show their DB path. */
   private String tooltipFor(ExistNode existNode) {
     if (!DB_ROOT.equals(existNode.path)) {
-      return existNode.path;
+      return existNode.accessible ? existNode.path
+          : existNode.path + " — you don't have permission to open this collection";
     }
     ExistClient client = ExistContext.clientById(existNode.serverId);
     String base = client != null ? client.getProfile().getBaseUrl() : "";
@@ -2522,6 +2529,10 @@ public final class ExistdbBrowserPanel extends JPanel {
         setToolTipText(tooltipFor(existNode));
         if (DB_ROOT.equals(existNode.path)) {
           dotColor = health.health(existNode.serverId).status().color();
+        }
+        // Dim a locked collection's label (but keep it legible on a selected/highlighted row).
+        if (!existNode.accessible && !selected) {
+          setForeground(LOCKED_FOREGROUND);
         }
       } else {
         setToolTipText(null);
@@ -2563,12 +2574,16 @@ public final class ExistdbBrowserPanel extends JPanel {
       }
     }
 
-    /** Server nodes get the eXist icon; collections folders; resources a per-extension type icon. */
+    /** Server nodes get the eXist icon; collections folders; resources a per-extension type icon.
+     * A collection we can't enter gets a dimmed folder with a small lock overlay. */
     private javax.swing.Icon iconFor(ExistNode existNode, boolean expanded) {
       if (DB_ROOT.equals(existNode.path) && SERVER_ICON != null) {
         return SERVER_ICON;
       }
       if (existNode.collection) {
+        if (!existNode.accessible) {
+          return new LockedFolderIcon(getDefaultClosedIcon());
+        }
         return expanded ? getDefaultOpenIcon() : getDefaultClosedIcon();
       }
       return fileIcon(existNode.name, getDefaultLeafIcon());
@@ -2700,14 +2715,21 @@ public final class ExistdbBrowserPanel extends JPanel {
     final String path;
     final String name;
     final boolean collection;
+    /** The server's read verdict (existdb-openapi#72); false → a locked collection we can't enter. */
+    final boolean accessible;
     boolean loaded;
     boolean loading;
 
     ExistNode(String serverId, String path, String name, boolean collection) {
+      this(serverId, path, name, collection, true);
+    }
+
+    ExistNode(String serverId, String path, String name, boolean collection, boolean accessible) {
       this.serverId = serverId;
       this.path = path;
       this.name = name;
       this.collection = collection;
+      this.accessible = accessible;
     }
 
     @Override
