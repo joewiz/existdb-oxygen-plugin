@@ -295,6 +295,83 @@ public final class ExistdbBrowserPanel extends JPanel {
     }
   }
 
+  /**
+   * The Refresh toolbar action: re-check every server's reachability, and reconcile the contents of
+   * each currently-open (expanded) collection against the server — adding new children and dropping
+   * gone ones, while leaving existing nodes (and their expansion) in place.
+   */
+  private void refreshAll() {
+    health.refresh();
+    for (DefaultMutableTreeNode node : expandedCollectionNodes()) {
+      refreshNode(node);
+    }
+  }
+
+  /** The currently-expanded, loaded collection nodes (the visible collections), snapshotted. */
+  private List<DefaultMutableTreeNode> expandedCollectionNodes() {
+    List<DefaultMutableTreeNode> out = new ArrayList<>();
+    for (int row = 0; row < tree.getRowCount(); row++) {
+      TreePath path = tree.getPathForRow(row);
+      if (path != null && tree.isExpanded(path)
+          && path.getLastPathComponent() instanceof DefaultMutableTreeNode node
+          && node.getUserObject() instanceof ExistNode existNode
+          && existNode.collection && existNode.loaded) {
+        out.add(node);
+      }
+    }
+    return out;
+  }
+
+  /** Re-lists one open collection and reconciles its children, recording the server's reachability. */
+  private void refreshNode(DefaultMutableTreeNode node) {
+    if (!(node.getUserObject() instanceof ExistNode existNode)
+        || !existNode.collection || !existNode.accessible) {
+      return;
+    }
+    final ExistClient client = ExistContext.clientById(existNode.serverId);
+    if (client == null) {
+      return;
+    }
+    new SwingWorker<List<ExistClient.ChildEntry>, Void>() {
+      @Override
+      protected List<ExistClient.ChildEntry> doInBackground() throws Exception {
+        return client.listChildren(existNode.path);
+      }
+
+      @Override
+      protected void done() {
+        try {
+          reconcileChildren(node, existNode, get());
+          health.record(existNode.serverId, null);
+        } catch (Exception ex) {
+          // Best-effort refresh: a server that's now unreachable just keeps its stale view (and its
+          // status dot turns red); nothing to interrupt the user with.
+          health.record(existNode.serverId, ex.getCause() != null ? ex.getCause() : ex);
+        }
+      }
+    }.execute();
+  }
+
+  /** Removes children the server no longer lists, then adds any new ones (existing nodes untouched). */
+  private void reconcileChildren(DefaultMutableTreeNode node, ExistNode existNode,
+      List<ExistClient.ChildEntry> entries) {
+    boolean showHidden = profileStore.showHidden();
+    Set<String> serverNames = new HashSet<>();
+    for (ExistClient.ChildEntry child : entries) {
+      if (showHidden || !child.name().startsWith(".")) {
+        serverNames.add(child.name());
+      }
+    }
+    for (int i = node.getChildCount() - 1; i >= 0; i--) {
+      if (node.getChildAt(i) instanceof DefaultMutableTreeNode child
+          && child.getUserObject() instanceof ExistNode childInfo
+          && !serverNames.contains(childInfo.name)) {
+        treeModel.removeNodeFromParent(child);
+      }
+    }
+    mergeNewChildren(node, existNode, entries);
+  }
+
   /** Attaches a save listener to an {@code exist:} editor so saves refresh its collection in the tree. */
   private void watchForSaves(URL editorLocation) {
     if (editorLocation == null
@@ -363,6 +440,17 @@ public final class ExistdbBrowserPanel extends JPanel {
         SearchDialog.open(ownerFrame(), profileStore, workspace);
       }
     };
+    Action refreshAction = new AbstractAction() {
+      {
+        putValue(SMALL_ICON, loadFirstIcon("/images/Refresh16.png"));
+        putValue(SHORT_DESCRIPTION, "Refresh — re-check the servers and reload the open collections");
+      }
+
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        refreshAll();
+      }
+    };
     Action collapseAction = new AbstractAction() {
       {
         putValue(SMALL_ICON, loadFirstIcon("/images/CollapseAll16.png"));
@@ -388,6 +476,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     };
 
     // Oxygen's factory buttons inherit the workbench's flat rollover (and toggle) styling exactly.
+    JButton refresh = OxygenUIComponentsFactory.createToolbarButton(refreshAction, false);
     JButton collapse = OxygenUIComponentsFactory.createToolbarButton(collapseAction, false);
     JButton search = OxygenUIComponentsFactory.createToolbarButton(searchAction, false);
     JButton link = OxygenUIComponentsFactory.createToolbarToggleButton(linkAction, false);
@@ -399,6 +488,7 @@ public final class ExistdbBrowserPanel extends JPanel {
     bar.add(Box.createHorizontalGlue());
     bar.add(search);
     bar.addSeparator();
+    bar.add(refresh);
     bar.add(collapse);
     bar.add(link);
     bar.addSeparator();
