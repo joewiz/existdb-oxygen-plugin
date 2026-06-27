@@ -91,7 +91,12 @@ public final class RunCurrentEditorAction extends AbstractAction {
     }
     final String serverId = ExistContext.serverIdFor(editor.getEditorLocation());
     final JTextComponent component = (JTextComponent) page.getTextComponent();
-    final String query = queryText(component);
+    // Run the selection if there is one, else the whole editor; remember where the selection starts
+    // so an error's selection-relative line/column maps back to the document for caret-jump.
+    final String selection = component.getSelectedText();
+    final boolean usingSelection = selection != null && !selection.isBlank();
+    final String query = usingSelection ? selection : component.getText();
+    final int queryBaseOffset = usingSelection ? component.getSelectionStart() : 0;
     if (query.isBlank()) {
       workspace.showInformationMessage("Nothing to run — the editor is empty.");
       return;
@@ -111,16 +116,13 @@ public final class RunCurrentEditorAction extends AbstractAction {
           openResults(get(), serverId);
         } catch (Exception e) {
           Throwable cause = e.getCause() != null ? e.getCause() : e;
+          // Move the caret to the error position (when present) before the dialog, so OK leaves the
+          // caret on the offending spot.
+          QueryErrorCaret.jumpTo(component, query, queryBaseOffset, cause);
           workspace.showErrorMessage(XQueryError.describe("XQuery failed", cause));
         }
       }
     }.execute();
-  }
-
-  /** The current selection if there is one, otherwise the whole editor text. */
-  private static String queryText(JTextComponent component) {
-    String selection = component.getSelectedText();
-    return selection != null && !selection.isBlank() ? selection : component.getText();
   }
 
   private void openResults(QueryRunner.QueryResult result, String serverId) {
