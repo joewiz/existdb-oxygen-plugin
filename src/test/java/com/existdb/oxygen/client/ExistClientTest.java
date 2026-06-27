@@ -73,12 +73,24 @@ class ExistClientTest {
   @Test
   void listChildrenParsesCollectionChildren() throws Exception {
     List<ExistClient.ChildEntry> children = client.listChildren("/db");
-    assertEquals(2, children.size());
+    assertEquals(3, children.size());
     assertTrue(children.get(0).collection());
     assertEquals("apps", children.get(0).name());
     assertEquals("/db/apps", children.get(0).path());
     assertFalse(children.get(1).collection());
     assertEquals("index.xq", children.get(1).name());
+  }
+
+  @Test
+  void listChildrenParsesTheAccessibleFlag() throws Exception {
+    List<ExistClient.ChildEntry> children = client.listChildren("/db");
+    // "apps" carries accessible:true; "index.xq" omits the flag (pre-#72 shape) → defaults true;
+    // "secret" is the degraded inaccessible entry.
+    assertTrue(children.get(0).accessible());
+    assertTrue(children.get(1).accessible());
+    assertEquals("secret", children.get(2).name());
+    assertTrue(children.get(2).collection());
+    assertFalse(children.get(2).accessible());
   }
 
   @Test

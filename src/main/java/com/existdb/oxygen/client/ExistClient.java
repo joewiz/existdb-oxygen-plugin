@@ -157,8 +157,13 @@ public final class ExistClient {
   // Browsing
   // ---------------------------------------------------------------------------
 
-  /** A child of a collection: either a sub-collection or a resource, with its full DB path. */
-  public record ChildEntry(String name, String path, boolean collection) {
+  /**
+   * A child of a collection: either a sub-collection or a resource, with its full DB path.
+   * {@code accessible} is the server's authoritative read verdict (existdb-openapi#72) — false for a
+   * child whose permissions the connected user can't read (its other metadata is then absent); it
+   * defaults to true on a server that predates the flag.
+   */
+  public record ChildEntry(String name, String path, boolean collection, boolean accessible) {
   }
 
   /**
@@ -176,7 +181,8 @@ public final class ExistClient {
       for (int i = 0; i < children.length(); i++) {
         JSONObject c = children.getJSONObject(i);
         boolean isCollection = "collection".equals(c.optString("type"));
-        out.add(new ChildEntry(c.getString("name"), c.optString("path", null), isCollection));
+        out.add(new ChildEntry(c.getString("name"), c.optString("path", null), isCollection,
+            c.optBoolean("accessible", true)));
       }
     }
     return out;
