@@ -113,6 +113,11 @@ final class ConnectionHealth {
     timer.stop();
   }
 
+  /** Forces an immediate reachability re-check of every server (the pane's Refresh button). */
+  void refresh() {
+    poll();
+  }
+
   /** Records the outcome of a real API call against a server (a free passive health signal). */
   void record(String serverId, Throwable failureOrNull) {
     update(serverId, failureOrNull == null ? new Health(Status.ONLINE, null) : classify(failureOrNull));
