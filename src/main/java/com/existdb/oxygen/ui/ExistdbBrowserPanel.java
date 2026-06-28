@@ -2613,6 +2613,7 @@ public final class ExistdbBrowserPanel extends JPanel {
   private static Map<String, String> buildTypeIconResources() {
     Map<String, String> m = new HashMap<>();
     m.put("xml", "/images/XmlIcon16.png");
+    m.put("xconf", "/images/XmlIcon16.png"); // eXist-db collection/index config (XML)
     m.put("xq", "/images/XqueryIcon16.png");
     m.put("xql", "/images/XqueryIcon16.png");
     m.put("xqm", "/images/XqueryIcon16.png");
