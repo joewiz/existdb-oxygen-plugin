@@ -11,10 +11,10 @@ The plugin sits downstream of three eXist-db projects that evolve together: **eX
 ## The pin
 
 ```
-ghcr.io/joewiz/existdb-trio@sha256:427fa2dd82a135da952db07544ef222cd889e0ca6495197b24f817c19a9a2630
+ghcr.io/joewiz/existdb-trio@sha256:f7d3854045ed96766d4332229e33559b046a61b2e103ac7eccf91d260d21a131
 ```
 
-- Human tag: `ghcr.io/joewiz/existdb-trio:2026-06-26` (CI pins the digest, not the tag).
+- Human tag: `ghcr.io/joewiz/existdb-trio:2026-06-27` (CI pins the digest, not the tag). Supersedes `sha256:427fa2dd…` (2026-06-26), which added one delta: existdb-openapi **#72**.
 - Multi-arch OCI index: `linux/amd64` (CI runners) + `linux/arm64` (Apple-silicon local runs).
 - **Public** on GHCR — runners pull anonymously, no login, no Docker Hub rate limit.
 - Size: ~364 MiB compressed per arch.
@@ -27,6 +27,7 @@ Set in `ci.yml` as `TRIO_IMAGE` and passed to the IT via `-Dexistdb.docker.image
 - `POST /api/query` returns the **#71 structured error envelope** (`code` / `message` / user-relative `line`/`column` / `raw`); query errors are HTTP **400**.
 - **Multipart** `POST /api/packages/install` (the `file` part).
 - `GET /api/db/collection/export?format=zip|xar`.
+- **#72 `/api/db` listing resilience** — an unreadable child degrades to an entry flagged `accessible: false` instead of 500ing the whole collection; every child carries an `accessible` boolean.
 - Serialization params on reads (`indent`, `omit-xml-declaration`, `exist.expand-xincludes`).
 - **ft:fields** present (`#6455`/`#6459`) — load-bearing for the entire `/api/*` surface (the openapi app statically imports it).
 - Vector/KNN search (ONNX `all-MiniLM-L6-v2`, 384-dim).
@@ -46,7 +47,7 @@ Set in `ci.yml` as `TRIO_IMAGE` and passed to the IT via `-Dexistdb.docker.image
 | #6507 | `c0d301d47f` | `Sequence.containsReference` recursion — the multipart-store fix |
 | vector ext | — | vector module + ONNX `all-MiniLM-L6-v2`, built `-Ponnx-model` |
 
-**existdb-openapi** — worktree `collection-export`, branch `trio-openapi-export-search`, HEAD `949e875`:
+**existdb-openapi** — worktree `collection-export`, branch `trio-openapi-export-search`, HEAD `44ac992`:
 
 | Feature | PR | SHA |
 |---------|----|-----|
@@ -55,17 +56,20 @@ Set in `ci.yml` as `TRIO_IMAGE` and passed to the IT via `-Dexistdb.docker.image
 | vector "Similar to" search | #60 | `5b5c1a2` |
 | query external-variables | #61 | `68452db` |
 | multipart `.xar` upload | #49 | `099e1628f8` |
-| /api/query structured error envelope | #71 | cherry-pick `19dae74` → `949e875` |
+| /api/query structured error envelope | #71 | cherry-pick `19dae74` |
+| /api/db listing resilience + `accessible` flag | #72 | cherry-pick `ccd9fa4` → `44ac992` |
 
 **Other XARs:** roaster `joewiz/roaster#fix/map-key-response-code-string` (baked `roaster-1.12.1.xar`); eXide #824 db-core adapter (`eXide-4.0.1.xar`).
 
 **Deliberately excluded:** eXist-db/exist#6508 (resource-naming contract) — unratified (pending eXist-db/exist#6463) and would regress the plugin's awkward-name round-trip, so it would make CI red by construction. A naming-inclusive image + awkward-name canary is a separate, later effort.
 
+**Not yet included (harmless, just not needed yet):** existdb-openapi #69 (`packages:list` resilience for a package poisoned with a literal `${app.version}`). No current IT or feature exercises a poison package on the bed, so it wasn't part of this bump — `GET /api/packages` on this image still 500s if such a package is installed. Fold it into a future bump if the bed needs that resilience (flagged by api-strategy, 2026-06-27).
+
 ## Merge-down checklist (drop each delta from the pin as it lands in a release)
 
 Each item below is a reason the pin is needed; when its PRs ship in a published eXist/existdb-openapi the CI image should be rebuilt without that delta, and eventually the pin can return to a stock published image:
 
-- [ ] existdb-openapi #49 (multipart install), #58, #59/#68 (export), #60 (vector), #61 (ext-vars), **#71 (error envelope)** released.
+- [ ] existdb-openapi #49 (multipart install), #58, #59/#68 (export), #60 (vector), #61 (ext-vars), **#71 (error envelope)**, **#72 (db-listing resilience + `accessible` flag)** released.
 - [ ] eXist core #6455/#6459 (ft:fields), #6491, #6492, #6493, #6497, #6506, **#6507 (multipart store)** released.
 - [ ] Once all of the above are in a published image, switch `TRIO_IMAGE` back to that release and retire this file.
 
@@ -85,7 +89,7 @@ The eXist core is unchanged from the `:19110` trio (`multipart-fix-beta`); this 
    ```
 4. Update `TRIO_IMAGE` in `ci.yml` and the pin here to the new `@sha256:…` index digest.
 
-(Source: rebuild-trio's report `joe-vault/Claude/existdb-oxygen-plugin/2026-06-26-report-trio-ghcr-image-published.md`.)
+(Source: rebuild-trio's reports `joe-vault/Claude/existdb-oxygen-plugin/2026-06-26-report-trio-ghcr-image-published.md` and `2026-06-27-report-trio-image-bump-72.md`.)
 
 ## Org transfer
 

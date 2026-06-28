@@ -36,7 +36,7 @@ jobs:
       # ft:fields, vector). Public on GHCR, so no docker login is needed. Provenance, the
       # behaviors it guarantees, the merge-down checklist, and the rebuild recipe are in
       # .github/trio-image.md — bump this digest there in lockstep when the trio advances.
-      TRIO_IMAGE: ghcr.io/joewiz/existdb-trio@sha256:427fa2dd82a135da952db07544ef222cd889e0ca6495197b24f817c19a9a2630
+      TRIO_IMAGE: ghcr.io/joewiz/existdb-trio@sha256:f7d3854045ed96766d4332229e33559b046a61b2e103ac7eccf91d260d21a131
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
