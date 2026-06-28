@@ -139,6 +139,9 @@ public final class ExistdbBrowserPanel extends JPanel {
   /** Maps a file extension (lower-case) to one of Oxygen's bundled file-type icons, and caches them. */
   private static final Map<String, String> TYPE_ICON_RESOURCES = buildTypeIconResources();
   private static final Map<String, ImageIcon> TYPE_ICON_CACHE = new ConcurrentHashMap<>();
+  /** Oxygen's generic file glyph, used for any unrecognized extension — the tree's default leaf icon
+   *  renders blank, so a plain document icon (as the Project pane shows) reads better. */
+  private static final ImageIcon GENERIC_FILE_ICON = loadFirstIcon("/images/UnknownFile16.png");
 
   /** A transparent 16×16 icon so iconless menu items reserve the icon gutter and their labels line up
    * with the icon'd items' labels, matching Oxygen's native contextual menus. */
@@ -2636,22 +2639,28 @@ public final class ExistdbBrowserPanel extends JPanel {
     m.put("yaml", "/images/YAMLIcon16.png");
     m.put("yml", "/images/YAMLIcon16.png");
     m.put("php", "/images/PhpIcon16.png");
+    // Image files get Oxygen's generic image glyph (what the Project pane shows), incl. SVG.
+    for (String image : new String[] {
+        "png", "gif", "jpg", "jpeg", "bmp", "webp", "ico", "tif", "tiff", "svg"}) {
+      m.put(image, "/images/Image16.png");
+    }
     return m;
   }
 
   /** The type icon for a resource name by extension, or {@code fallback} when none is mapped. */
   private static javax.swing.Icon fileIcon(String name, javax.swing.Icon fallback) {
+    javax.swing.Icon generic = GENERIC_FILE_ICON != null ? GENERIC_FILE_ICON : fallback;
     int dot = name.lastIndexOf('.');
     if (dot < 0 || dot == name.length() - 1) {
-      return fallback;
+      return generic;
     }
     String ext = name.substring(dot + 1).toLowerCase(Locale.ROOT);
     String resource = TYPE_ICON_RESOURCES.get(ext);
     if (resource == null) {
-      return fallback;
+      return generic;
     }
     ImageIcon icon = TYPE_ICON_CACHE.computeIfAbsent(ext, k -> loadFirstIcon(resource));
-    return icon != null ? icon : fallback;
+    return icon != null ? icon : generic;
   }
 
   /** Tree node payload: which server it belongs to, its DB path/name, and lazy-load state. */
